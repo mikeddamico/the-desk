@@ -1,0 +1,5 @@
+Lock/
+AGENTS.md
+package-lock.json
+dist/
+coverage/
