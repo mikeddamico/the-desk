@@ -1,0 +1,301 @@
+{
+  "pack": "The Desk Build 1-2 Final Lock v1.2",
+  "file_count_excluding_manifest": 59,
+  "files": [
+    {
+      "path": "00_INDEX/ACTIVE_SPECS_LOCKED_v1.1.docx",
+      "bytes": 39047,
+      "sha256": "e8d8d8d71ecc976d467442a5147e56b1dafcefb67d056f85138b8ffa8381e04b"
+    },
+    {
+      "path": "00_INDEX/ACTIVE_SPECS_LOCKED_v1.1.md",
+      "bytes": 3962,
+      "sha256": "326d2c05607c52904c10174c2727169a954c6fc219246d353ebe9c909be94603"
+    },
+    {
+      "path": "00_INDEX/ACTIVE_SPECS_LOCKED_v1.2.docx",
+      "bytes": 26204,
+      "sha256": "3008aa18e9c3c8ff182bacf09f27b62d6e3d0181b7ff51d2f13f506429806394"
+    },
+    {
+      "path": "00_INDEX/ACTIVE_SPECS_LOCKED_v1.2.md",
+      "bytes": 6298,
+      "sha256": "44a1141d1adab202993d812e9b4fb3d0c1af37883c15c37c3d81cf6f73bdc635"
+    },
+    {
+      "path": "00_INDEX/The_Desk_FINAL_LOCK_README.md",
+      "bytes": 1253,
+      "sha256": "490befbd58df20f60a320da99b566eabe02ec10fbb13c62cc41e9c30f91d70ac"
+    },
+    {
+      "path": "01_ARCHITECTURE_AND_ADRS/Desk_v10.docx",
+      "bytes": 86253,
+      "sha256": "7defe7591982818470e14a3af79e2457c76fc866dbcb98dca5b9c0cea3173623"
+    },
+    {
+      "path": "01_ARCHITECTURE_AND_ADRS/Desk_v10.md",
+      "bytes": 105373,
+      "sha256": "25a08368ac1451d14f45dcb861914996de4feec9514fde6678f736c378eaa736"
+    },
+    {
+      "path": "01_ARCHITECTURE_AND_ADRS/The_Desk_ADR_001_Coverage_Commissioning.docx",
+      "bytes": 31687,
+      "sha256": "77165d1d2001bf71e6efdf62d53c8fe6e7401dd4c14c4d2257ac1ea8d8f29496"
+    },
+    {
+      "path": "01_ARCHITECTURE_AND_ADRS/The_Desk_ADR_001_Coverage_Commissioning.md",
+      "bytes": 16054,
+      "sha256": "9724a00f14b561d1a1cba4821ab7ecde0962cb43ee470e3370893d14f559fd56"
+    },
+    {
+      "path": "01_ARCHITECTURE_AND_ADRS/The_Desk_ADR_002_Application_Runtime_TypeScript_Node.docx",
+      "bytes": 39907,
+      "sha256": "68b967b1f3161ff2072e815a446e38dff026db0b40c248937df859df60d5f6d9"
+    },
+    {
+      "path": "01_ARCHITECTURE_AND_ADRS/The_Desk_ADR_002_Application_Runtime_TypeScript_Node.md",
+      "bytes": 3276,
+      "sha256": "49ec5e87a780e998a9ce515a8bb47df271493f9888871cc92c7c787f2ca42e4a"
+    },
+    {
+      "path": "01_ARCHITECTURE_AND_ADRS/The_Desk_ADR_003_Autonomous_Operation_and_Operator_Repair.docx",
+      "bytes": 40675,
+      "sha256": "f7ff4ceddfe95757206c7be857816238aa5e8180ec007a68999080f5d9746080"
+    },
+    {
+      "path": "01_ARCHITECTURE_AND_ADRS/The_Desk_ADR_003_Autonomous_Operation_and_Operator_Repair.md",
+      "bytes": 7349,
+      "sha256": "1538c7ec33190e4965b41c012afe1f676f99b33a762f64bd6f15c5d63c0c0000"
+    },
+    {
+      "path": "02_ACTIVE_SPECS/The_Desk_Character_Bible_v0.1.3.docx",
+      "bytes": 49179,
+      "sha256": "2e49435e33e043347fd0e9e6f86882897e4a00de0124c4afa8dd7112df5aaeb4"
+    },
+    {
+      "path": "02_ACTIVE_SPECS/The_Desk_Character_Bible_v0.1.4.docx",
+      "bytes": 38551,
+      "sha256": "e9db1fdcf8c221d59532c3e8e7bc99482637141716d7a7f0fb1a21adf3f3d3fc"
+    },
+    {
+      "path": "02_ACTIVE_SPECS/The_Desk_Character_Bible_v0.1.4.md",
+      "bytes": 31111,
+      "sha256": "5e38c5163ffee8757e38fce14a1919caf000f7e2f7c3159b949351d6962b313c"
+    },
+    {
+      "path": "02_ACTIVE_SPECS/The_Desk_Claims_Policy_v0.1.docx",
+      "bytes": 56273,
+      "sha256": "2f07910d53c2b9beb8ec3d41734dc827b67ea75359fb4f02a012be847fc10ddc"
+    },
+    {
+      "path": "02_ACTIVE_SPECS/The_Desk_Claims_Policy_v0.1.md",
+      "bytes": 40637,
+      "sha256": "98b2be6b5fe225c5732e5dbaf53827b94b4e9ef9b6691e05658ebbf92616de8f"
+    },
+    {
+      "path": "02_ACTIVE_SPECS/The_Desk_Coverage_Commissioning_v0.1.docx",
+      "bytes": 39761,
+      "sha256": "f9ddf179484e96c1d07668007cc9ee5be748f424dfa9bc29a9e9ef16aa9e786f"
+    },
+    {
+      "path": "02_ACTIVE_SPECS/The_Desk_Coverage_Commissioning_v0.1.md",
+      "bytes": 31154,
+      "sha256": "849e051b21346ae1f64734c68b4c33d495fd41fac43e321ac4ce642c0222f030"
+    },
+    {
+      "path": "02_ACTIVE_SPECS/The_Desk_Engineering_Standards_and_Security_v0.1.2-skeleton.docx",
+      "bytes": 44890,
+      "sha256": "d40b9a17333d4920b5321f333f3b9e6ce95896249d41580b5bb01553683833ca"
+    },
+    {
+      "path": "02_ACTIVE_SPECS/The_Desk_Engineering_Standards_and_Security_v0.1.2-skeleton.md",
+      "bytes": 18012,
+      "sha256": "8617f209789940892b805010fa50ddf6e9953a71a08b04de3c2166dc0987e1cf"
+    },
+    {
+      "path": "02_ACTIVE_SPECS/The_Desk_Evidence_Package_v0.2.docx",
+      "bytes": 43131,
+      "sha256": "296a8926c26473727795e20dffa1a216b848429736353b03bf57504411968681"
+    },
+    {
+      "path": "02_ACTIVE_SPECS/The_Desk_Evidence_Package_v0.2.md",
+      "bytes": 38241,
+      "sha256": "2fad873536aef624b1ebf504fb6c707ff2ff8645799909e622df663f796fb575"
+    },
+    {
+      "path": "02_ACTIVE_SPECS/The_Desk_Operator_Repair_v0.1.docx",
+      "bytes": 40038,
+      "sha256": "800e716723660379c6e7f1f1c015c6b6161bea92ba3c21a16320e9f90abf297e"
+    },
+    {
+      "path": "02_ACTIVE_SPECS/The_Desk_Operator_Repair_v0.1.md",
+      "bytes": 6169,
+      "sha256": "8bf92919eeaac86ff95c81b700c82c1a8cb4a1112f79500e27ca05cafef27d63"
+    },
+    {
+      "path": "02_ACTIVE_SPECS/The_Desk_Performance_and_Render_v0.1.2.docx",
+      "bytes": 62454,
+      "sha256": "69c12e257b6ab862c51fb4936b362bc5ae3280f0449bdd4a62b9627132bb5506"
+    },
+    {
+      "path": "02_ACTIVE_SPECS/The_Desk_Performance_and_Render_v0.1.2.md",
+      "bytes": 58890,
+      "sha256": "1a26e4dd75ebc05d9df35cc031619948bb240141c47431b983fab7d8fb2ea7b0"
+    },
+    {
+      "path": "02_ACTIVE_SPECS/The_Desk_Showrunner_Planning_v0.1.2.docx",
+      "bytes": 56453,
+      "sha256": "b31a8c267b2230bd2ead5e591af462cbf1df8f625361d749b9fd8043f74aeaa4"
+    },
+    {
+      "path": "02_ACTIVE_SPECS/The_Desk_Showrunner_Planning_v0.1.3.docx",
+      "bytes": 46690,
+      "sha256": "16f5ca9a170a2e841e9ad7e08e24fa7a90f12911626474ef6cf9aa40e31818b7"
+    },
+    {
+      "path": "02_ACTIVE_SPECS/The_Desk_Showrunner_Planning_v0.1.3.md",
+      "bytes": 47659,
+      "sha256": "8a658b976a3c9d73bb2e039655ab4016af867b919d906bbc07aef286555b7367"
+    },
+    {
+      "path": "02_ACTIVE_SPECS/The_Desk_Writing_Craft_and_Invisible_Comprehension_v0.1.docx",
+      "bytes": 35358,
+      "sha256": "230d38b2e84d9f1775a14f6c717acb9109cd5d03c94663d43573122fffdb7baa"
+    },
+    {
+      "path": "02_ACTIVE_SPECS/The_Desk_Writing_Craft_and_Invisible_Comprehension_v0.1.md",
+      "bytes": 22315,
+      "sha256": "07b9cc27d2e20882c8890aec8c5432044aa9d5b295b7ac166e9e99beec30ad04"
+    },
+    {
+      "path": "02_ACTIVE_SPECS/The_Desk_Writing_Spec_v0.2.1.docx",
+      "bytes": 61399,
+      "sha256": "2170e3c7f8c585b175732579a6da1829b561d32b9f0dbbefa16c2b171007d266"
+    },
+    {
+      "path": "02_ACTIVE_SPECS/The_Desk_Writing_Spec_v0.2.2.docx",
+      "bytes": 52733,
+      "sha256": "56937f37b1e729f5b4ded7df782d22c3ea8870607a586040f48ede8483055f9b"
+    },
+    {
+      "path": "02_ACTIVE_SPECS/The_Desk_Writing_Spec_v0.2.2.md",
+      "bytes": 57480,
+      "sha256": "c9f16b84e7e4789c5709c815c477508182a4898cf935b044ca8deb812da0061e"
+    },
+    {
+      "path": "03_LEGACY_BANNERED/The_Desk_Episode_Input_Package_v0.1_SUPERSEDED.docx",
+      "bytes": 8421,
+      "sha256": "c2e78ad907be87a4b8f10db634fa12c853326aafe69b161b1ea6cfe8619db6d4"
+    },
+    {
+      "path": "03_LEGACY_BANNERED/The_Desk_Episode_Input_Package_v0.1_SUPERSEDED.md",
+      "bytes": 7620,
+      "sha256": "4bb7d34ac4df2050bfecdaf1e5ef8f7e27f4123573b0b5aba420c475235fd05c"
+    },
+    {
+      "path": "03_LEGACY_BANNERED/The_Desk_Ingest_and_Digest_v0.1_LEGACY.docx",
+      "bytes": 44228,
+      "sha256": "97e90ccbc48b0295eaf642f87618acb5329a3b1192f165900fa35d645978d095"
+    },
+    {
+      "path": "03_LEGACY_BANNERED/The_Desk_Ingest_and_Digest_v0.1_LEGACY.md",
+      "bytes": 15395,
+      "sha256": "99a76cb1c450aa209fbaec6b2c3ac9c2ea18de95996de5aa24fa8bf9eb8fdf7c"
+    },
+    {
+      "path": "03_LEGACY_BANNERED/The_Desk_Lore_Pipeline_v0.1_LEGACY.docx",
+      "bytes": 43404,
+      "sha256": "8b353b2fb67d1ff3f2f935182dcd4e217b1c1c9e9982b7c3e9a1909a175fdb70"
+    },
+    {
+      "path": "03_LEGACY_BANNERED/The_Desk_Lore_Pipeline_v0.1_LEGACY.md",
+      "bytes": 13315,
+      "sha256": "3e8e11aa2b185e4bd7a57f98d6235837ec53a031140efb0e684790edeb1fcf2d"
+    },
+    {
+      "path": "03_LEGACY_BANNERED/The_Desk_Script_Spec_v0.1_SUPERSEDED.docx",
+      "bytes": 12671,
+      "sha256": "ea4cc1cc97a0d7319cbb748f711d10ad20373f04ce0c31bd6a6d71c5f38c8697"
+    },
+    {
+      "path": "03_LEGACY_BANNERED/The_Desk_Script_Spec_v0.1_SUPERSEDED.md",
+      "bytes": 16294,
+      "sha256": "4103906bba62a0fa6f60638fc73dc21847cc301ab091fbd6228fa1d830224042"
+    },
+    {
+      "path": "04_IMPLEMENTATION/The_Desk_Implementation_Readiness_Closure_v1.1.docx",
+      "bytes": 38927,
+      "sha256": "1042d42b419b10a5cc4eb6f4f81760029eb6326353f10ef27f3309d433bf0fe8"
+    },
+    {
+      "path": "04_IMPLEMENTATION/The_Desk_Implementation_Readiness_Closure_v1.1.md",
+      "bytes": 3774,
+      "sha256": "947db3bbd30cdf31e9834f64bedc947917262fa3f4cf355546af930819710f01"
+    },
+    {
+      "path": "04_IMPLEMENTATION/The_Desk_Implementation_Readiness_Closure_v1.2.docx",
+      "bytes": 25802,
+      "sha256": "8a290c29b42c060ecad017e4db6fe58d7c21e78f413a22cab99e7f3c5e2e629d"
+    },
+    {
+      "path": "04_IMPLEMENTATION/The_Desk_Implementation_Readiness_Closure_v1.2.md",
+      "bytes": 5727,
+      "sha256": "e01490cb8382bc4a499ad7ef256f7ed12ad884b606ac745012aa4301ab021291"
+    },
+    {
+      "path": "04_IMPLEMENTATION/The_Desk_Walking_Skeleton_Coding_Handoff_v0.3.docx",
+      "bytes": 43484,
+      "sha256": "2f0a67552fb7535e05e8d01f5ab6031e841c4bca1de2b67476128290ee938a6f"
+    },
+    {
+      "path": "04_IMPLEMENTATION/The_Desk_Walking_Skeleton_Coding_Handoff_v0.4.docx",
+      "bytes": 31304,
+      "sha256": "d742c07465cbb25d894cbd41371a4165231e60123772b8345615db10ac386b3f"
+    },
+    {
+      "path": "04_IMPLEMENTATION/The_Desk_Walking_Skeleton_Coding_Handoff_v0.4.md",
+      "bytes": 16952,
+      "sha256": "54ffe06820b3a1a380c22f0b24afd3428112204061071060e23dcefe065bca24"
+    },
+    {
+      "path": "04_IMPLEMENTATION/The_Desk_Walking_Skeleton_Contract_Trace_v0.3.docx",
+      "bytes": 43308,
+      "sha256": "8944d286f10c3f76ca826469fdd2465000617a397becc9efa4a70d873d2dbcd9"
+    },
+    {
+      "path": "04_IMPLEMENTATION/The_Desk_Walking_Skeleton_Contract_Trace_v0.3.md",
+      "bytes": 14499,
+      "sha256": "9442eb0d617019bb5dc3b24cd098c72cb90b6a74ffdd2a482749115ef31653eb"
+    },
+    {
+      "path": "04_IMPLEMENTATION/The_Desk_Walking_Skeleton_Contract_Trace_v0.4.docx",
+      "bytes": 32001,
+      "sha256": "bdab0aaeea8a646cb92a6a65f1dc351e52fb37cb94b03b8924de6001193c7be4"
+    },
+    {
+      "path": "04_IMPLEMENTATION/The_Desk_Walking_Skeleton_Contract_Trace_v0.4.md",
+      "bytes": 18932,
+      "sha256": "c6b7830b420759220241b497686d7a46ef490400278476f7be9c82452e495488"
+    },
+    {
+      "path": "04_IMPLEMENTATION/The_Desk_Walking_Skeleton_Fixture_v0.3.zip",
+      "bytes": 42934,
+      "sha256": "ec87d45087bc7a4f0790037f670577eff293fcd281277d962e01e351161bb47f"
+    },
+    {
+      "path": "04_IMPLEMENTATION/The_Desk_Walking_Skeleton_Fixture_v0.4.zip",
+      "bytes": 54371,
+      "sha256": "c11e9252ec7ff473fa074189b0cfe7626776a480c2e99a78c68c605e0856be04"
+    },
+    {
+      "path": "05_REVIEWS_REFERENCE/The_Desk_Implementation_Readiness_Review_v1.0.md",
+      "bytes": 37179,
+      "sha256": "7034cc7607b684e5bc2699ccfe4f1b68833fb3441bc88d69ef2c4548e2d7d271"
+    },
+    {
+      "path": "05_REVIEWS_REFERENCE/The_Desk_Readiness_Review_Supplement_S1.md",
+      "bytes": 25054,
+      "sha256": "b2230ab8cd96d42e6a15dd6dbda8bfc50486759a7da62da8d8e77867a54a7fcf"
+    }
+  ]
+}
