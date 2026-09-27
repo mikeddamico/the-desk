@@ -1,8 +1,9 @@
 import eslint from "@eslint/js";
+import { defineConfig } from "eslint/config";
 import prettier from "eslint-config-prettier";
 import tseslint from "typescript-eslint";
 
-export default tseslint.config(
+export default defineConfig(
   { ignores: ["dist/**", "node_modules/**", "Lock/**"] },
   eslint.configs.recommended,
   ...tseslint.configs.strictTypeChecked,
@@ -11,7 +12,9 @@ export default tseslint.config(
   {
     languageOptions: {
       parserOptions: {
-        projectService: true,
+        projectService: {
+          allowDefaultProject: ["eslint.config.js"],
+        },
         tsconfigRootDir: import.meta.dirname,
       },
     },

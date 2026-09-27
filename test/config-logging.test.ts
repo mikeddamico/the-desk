@@ -25,25 +25,32 @@ describe("environment and security foundation", () => {
   });
 
   it("denies destructive production operations", () => {
-    expect(() =>
-      assertDestructiveOperationAllowed(loadConfig(base), "destroy-test"),
-    ).not.toThrow();
+    const testConfig = loadConfig(base);
+    assertDestructiveOperationAllowed(testConfig, "destroy-test");
     const production = loadConfig({
       ...base,
       DESK_ENV: "production",
       DEPLOYED_COMMIT: "deadbeef",
     });
-    expect(() =>
-      assertDestructiveOperationAllowed(production, "destroy-production"),
-    ).toThrow(/denied/);
+    expect(() => {
+      assertDestructiveOperationAllowed(production, "destroy-production");
+    }).toThrow(/denied/);
   });
 
   it("redacts protected logging fields", async () => {
     let output = "";
     const sink = new Writable({
-      write(chunk, _encoding, callback) {
-        output += chunk.toString();
-        callback();
+      write(
+        chunk: unknown,
+        _encoding: BufferEncoding,
+        callback: (error?: Error | null) => void,
+      ) {
+        if (typeof chunk === "string" || Buffer.isBuffer(chunk)) {
+          output += chunk.toString();
+          callback();
+          return;
+        }
+        callback(new TypeError("Logger emitted an unsupported chunk type"));
       },
     });
     const logger = createLogger(

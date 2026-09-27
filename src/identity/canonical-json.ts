@@ -9,10 +9,26 @@ export type JsonValue =
   | { [key: string]: JsonValue };
 
 function compareCodePoints(left: string, right: string): number {
-  const a = Array.from(left, (character) => character.codePointAt(0)!);
-  const b = Array.from(right, (character) => character.codePointAt(0)!);
+  const toCodePoints = (value: string): number[] =>
+    Array.from(value, (character) => {
+      const codePoint = character.codePointAt(0);
+      if (codePoint === undefined) {
+        throw new TypeError("Cannot order an empty Unicode character");
+      }
+      return codePoint;
+    });
+  const a = toCodePoints(left);
+  const b = toCodePoints(right);
   for (let index = 0; index < Math.min(a.length, b.length); index += 1) {
-    if (a[index] !== b[index]) return a[index]! - b[index]!;
+    const leftCodePoint = a[index];
+    const rightCodePoint = b[index];
+    if (
+      leftCodePoint !== undefined &&
+      rightCodePoint !== undefined &&
+      leftCodePoint !== rightCodePoint
+    ) {
+      return leftCodePoint - rightCodePoint;
+    }
   }
   return a.length - b.length;
 }
@@ -44,7 +60,7 @@ function serialize(value: unknown, ancestors: Set<object>): string {
     }
     return String(value);
   }
-  if (typeof value !== "object" || value === undefined)
+  if (typeof value !== "object")
     throw new TypeError(`Non-JSON semantic value: ${typeof value}`);
   if (ancestors.has(value)) throw new TypeError("Cyclic semantic value");
   ancestors.add(value);

@@ -7,15 +7,15 @@ const boolean = z
 const schema = z
   .object({
     DESK_ENV: z.enum(["development", "test", "staging", "production"]),
-    DATABASE_URL: z.string().url().startsWith("postgresql://"),
-    MIGRATION_DATABASE_URL: z.string().url().startsWith("postgresql://"),
+    DATABASE_URL: z.url({ protocol: /^postgresql$/ }),
+    MIGRATION_DATABASE_URL: z.url({ protocol: /^postgresql$/ }),
     DEPLOYED_COMMIT: z.string().min(1),
     PROVIDERS_ENABLED: boolean.default(false),
     GENERATION_KILL_SWITCH: boolean.default(true),
     LOG_LEVEL: z
       .enum(["fatal", "error", "warn", "info", "debug", "trace", "silent"])
       .default("info"),
-    ERROR_TRACKING_DSN: z.string().url().optional(),
+    ERROR_TRACKING_DSN: z.url().optional(),
   })
   .superRefine((config, context) => {
     if (
