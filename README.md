@@ -6,7 +6,8 @@ Foundation implementation for FINAL LOCK v1.2.3: Node.js 24/strict TypeScript, e
 
 ```bash
 nvm use
-npm ci
+npm install --global npm@11.19.0 --ignore-scripts
+npm ci --ignore-scripts
 npm run format:check
 npm run lint
 npm run typecheck
@@ -14,13 +15,13 @@ npm run build
 npm test
 ```
 
-Database integration tests require a disposable PostgreSQL database:
+Database integration tests require a disposable PostgreSQL 17 database:
 
 ```bash
 TEST_DATABASE_URL=postgresql://postgres:postgres@localhost:5432/the_desk_test npm run test:integration
 ```
 
-Copy `.env.example` to an ignored `.env` only for local shell tooling; the application does not silently load files or infer an environment. Migration/schema credentials and runtime credentials must be distinct.
+Copy `.env.example` to an ignored `.env` only for local shell tooling; the application does not silently load files or infer an environment. Migration and runtime credentials must be distinct. Bootstrap roles as the owner before migrating; see the operations guide. Runtime startup does not require migration credentials.
 
 ## Direct dependencies
 
@@ -32,4 +33,4 @@ TypeScript, ESLint, Prettier, Vitest, and `tsx` are development-only compiler/qu
 
 ## Scope
 
-This tranche deliberately does not implement workflow execution, leases, retries/scheduling, READY wait/resume execution, repairs, live providers, audio assembly, publication, ingest, commissioning, retrieval, or a web UI. It stores the locked identities and lineage needed by Builds 1–2 without making mutable projections provenance targets. See [foundation operations](docs/operations.md) for deployment, privileges, migration, backup, and restore procedures.
+This tranche deliberately does not implement workflow execution, leases, retries/scheduling, READY wait/resume execution, repairs, live providers, audio assembly, publication, ingest, commissioning, retrieval, or a web UI. It supplies constrained database lifecycle transitions and stores the locked identities and lineage needed by Builds 1–2 without making mutable projections provenance targets. See [foundation operations](docs/operations.md) for deployment, privileges, migration, backup, and restore procedures.

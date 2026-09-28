@@ -33,7 +33,7 @@ function compareCodePoints(left: string, right: string): number {
   return a.length - b.length;
 }
 
-function normalizeString(value: string): string {
+export function normalizeString(value: string): string {
   for (let index = 0; index < value.length; index += 1) {
     const codeUnit = value.charCodeAt(index);
     if (codeUnit >= 0xd800 && codeUnit <= 0xdbff) {
@@ -65,8 +65,13 @@ function serialize(value: unknown, ancestors: Set<object>): string {
   if (ancestors.has(value)) throw new TypeError("Cyclic semantic value");
   ancestors.add(value);
   try {
-    if (Array.isArray(value))
+    if (Array.isArray(value)) {
+      for (let index = 0; index < value.length; index += 1) {
+        if (!Object.hasOwn(value, index))
+          throw new TypeError("Sparse semantic array");
+      }
       return `[${value.map((item) => serialize(item, ancestors)).join(",")}]`;
+    }
     if (
       Object.getPrototypeOf(value) !== Object.prototype &&
       Object.getPrototypeOf(value) !== null
@@ -116,11 +121,26 @@ export function sha256(bytes: Uint8Array): string {
 }
 
 export function canonicalTimestamp(value: string): string {
+  const match =
+    /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.(\d+))?Z$/.exec(
+      value,
+    );
+  if (!match) throw new TypeError("Semantic timestamp must be RFC 3339 UTC Z");
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  const leap = year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0);
+  const days = [31, leap ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
   if (
-    !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z$/.test(value) ||
-    Number.isNaN(Date.parse(value))
+    month < 1 ||
+    month > 12 ||
+    day < 1 ||
+    day > (days[month - 1] ?? 0) ||
+    Number(match[4]) > 23 ||
+    Number(match[5]) > 59 ||
+    Number(match[6]) > 59
   ) {
-    throw new TypeError("Semantic timestamp must be RFC 3339 UTC Z");
+    throw new TypeError("Impossible semantic UTC timestamp");
   }
   return value;
 }

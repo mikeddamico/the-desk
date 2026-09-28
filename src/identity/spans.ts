@@ -1,10 +1,12 @@
+import { normalizeString } from "./canonical-json.js";
+
 export interface CodePointSpan {
   start: number;
   end: number;
 }
 
 export function normalizeSpokenText(text: string): string {
-  return text.normalize("NFC");
+  return normalizeString(text);
 }
 
 export function sliceCodePointSpan(text: string, span: CodePointSpan): string {

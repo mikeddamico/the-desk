@@ -8,7 +8,6 @@ const schema = z
   .object({
     DESK_ENV: z.enum(["development", "test", "staging", "production"]),
     DATABASE_URL: z.url({ protocol: /^postgresql$/ }),
-    MIGRATION_DATABASE_URL: z.url({ protocol: /^postgresql$/ }),
     DEPLOYED_COMMIT: z.string().min(1),
     PROVIDERS_ENABLED: boolean.default(false),
     GENERATION_KILL_SWITCH: boolean.default(true),
@@ -30,20 +29,13 @@ const schema = z
       });
     }
     if (
-      config.DESK_ENV === "production" &&
-      config.DEPLOYED_COMMIT === "local"
+      !["development", "test"].includes(config.DESK_ENV) &&
+      !/^[0-9a-f]{40}$/.test(config.DEPLOYED_COMMIT)
     ) {
       context.addIssue({
         code: "custom",
         path: ["DEPLOYED_COMMIT"],
-        message: "production requires an auditable commit",
-      });
-    }
-    if (config.DATABASE_URL === config.MIGRATION_DATABASE_URL) {
-      context.addIssue({
-        code: "custom",
-        path: ["MIGRATION_DATABASE_URL"],
-        message: "runtime and migration credentials must differ",
+        message: "staging/production require a full auditable commit SHA",
       });
     }
   });
@@ -69,3 +61,16 @@ export function assertDestructiveOperationAllowed(
     );
   }
 }
+
+export function loadMigrationConfig(
+  environment: NodeJS.ProcessEnv = process.env,
+) {
+  const config = loadConfig(environment);
+  const migrationUrl = z
+    .url({ protocol: /^postgresql$/ })
+    .parse(environment.MIGRATION_DATABASE_URL);
+  if (migrationUrl === config.DATABASE_URL)
+    throw new Error("runtime and migration credentials must differ");
+  return { ...config, MIGRATION_DATABASE_URL: migrationUrl };
+}
+export type MigrationConfig = ReturnType<typeof loadMigrationConfig>;

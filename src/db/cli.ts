@@ -1,9 +1,12 @@
-import { assertDestructiveOperationAllowed, loadConfig } from "../config.js";
+import {
+  assertDestructiveOperationAllowed,
+  loadMigrationConfig,
+} from "../config.js";
 import { migrate, verifyMigrationIntegrity } from "./migrations.js";
 import { createMigrationPool } from "./pool.js";
 
 const command = process.argv[2];
-const config = loadConfig();
+const config = loadMigrationConfig();
 const pool = createMigrationPool(config);
 
 try {
@@ -14,8 +17,9 @@ try {
       config,
       process.env.DESTRUCTIVE_CONFIRMATION,
     );
-    await pool.query("DROP SCHEMA public CASCADE; CREATE SCHEMA public");
-    await migrate(pool);
+    throw new Error(
+      "Reset requires the database owner: recreate the disposable database and rerun roles.sql, then db:migrate. Migrator does not own the application schema.",
+    );
   } else throw new Error("Usage: db: migrate | verify | reset");
 } finally {
   await pool.end();
