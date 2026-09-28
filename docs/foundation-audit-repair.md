@@ -134,3 +134,134 @@ Final local validation (2026-09-28 UTC):
 Fresh creation, concurrent migration application, rerun/checksum verification, forged-future-entry rejection, exact fixture conformance and effective privilege checks are included in the 39 tests. Local gitleaks is not installed; the existing CI gitleaks action is unchanged. The local secret check was a targeted signature scan plus review, not a claim of running gitleaks.
 
 Initial sandbox attempts could not connect to PostgreSQL, execute the fixture unzip child process, or reach npm audit/metadata DNS. Those checks were rerun with the required access and passed; no validation was bypassed. GitHub-hosted CI itself has not been claimed as locally executed.
+
+## Second-audit follow-up: NB1 policy binding
+
+Starting HEAD: `2bb20ab466201ece6422d23063366902b7c5e1a2` on the existing
+`codex/implement-build-1-foundation-tranche` branch, independently verified with a
+clean tree before editing. This section records the narrowly scoped follow-up;
+the earlier report above describes the preceding repair.
+
+### Enforcement
+
+- `desk_runtime` no longer has INSERT on `show_config_versions`. The operator
+  inherits this restriction. Fixture/config setup uses the existing non-superuser
+  migrator credential; no new role or configuration service is introduced.
+- The first attempt atomically establishes `program_runs.show_config_version_id`
+  and `program_runs.publication_enabled`. These nullable columns are paired, may
+  not be supplied at run creation, and cannot be changed after binding. Runtime
+  retains no direct UPDATE permission. Later attempts must use the bound config
+  and cannot exceed the run's publication permission.
+- The existing attempt trigger is SECURITY DEFINER solely to perform this guarded
+  run-row update. Its fixed `pg_catalog, public, pg_temp` search path is retained;
+  migration default privileges do not grant runtime or PUBLIC direct EXECUTE on
+  the trigger function. Publication-enabled attempt insertion requires the
+  authenticated `session_user` to have migrator membership, checked independently
+  of the definer's effective identity. Neither runtime nor operator credentials
+  can self-enable publication, including on an entirely new run.
+- READY repair children additionally require exact parent config and publication
+  permission. Existing same-run parent, confirmed causal plan, request_repair,
+  package reuse, immutable candidate and exact-candidate approval checks remain.
+  Binding the config closes the policy-swap route around fresh review: a legitimate
+  repaired child reaches READY, fails REVALIDATED without its own approval, then
+  succeeds after its exact-candidate operator approval. It still cannot publish.
+- An atomic conditional UPDATE of the existing run row serializes competing first
+  attempts. At READ COMMITTED, the loser observes the committed binding and rejects
+  contradiction. At REPEATABLE READ and SERIALIZABLE, a stale concurrent writer
+  receives a serialization failure and must retry its transaction. A failed first
+  insert rolls its binding update back with the statement. No new table, extension,
+  dependency, service, migration file or publication implementation is required.
+
+### Regression coverage and harness diagnosis
+
+Seven added integration cases cover runtime/operator config and publication denial;
+repair-child and parentless config drift/publication elevation; a valid repaired
+candidate's fresh review and continued publication denial; exact parent permission
+inside a privileged setup-enabled run; prebinding/mutation/failed-insert rollback;
+and concurrent conflicting config/publication bindings at all three isolation
+levels. Existing evaluation, lifecycle, provenance, provider ledger, immutable
+history, migration integrity, fixture and hash tests remain in place.
+
+The old enabled-publication lifecycle test still exercises the entire graph. Its
+initial enabled attempt now comes from privileged setup, while lifecycle execution
+continues through the runtime pool. Config creation in test setup likewise uses
+the real migrator pool. Negative cases use actual non-superuser runtime/operator
+login wrappers, not owner-level SET ROLE simulation.
+
+The first concurrency run exposed a test harness acquisition deadlock, not a
+PostgreSQL lock cycle: the publication race tried to check out two clients from
+the migrator pool, whose intentional maximum is one. The second acquisition was
+outside try/finally. PostgreSQL activity showed the retained migrator client idle,
+without an open transaction or blocking locks. That leaked checkout starved later
+setup queries and prevented pool shutdown. The test now gives the competitor a
+separate pool created by the same migrator factory and login. Acquisition is in
+the cleanup scope; both transactions are rolled back and clients destroyed even
+on assertion failure. No timeout was increased and production SQL was not changed
+in response to this failure. The test still observes an actually blocked insert
+before committing the winner and asserting the competitor's rejection.
+
+Validation after this correction proceeded in order: one READ COMMITTED case,
+all three isolation variants, then all 46 tests across seven files, with all 22
+PostgreSQL integration tests executed. The earlier ECONNREFUSED/child-process EPERM
+failures were resolved by authorized execution outside the restricted sandbox;
+application code and fixture loading were not changed to accommodate restrictions.
+
+### External verification and CI maintenance
+
+The [official Gitleaks v3.0.0 release](https://github.com/gitleaks/gitleaks-action/releases/tag/v3.0.0)
+(2026-05-30) links to commit
+`e0c47f4f8be36e29cdc102c57e68cb5cbf0e8d1e`. Its
+[exact action manifest](https://raw.githubusercontent.com/gitleaks/gitleaks-action/e0c47f4f8be36e29cdc102c57e68cb5cbf0e8d1e/action.yml)
+declares `node24`; release notes describe the Node 20 to 24 migration with unchanged
+inputs, outputs and behavior. The security advisory page and runner compatibility
+were checked. CI now pins that exact SHA with the `# v3.0.0` comment. Other Actions,
+application dependencies, package lock and Node/npm pins are unchanged.
+
+The implementation was checked against official PostgreSQL 17 documentation for
+[transaction isolation](https://www.postgresql.org/docs/17/transaction-iso.html),
+[function security](https://www.postgresql.org/docs/17/sql-createfunction.html), and
+[session identity, membership and lock-observation functions](https://www.postgresql.org/docs/17/functions-info.html),
+plus the PostgreSQL 17 security and 17.11 release pages. The disposable database
+reports PostgreSQL 17.11 (Debian 17.11-1.pgdg13+2). Local Node/npm are
+24.21.0/11.19.0.
+
+### Deferred second-audit punch list
+
+Preserved for later adjudication/implementation: sibling repair-child design;
+master causal lineage; render-take re-keying; provider-ledger hardening; HALTED
+reason taxonomy; run projection redesign; knowledge-spine vocabulary; cumulative
+repair budget; actor/authentication redesign; generalized default privileges;
+integration-harness architecture; migration filename policy; span bounds; full
+Build 2; staging deployment and hosted error correlation; publication/RSS. The
+small test pool correction above is necessary to execute this repair's concurrency
+regression, not a harness redesign.
+
+The unmerged `001_foundation.sql` baseline remains disposable-only. Recreate a
+disposable database to adopt these exact migration bytes; do not run the changed
+baseline over an already-applied permanent environment. `/Lock` is untouched.
+No production system, real provider credential, paid API or live publishing
+infrastructure was accessed.
+
+### Final follow-up validation
+
+- `npm ci --ignore-scripts`: passed with pinned Node 24.21.0 / npm 11.19.0.
+- `npm run format:check`, `npm run lint`, `npm run typecheck`, `npm run build`:
+  passed. A missing query-result type in a new test was corrected without changing
+  the assertion or production code.
+- `npm run test:all` with `TEST_DATABASE_URL` targeting the fresh disposable
+  PostgreSQL 17.11 container: seven files / 46 tests passed, none skipped.
+  Frozen fixture, hashes, exact-byte migration and existing privilege regressions
+  remain green.
+- `npm audit --audit-level=high`: passed, zero vulnerabilities.
+- `docker build --tag the-desk:nb1-repair --build-arg DEPLOYED_COMMIT=2bb20ab466201ece6422d23063366902b7c5e1a2 .`:
+  passed from the repaired source tree. Both staging and test health invocations
+  returned `status: ok`, without migration credentials or provider credentials.
+  The pre-commit image reports the starting SHA supplied to its build argument.
+- Final diff and secret-material review: only the NB1 migration, tests, this audit
+  record and the exact Gitleaks pin are included. No test was removed or weakened,
+  no prior blocker repair was reverted, no dependency changed, and no secret was
+  introduced. A targeted credential-signature scan supplements manual review;
+  local Gitleaks is unavailable, so this is not a claim of a local Gitleaks run.
+- `git diff --check`: passed. `/Lock`, package manifest and lockfile are unchanged.
+  An unrelated trailing-newline-only `AGENTS.md` edit appeared during validation;
+  it was reported and excluded from this repair's commit.

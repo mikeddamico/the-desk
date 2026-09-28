@@ -2,6 +2,7 @@ import { randomBytes, randomUUID } from "node:crypto";
 import { readFile, mkdtemp, writeFile, rm, copyFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { setTimeout } from "node:timers/promises";
 import pg from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
@@ -72,6 +73,7 @@ async function seed(purpose = "production", publication = false, pkg?: string) {
   const config = await id(
     "INSERT INTO show_config_versions(show_id,version_number,config_hash,schema_version,canonical_payload,pre_publish_review_required) VALUES ($1,1,$2,'v1','{}',true) RETURNING show_config_version_id AS id",
     [show, hash()],
+    migrator,
   );
   const run = await id(
     "INSERT INTO program_runs(show_id,purpose) VALUES ($1,$2) RETURNING program_run_id AS id",
@@ -81,6 +83,7 @@ async function seed(purpose = "production", publication = false, pkg?: string) {
   const attempt = await id(
     "INSERT INTO program_run_attempts(program_run_id,show_config_version_id,evidence_package_id,publication_enabled) VALUES ($1,$2,$3,$4) RETURNING attempt_id AS id",
     [run, config, packageId, publication],
+    publication ? migrator : runtime,
   );
   return { show, config, run, attempt, packageId };
 }
@@ -144,10 +147,13 @@ async function child(
   repair: string,
   pkg = s.packageId,
   parent = s.attempt,
+  publication = false,
+  db = runtime,
 ) {
   return id(
-    "INSERT INTO program_run_attempts(program_run_id,show_config_version_id,evidence_package_id,parent_attempt_id,repair_plan_id) VALUES ($1,$2,$3,$4,$5) RETURNING attempt_id AS id",
-    [s.run, s.config, pkg, parent, repair],
+    "INSERT INTO program_run_attempts(program_run_id,show_config_version_id,evidence_package_id,parent_attempt_id,repair_plan_id,publication_enabled) VALUES ($1,$2,$3,$4,$5,$6) RETURNING attempt_id AS id",
+    [s.run, s.config, pkg, parent, repair, publication],
+    db,
   );
 }
 
@@ -397,6 +403,290 @@ suite("PostgreSQL 17 foundation under effective capability roles", () => {
       ]),
     ).rejects.toThrow(/illegal/);
   });
+
+  it("NB1: runtime and operator cannot manufacture show config or self-enable publication, even on a new run", async () => {
+    const s = await seed();
+    for (const db of [runtime, operator]) {
+      await expect(
+        db.query(
+          "INSERT INTO show_config_versions(show_id,version_number,config_hash,schema_version,canonical_payload,pre_publish_review_required) VALUES ($1,2,$2,'v1','{}',false)",
+          [s.show, hash()],
+        ),
+      ).rejects.toThrow(/permission denied/);
+      const run = await id(
+        "INSERT INTO program_runs(show_id,purpose) VALUES ($1,'production') RETURNING program_run_id AS id",
+        [s.show],
+      );
+      await expect(
+        db.query(
+          "INSERT INTO program_run_attempts(program_run_id,show_config_version_id,publication_enabled) VALUES ($1,$2,true)",
+          [run, s.config],
+        ),
+      ).rejects.toThrow(/publication enablement requires privileged setup/);
+      expect(
+        (
+          await runtime.query(
+            "SELECT show_config_version_id,publication_enabled FROM program_runs WHERE program_run_id=$1",
+            [run],
+          )
+        ).rows[0],
+      ).toEqual({ show_config_version_id: null, publication_enabled: null });
+    }
+  });
+
+  it("NB1: repair children and parentless rebuilds cannot switch config or elevate publication; valid repair needs fresh approval", async () => {
+    const s = await seed();
+    const alternate = await id(
+      "INSERT INTO show_config_versions(show_id,version_number,config_hash,schema_version,canonical_payload,pre_publish_review_required) VALUES ($1,2,$2,'v1','{}',false) RETURNING show_config_version_id AS id",
+      [s.show, hash()],
+      migrator,
+    );
+    const candidate = await ready(s);
+    const actor = await human();
+    await review(
+      candidate.version,
+      candidate.fingerprint,
+      actor,
+      "request_repair",
+    );
+    const repair = await plan(s.attempt, candidate.fingerprint, actor);
+    await operator.query(
+      "INSERT INTO repair_plan_decisions(repair_plan_id,actor_id,decision) VALUES ($1,$2,'confirm')",
+      [repair, actor],
+    );
+    await expect(child({ ...s, config: alternate }, repair)).rejects.toThrow(
+      /run show-config binding/,
+    );
+    await expect(
+      child(s, repair, s.packageId, s.attempt, true),
+    ).rejects.toThrow(/publication enablement requires privileged setup/);
+    // Even setup authority cannot elevate an existing run's permission.
+    await expect(
+      child(s, repair, s.packageId, s.attempt, true, migrator),
+    ).rejects.toThrow(/cannot elevate run publication/);
+    const rootSql =
+      "INSERT INTO program_run_attempts(program_run_id,show_config_version_id,publication_enabled) VALUES ($1,$2,$3) RETURNING attempt_id AS id";
+    await expect(id(rootSql, [s.run, alternate, false])).rejects.toThrow(
+      /run show-config binding/,
+    );
+    await expect(id(rootSql, [s.run, s.config, true])).rejects.toThrow(
+      /publication enablement requires privileged setup/,
+    );
+    await expect(id(rootSql, [s.run, alternate, true])).rejects.toThrow(
+      /publication enablement requires privileged setup/,
+    );
+    await expect(
+      id(rootSql, [s.run, s.config, true], migrator),
+    ).rejects.toThrow(/cannot elevate run publication/);
+    await id(rootSql, [s.run, s.config, false]);
+
+    const attempt = await child(s, repair);
+    const repaired = await ready({ ...s, attempt });
+    await expect(advance(attempt, "REVALIDATED", "READY")).rejects.toThrow(
+      /own approval/,
+    );
+    expect(
+      (
+        await runtime.query(
+          "SELECT * FROM review_decisions WHERE episode_version_id=$1",
+          [repaired.version],
+        )
+      ).rowCount,
+    ).toBe(0);
+    await review(repaired.version, repaired.fingerprint, actor, "approve");
+    await advance(attempt, "REVALIDATED", "READY");
+    await expect(advance(attempt, "PUBLISHING", "REVALIDATED")).rejects.toThrow(
+      /publication disabled/,
+    );
+    expect(
+      (
+        await runtime.query<{ state: string }>(
+          "SELECT state FROM program_run_attempts WHERE attempt_id=$1",
+          [s.attempt],
+        )
+      ).rows[0]?.state,
+    ).toBe("READY");
+    expect(
+      (
+        await runtime.query(
+          "SELECT show_config_version_id,publication_enabled FROM program_run_attempts WHERE attempt_id=$1",
+          [attempt],
+        )
+      ).rows[0],
+    ).toEqual({ show_config_version_id: s.config, publication_enabled: false });
+  });
+
+  it("NB1: repair inherits exact parent permission even within a setup-enabled run", async () => {
+    const s = await seed("production", true);
+    const disabled = await id(
+      "INSERT INTO program_run_attempts(program_run_id,show_config_version_id,evidence_package_id) VALUES ($1,$2,$3) RETURNING attempt_id AS id",
+      [s.run, s.config, s.packageId],
+    );
+    const parent = { ...s, attempt: disabled };
+    const c = await ready(parent);
+    const actor = await human();
+    await review(c.version, c.fingerprint, actor, "request_repair");
+    const repair = await plan(disabled, c.fingerprint, actor);
+    await operator.query(
+      "INSERT INTO repair_plan_decisions(repair_plan_id,actor_id,decision) VALUES ($1,$2,'confirm')",
+      [repair, actor],
+    );
+    await expect(
+      child(parent, repair, s.packageId, disabled, true, migrator),
+    ).rejects.toThrow(/inherit parent config and publication/);
+    await child(parent, repair);
+  });
+
+  it("NB1: callers cannot prebind or rewrite run policy, and failed first attempts roll back binding", async () => {
+    const s = await seed();
+    await expect(
+      runtime.query(
+        "INSERT INTO program_runs(show_id,purpose,show_config_version_id,publication_enabled) VALUES ($1,'production',$2,true)",
+        [s.show, s.config],
+      ),
+    ).rejects.toThrow(/first attempt/);
+    await expect(
+      runtime.query(
+        "UPDATE program_runs SET publication_enabled=true WHERE program_run_id=$1",
+        [s.run],
+      ),
+    ).rejects.toThrow(/permission denied/);
+    await expect(
+      migrator.query(
+        "UPDATE program_runs SET publication_enabled=true WHERE program_run_id=$1",
+        [s.run],
+      ),
+    ).rejects.toThrow(/identity mutation/);
+    const run = await id(
+      "INSERT INTO program_runs(show_id,purpose) VALUES ($1,'production') RETURNING program_run_id AS id",
+      [s.show],
+    );
+    await expect(
+      runtime.query(
+        "INSERT INTO program_run_attempts(program_run_id,show_config_version_id,evidence_package_id) VALUES ($1,$2,$3)",
+        [run, s.config, randomUUID()],
+      ),
+    ).rejects.toThrow(/foreign key/);
+    expect(
+      (
+        await runtime.query(
+          "SELECT show_config_version_id,publication_enabled FROM program_runs WHERE program_run_id=$1",
+          [run],
+        )
+      ).rows[0],
+    ).toEqual({ show_config_version_id: null, publication_enabled: null });
+  });
+
+  it.each(["READ COMMITTED", "REPEATABLE READ", "SERIALIZABLE"])(
+    "NB1: concurrent first attempts cannot establish conflicting bindings at %s",
+    async (isolation) => {
+      const s = await seed();
+      const alternate = await id(
+        "INSERT INTO show_config_versions(show_id,version_number,config_hash,schema_version,canonical_payload,pre_publish_review_required) VALUES ($1,2,$2,'v1','{}',false) RETURNING show_config_version_id AS id",
+        [s.show, hash()],
+        migrator,
+      );
+      // Config races use real runtime connections; publication races use setup
+      // authority to test run integrity independently of runtime's privilege denial.
+      for (const conflict of ["config", "publication"]) {
+        const run = await id(
+          "INSERT INTO program_runs(show_id,purpose) VALUES ($1,'production') RETURNING program_run_id AS id",
+          [s.show],
+        );
+        const db = conflict === "config" ? runtime : migrator;
+        // Migration pools intentionally allow only one checked-out client.
+        // Use the same factory/login on a separate pool for the competing writer.
+        const competitorPool =
+          conflict === "config"
+            ? runtime
+            : createMigrationPool({
+                MIGRATION_DATABASE_URL: migrator.options.connectionString ?? "",
+              });
+        const first = await db.connect();
+        let second: pg.PoolClient | undefined;
+        try {
+          second = await competitorPool.connect();
+          await first.query(`BEGIN ISOLATION LEVEL ${isolation}`);
+          await second.query(`BEGIN ISOLATION LEVEL ${isolation}`);
+          await second.query("SET LOCAL statement_timeout = '5s'");
+          const pid = (
+            await second.query<{ pid: number }>(
+              "SELECT pg_backend_pid() AS pid",
+            )
+          ).rows[0]?.pid;
+          const sql =
+            "INSERT INTO program_run_attempts(program_run_id,show_config_version_id,publication_enabled) VALUES ($1,$2,$3)";
+          await first.query(sql, [run, s.config, false]);
+          const pending = second.query(sql, [
+            run,
+            conflict === "config" ? alternate : s.config,
+            conflict === "publication",
+          ]);
+          const outcome = pending.then(
+            () => null,
+            (error: unknown) => error,
+          );
+          // Prove actual overlap; do not rely on scheduling or a fixed sleep.
+          const deadline = Date.now() + 3000;
+          let blocked = false;
+          while (Date.now() < deadline) {
+            blocked =
+              (
+                await runtime.query<{ blocked: boolean }>(
+                  "SELECT cardinality(pg_blocking_pids($1)) > 0 AS blocked",
+                  [pid],
+                )
+              ).rows[0]?.blocked ?? false;
+            if (blocked) break;
+            await setTimeout(10);
+          }
+          expect(blocked).toBe(true);
+          await first.query("COMMIT");
+          const error = await outcome;
+          expect(error).toBeInstanceOf(Error);
+          expect((error as Error).message).toMatch(
+            isolation === "READ COMMITTED"
+              ? /run show-config binding|cannot elevate run publication/
+              : /could not serialize/,
+          );
+          await second.query("ROLLBACK");
+          expect(
+            (
+              await runtime.query(
+                "SELECT show_config_version_id,publication_enabled FROM program_runs WHERE program_run_id=$1",
+                [run],
+              )
+            ).rows[0],
+          ).toEqual({
+            show_config_version_id: s.config,
+            publication_enabled: false,
+          });
+          expect(
+            (
+              await runtime.query(
+                "SELECT * FROM program_run_attempts WHERE program_run_id=$1",
+                [run],
+              )
+            ).rowCount,
+          ).toBe(1);
+        } finally {
+          // Release the lock holder even if an assertion fails while the other
+          // INSERT is blocked. Each client is released even if rollback fails.
+          await Promise.allSettled(
+            [first, second].map(async (client) => {
+              if (!client) return;
+              try {
+                await client.query("ROLLBACK");
+              } finally {
+                client.release(true);
+              }
+            }),
+          );
+          if (competitorPool !== runtime) await competitorPool.end();
+        }
+      }
+    },
+  );
 
   it("shares one frozen package across evaluation, production and confirmed child repair; preserves Episode/GUID/pubDate", async () => {
     const pkg = await evidencePackage();
@@ -883,6 +1173,8 @@ suite("PostgreSQL 17 foundation under effective capability roles", () => {
       "ALTER TABLE artifacts DISABLE TRIGGER ALL",
       "SET session_replication_role=replica",
       "SET ROLE desk_migrator",
+      "SET ROLE desk_operator",
+      "SET SESSION AUTHORIZATION desk_migrator",
     ])
       await expect(runtime.query(sql)).rejects.toThrow(
         /permission denied|must be owner/,

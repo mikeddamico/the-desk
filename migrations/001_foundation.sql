@@ -39,6 +39,10 @@ CREATE TABLE program_runs (
   program_run_id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   show_id uuid NOT NULL REFERENCES shows(show_id),
   purpose text NOT NULL CHECK (purpose IN ('evaluation', 'production')),
+  -- Established atomically by the first attempt; never supplied by run creation.
+  show_config_version_id uuid REFERENCES show_config_versions(show_config_version_id),
+  publication_enabled boolean,
+  CHECK ((show_config_version_id IS NULL) = (publication_enabled IS NULL)),
   state lifecycle_state NOT NULL DEFAULT 'PENDING',
   created_at timestamptz NOT NULL DEFAULT now()
 );
@@ -314,6 +318,16 @@ SET search_path = pg_catalog, public, pg_temp AS $$
 BEGIN
   IF TG_OP = 'INSERT' THEN
     IF NEW.state <> 'PENDING' THEN RAISE EXCEPTION 'run must start PENDING'; END IF;
+    IF NEW.show_config_version_id IS NOT NULL OR NEW.publication_enabled IS NOT NULL THEN
+      RAISE EXCEPTION 'run policy binding must be established by the first attempt';
+    END IF;
+  ELSIF OLD.show_config_version_id IS NULL AND NEW.show_config_version_id IS NOT NULL
+    AND NEW.publication_enabled IS NOT NULL
+    AND (to_jsonb(NEW) - ARRAY['show_config_version_id','publication_enabled'])
+      IS NOT DISTINCT FROM (to_jsonb(OLD) - ARRAY['show_config_version_id','publication_enabled']) THEN
+    -- Only the attempt trigger has the runtime-side authority to make this update.
+    -- Ordinary lifecycle updates still pass through the branch below.
+    NULL;
   ELSE
     IF (to_jsonb(NEW) - 'state') IS DISTINCT FROM (to_jsonb(OLD) - 'state')
       OR NOT valid_lifecycle_edge(OLD.state, NEW.state) THEN
@@ -330,7 +344,7 @@ BEGIN
 END $$;
 CREATE TRIGGER run_lifecycle BEFORE INSERT OR UPDATE ON program_runs FOR EACH ROW EXECUTE FUNCTION guard_run_lifecycle();
 
-CREATE FUNCTION guard_attempt_lifecycle() RETURNS trigger LANGUAGE plpgsql
+CREATE FUNCTION guard_attempt_lifecycle() RETURNS trigger LANGUAGE plpgsql SECURITY DEFINER
 SET search_path = pg_catalog, public, pg_temp AS $$
 DECLARE run_record program_runs; parent program_run_attempts; repair_layer text;
 BEGIN
@@ -349,10 +363,31 @@ BEGIN
   END IF;
   IF TG_OP = 'INSERT' THEN
     IF NEW.state <> 'PENDING' THEN RAISE EXCEPTION 'attempt must start PENDING'; END IF;
+    -- Check the authenticated login, not CURRENT_USER (the definer). There is no
+    -- application/operator publication grant in Foundation; privileged setup only.
+    IF NEW.publication_enabled AND NOT pg_has_role(session_user, 'desk_migrator', 'MEMBER') THEN
+      RAISE EXCEPTION 'publication enablement requires privileged setup' USING ERRCODE = '42501';
+    END IF;
+    -- Updating the existing run row serializes competing first inserts, including
+    -- at REPEATABLE READ/SERIALIZABLE, where a stale writer must retry.
+    UPDATE program_runs SET show_config_version_id = NEW.show_config_version_id,
+      publication_enabled = NEW.publication_enabled
+      WHERE program_run_id = NEW.program_run_id AND show_config_version_id IS NULL;
+    SELECT * INTO STRICT run_record FROM program_runs WHERE program_run_id = NEW.program_run_id;
+    IF NEW.show_config_version_id IS DISTINCT FROM run_record.show_config_version_id THEN
+      RAISE EXCEPTION 'attempt must use the run show-config binding';
+    END IF;
+    IF NEW.publication_enabled AND NOT run_record.publication_enabled THEN
+      RAISE EXCEPTION 'attempt cannot elevate run publication permission';
+    END IF;
     IF NEW.parent_attempt_id IS NOT NULL THEN
       SELECT * INTO STRICT parent FROM program_run_attempts WHERE attempt_id = NEW.parent_attempt_id;
       IF parent.program_run_id <> NEW.program_run_id OR parent.state <> 'READY' THEN
         RAISE EXCEPTION 'repair parent must be READY in the same run';
+      END IF;
+      IF NEW.show_config_version_id IS DISTINCT FROM parent.show_config_version_id
+        OR NEW.publication_enabled IS DISTINCT FROM parent.publication_enabled THEN
+        RAISE EXCEPTION 'repair child must inherit parent config and publication permission';
       END IF;
       SELECT p.typed_plan->>'repair_layer' INTO repair_layer
       FROM repair_plans p JOIN repair_requests r USING (repair_request_id)
@@ -533,7 +568,7 @@ END $$;
 CREATE TRIGGER render_take_lineage BEFORE INSERT ON render_takes FOR EACH ROW EXECUTE FUNCTION guard_render_take();
 
 -- Explicit exceptions to the default application INSERT grant.
-REVOKE INSERT ON episodes, episode_versions, review_decisions, repair_plan_decisions FROM desk_runtime;
+REVOKE INSERT ON show_config_versions, episodes, episode_versions, review_decisions, repair_plan_decisions FROM desk_runtime;
 GRANT INSERT ON review_decisions, repair_plan_decisions TO desk_operator;
 GRANT EXECUTE ON FUNCTION transition_attempt(uuid,lifecycle_state,lifecycle_state,sha256_hex,uuid),
   transition_run(uuid,lifecycle_state,lifecycle_state), bind_evidence_package(uuid,uuid) TO desk_runtime;
