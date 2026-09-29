@@ -1,6 +1,6 @@
 # The Desk Agent Instructions
 
-The current implementation authority is FINAL LOCK v1.2.3 only.
+The current implementation authority is FINAL LOCK v1.2.4 only.
 
 All current governing specifications and implementation contracts are under `/Lock`.
 
@@ -8,8 +8,8 @@ Superseded lock versions may exist in Git history and MUST NOT be used as curren
 
 Start by reading:
 
-1. `Lock/00_INDEX/ACTIVE_SPECS_LOCKED_v1.2.3.md`
-2. `Lock/00_INDEX/The_Desk_FINAL_LOCK_README_v1.2.3.md`
+1. `Lock/00_INDEX/ACTIVE_SPECS_LOCKED_v1.2.4.md`
+2. `Lock/00_INDEX/The_Desk_FINAL_LOCK_README_v1.2.4.md`
 3. the current Coding Handoff identified by the active-spec manifest
 4. the current Contract Trace identified by the active-spec manifest
 5. the current Walking Skeleton Fixture identified by the active-spec manifest
