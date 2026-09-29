@@ -80,7 +80,7 @@ sha256("evidence-package-v2\n" + canonical_json(semantic_manifest))
 
 Operational fields such as `created_at`/`frozen_at`, worker IDs, and request trace IDs do not alter semantic identity.
 
-Fixture v0.4.4 preserves the governed semantic artifact hashes established by the earlier corrective rebuild; its UUID repair changes only the READY stage fingerprint.
+Fixture v0.4.4 preserves the governed semantic artifact hashes established by the earlier corrective rebuild; its UUID repair changes Assembly and READY stage fingerprints only.
 
 **Canonical package hash:** `22fa7218e2f820b3c3378fc083eae52d1a0b0259c43fcf555f9115afed4d0457`
 
@@ -194,8 +194,8 @@ Read-only bounded context may use the configured recipe and may cross from the i
 - Performance: `2b8d739aa58d4721daf75ef7e72594994c80ddeb9d00d677114ee7ced5b7c761`
 - Semantic audit: `de4e027bd6d8599ecc047745023fe2545e0fcbdaace645528f7d99902f338657`
 - Render: `d92d620c8e60098e750bea6c490a85f7ca71d27994e90cb9e247bc8072241b37`
-- Assembly: `dd20eb19b78bea075369ebc04db438928ab272986bd3d062904604b069a84518`
-- READY candidate: `76e7e59ba2d6c21ed152afdc9b8781151fa9caadffa9dc9471ae2caf57bd06c6`
+- Assembly: `075453adc3daaee4fc458f51b005d9a70323341fbf2c5393730c3f8017dcc5cf`
+- READY candidate: `5ca32745069787bec224344fc7207239f332bf8e388b60a8da388f916958194e`
 
 Hash domains, exact stage projection keys, revision-parent identity, artifact projection exclusions, and Unicode span coordinates are normative in Hashing, Fingerprints & Text Spans v0.1.3. Fixture `gate_fingerprint_inputs.json` contains the exact six input projections and expected hashes; stage-result files repeat the relevant projection beside each fingerprint.
 
@@ -311,12 +311,12 @@ The walking skeleton is complete only when:
 
 ## v1.2.4 executable-contract hotfix
 
-Triggered by the read-only Completion A persistence design pass, this bounded hotfix repairs fixture run/attempt identities to authoritative Foundation UUIDs, completes explicit deterministic `fixture_stub` model provenance, and closes the previously unspecified `model_runs.semantic_input_hash` projection/domain via Hashing v0.1.3.
+Triggered by the read-only Completion A persistence design pass, this bounded hotfix repairs fixture run/attempt, render-block, take, selection, and audio/artifact identities to authoritative Foundation UUIDs, completes explicit deterministic `fixture_stub` model provenance, and closes the previously unspecified `model_runs.semantic_input_hash` projection/domain via Hashing v0.1.3.
 
-Foundation UUID primary keys remain the durable run/attempt identities; no canonical-identity columns or permanent alias system are introduced. Each of the five intended typed model executions has a purpose-specific prompt manifest, explicit component versions and policy source hashes, rendered-request and semantic-input hashes, a synthetic provider-call reservation, one succeeded terminal event, zero actual USD cost, fixture model identity, and an output-artifact binding. No external provider was contacted or paid. `provider_calls` remains the authoritative side-effect/try ledger; production provider-accounting semantics are unchanged.
+Foundation UUID primary keys remain the durable persisted identities; no canonical-identity columns or permanent alias system are introduced. Each of the five intended typed model executions has a purpose-specific prompt manifest, explicit component versions and policy source hashes, rendered-request and semantic-input hashes, a synthetic provider-call reservation, one succeeded terminal event, zero actual USD cost, fixture model identity, and an output-artifact binding. No external provider was contacted or paid. `provider_calls` remains the authoritative side-effect/try ledger; production provider-accounting semantics are unchanged.
 
 There is no database/schema, migration, lifecycle, product-intent, dependency, or product-implementation change. No unrelated semantic projection changes. Build 1 and Build 2 scope does not broaden; this hotfix does not begin Build 1 Completion A. Technical Architecture v1.0 and accepted ADRs remain unchanged. The Product Thesis remains working product context, outside locked implementation authority.
 
-Only the READY candidate fingerprint changes among the six stage fingerprints, from `c9ec6c12015993af3199054429b82cc37c0c692dd259df51319e5d41e34b41ce` to `76e7e59ba2d6c21ed152afdc9b8781151fa9caadffa9dc9471ae2caf57bd06c6`. Governed upstream semantic artifact identities are unchanged. The five model semantic-input hashes are additive provenance identities.
+The completed persistence-compatible identity repair changes Assembly from `dd20eb19b78bea075369ebc04db438928ab272986bd3d062904604b069a84518` to `075453adc3daaee4fc458f51b005d9a70323341fbf2c5393730c3f8017dcc5cf` and READY from the pre-second-repair `76e7e59ba2d6c21ed152afdc9b8781151fa9caadffa9dc9471ae2caf57bd06c6` to `5ca32745069787bec224344fc7207239f332bf8e388b60a8da388f916958194e`. Claims/Writing, Performance, Semantic Audit, and Render remain unchanged. Governed upstream semantic artifact identities are unchanged. The five model semantic-input hashes are additive provenance identities.
 
-Fixture v0.4.4 `validate_fixture.py` verifies the UUID references, five explicit synthetic model executions, model semantic-input vectors, existing artifact and stage identities, and immutable-pack inventory. Run it from the repository root as documented in the fixture README. Future loaders must consume explicit provenance and must not fabricate missing model provenance.
+Fixture v0.4.4 `validate_fixture.py` verifies canonical v4 Foundation UUIDs and exact block/take/final-selection/audio relationships, including rejected/superseded history, READY master and run/attempt bindings, cross-stage projections, causal model timestamps, five explicit synthetic model executions, model semantic-input vectors, existing artifact and stage identities, and immutable-pack inventory. Run it from the repository root as documented in the fixture README. Future loaders must consume explicit provenance and must not fabricate missing model provenance.

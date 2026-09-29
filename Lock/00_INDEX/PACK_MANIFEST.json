@@ -45,8 +45,8 @@
     },
     {
       "path": "00_INDEX/ACTIVE_SPECS_LOCKED_v1.2.4.md",
-      "size_bytes": 6790,
-      "sha256": "906dff0db4316c3c12707a8d8d74c8df332a714ad7da893ad812862aaffb3e4c"
+      "size_bytes": 7078,
+      "sha256": "cee56b15b334fe8f047743bc4931cc52b3c5f76e4fc9aa30d199d5d0afb8c72a"
     },
     {
       "path": "00_INDEX/ACTIVE_SPECS_LOCKED_v1.2.docx",
@@ -80,8 +80,8 @@
     },
     {
       "path": "00_INDEX/The_Desk_FINAL_LOCK_README_v1.2.4.md",
-      "size_bytes": 2714,
-      "sha256": "6c93d254e8581e2e32259903d33bd0cc066a5e40c16f0fbc91d0c94757c47363"
+      "size_bytes": 3002,
+      "sha256": "48e2edc0e36a1737b2cc68915ef8ec8499e716b407e19d3486090aa9936ec672"
     },
     {
       "path": "01_ARCHITECTURE_AND_ADRS/Desk_v10.docx",
@@ -360,8 +360,8 @@
     },
     {
       "path": "04_IMPLEMENTATION/The_Desk_Hashing_Fingerprints_and_Text_Spans_v0.1.3.md",
-      "size_bytes": 13931,
-      "sha256": "5cbfa1d1b77a76f3738f6a9757de60502db69a8c842b88fabda769d67048174d"
+      "size_bytes": 14057,
+      "sha256": "0f7541d2b58bdc5cb29c90db4155cd462f9b405539af9f2d2cb976d219041a36"
     },
     {
       "path": "04_IMPLEMENTATION/The_Desk_Hashing_Fingerprints_and_Text_Spans_v0.1.docx",
@@ -460,8 +460,8 @@
     },
     {
       "path": "04_IMPLEMENTATION/The_Desk_Walking_Skeleton_Coding_Handoff_v0.5.3.md",
-      "size_bytes": 23244,
-      "sha256": "07769eb0a792fbe75fb4b71fd516e3e254137e1f7b4d1767b5fa1c1d77cb5ec4"
+      "size_bytes": 23532,
+      "sha256": "86c328f463112b1615bc6e716d4cda9b97916195fab39f0fd35fdb6d28e5fdb9"
     },
     {
       "path": "04_IMPLEMENTATION/The_Desk_Walking_Skeleton_Coding_Handoff_v0.5.docx",
@@ -515,8 +515,8 @@
     },
     {
       "path": "04_IMPLEMENTATION/The_Desk_Walking_Skeleton_Contract_Trace_v0.5.3.md",
-      "size_bytes": 24230,
-      "sha256": "6e095e04d684a0de3d6bc368eb240693f0e3f2922319501eae939248df1752ab"
+      "size_bytes": 24723,
+      "sha256": "8b55c014cbfb8f31c39b99a5ebaf6eba4285d44e974aced1ebc9280416cb95e9"
     },
     {
       "path": "04_IMPLEMENTATION/The_Desk_Walking_Skeleton_Contract_Trace_v0.5.docx",
@@ -550,8 +550,8 @@
     },
     {
       "path": "04_IMPLEMENTATION/The_Desk_Walking_Skeleton_Fixture_v0.4.4.zip",
-      "size_bytes": 138723,
-      "sha256": "f9155b017390ecd0585b53d938d413792f4b71be3fdfeec4b567348368c9da40"
+      "size_bytes": 142576,
+      "sha256": "1f73b93c7d0b274889943f0eeb0f08480eadb779796d062042b80acab8ba0451"
     },
     {
       "path": "04_IMPLEMENTATION/The_Desk_Walking_Skeleton_Fixture_v0.4.zip",

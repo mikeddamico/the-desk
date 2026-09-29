@@ -270,7 +270,7 @@ If fixture values and this contract disagree, this contract and the higher-autho
 
 ## 11. Model semantic-input identity (v0.1.3)
 
-v0.1.3 supersedes v0.1.2 only to add this normative rule. Sections 1–10 retain every existing rule and historical Fixture v0.4.3 vector unchanged. FINAL LOCK v1.2.4 selects Fixture v0.4.4; its UUID-bound READY vector is `76e7e59ba2d6c21ed152afdc9b8781151fa9caadffa9dc9471ae2caf57bd06c6` under the unchanged §5.6 projection.
+v0.1.3 supersedes v0.1.2 only to add this normative rule. Sections 1–10 retain every existing rule and historical Fixture v0.4.3 vector unchanged. FINAL LOCK v1.2.4 selects Fixture v0.4.4; its persistence-compatible Assembly vector is `075453adc3daaee4fc458f51b005d9a70323341fbf2c5393730c3f8017dcc5cf` and its UUID-bound READY vector is `5ca32745069787bec224344fc7207239f332bf8e388b60a8da388f916958194e` under the unchanged §§5.5–5.6 projections.
 
 Domain separator: `model-semantic-input-v1`.
 
