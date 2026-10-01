@@ -1215,102 +1215,78 @@ suite("Migration 002 persistence profile on disposable PostgreSQL 17", () => {
     });
 
     it.each(["REPEATABLE READ", "SERIALIZABLE"])(
-      "%s: a stale snapshot cannot insert below, at or above a concurrently committed maximum (fails safely)",
-      async (level) => {
-        const actor = await account(ready);
-        for (const attempt of [3, 6, 5]) {
-          const target = await claim(ready);
-          await ready.runtime.query(eventSql, [target, actor, 1]);
-          const stale = await runtimeClient(ready, level);
-          try {
-            await stale.query("SELECT count(*) FROM claim_state_events");
-            // A competitor commits sequence 5 after the stale snapshot was taken.
-            await ready.runtime.query(eventSql, [target, actor, 5]);
-            const outcome = await code(
-              stale.query(eventSql, [target, actor, attempt]),
-            );
-            expect(outcome, `attempt ${String(attempt)}`).toBe("40001");
-            await stale.query("ROLLBACK");
-          } finally {
-            await stale.end();
-          }
-          expect(
-            (
-              await ready.runtime.query<{ event_sequence: number }>(
-                "SELECT event_sequence FROM claim_state_events WHERE claim_id=$1 ORDER BY event_sequence",
-                [target],
-              )
-            ).rows.map((r) => r.event_sequence),
-          ).toEqual([1, 5]);
-        }
-      },
-      60000,
-    );
-
-    it("REPEATABLE READ: a snapshot taken while a competitor was in progress fails safely even after it commits", async () => {
-      const actor = await account(ready);
-      const target = await claim(ready);
-      const writer = await runtimeClient(ready);
-      const stale = await runtimeClient(ready, "REPEATABLE READ");
-      try {
-        await writer.query("BEGIN");
-        await writer.query(eventSql, [target, actor, 1]);
-        await writer.query(eventSql, [target, actor, 7]);
-        await stale.query("SELECT count(*) FROM claim_state_events");
-        await writer.query("COMMIT");
-        expect(await code(stale.query(eventSql, [target, actor, 6]))).toBe(
-          "40001",
-        );
-        await stale.query("ROLLBACK");
-      } finally {
-        await writer.end();
-        await stale.end();
-      }
-      expect(
-        (
-          await ready.runtime.query<{ event_sequence: number }>(
-            "SELECT event_sequence FROM claim_state_events WHERE claim_id=$1 ORDER BY event_sequence",
-            [target],
-          )
-        ).rows.map((r) => r.event_sequence),
-      ).toEqual([1, 7]);
-    });
-
-    it.each(["REPEATABLE READ", "SERIALIZABLE"])(
-      "%s: a current snapshot appends in order, including several events in one transaction",
+      "%s: every append is rejected as unsupported before any lock or write, even with no competitor",
       async (level) => {
         const actor = await account(ready);
         const target = await claim(ready);
-        const append = async (sequences: number[]) => {
-          const client = await runtimeClient(ready, level);
-          try {
-            for (const sequence of sequences)
-              await client.query(eventSql, [target, actor, sequence]);
-            await client.query("COMMIT");
-          } catch (error) {
-            await client.query("ROLLBACK").catch(() => undefined);
-            throw error;
-          } finally {
-            await client.end();
-          }
-        };
-        await append([1, 2]);
-        await append([4]);
-        await expect(append([3])).rejects.toThrow(/exceed accepted maximum/);
-        await expect(append([4])).rejects.toThrow(/exceed accepted maximum/);
+        const client = await runtimeClient(ready, level);
+        try {
+          const outcome = await client.query(eventSql, [target, actor, 1]).then(
+            () => undefined,
+            (error: unknown) =>
+              error as { code?: string; message: string; hint?: string },
+          );
+          expect(outcome?.code).toBe("0A000");
+          expect(outcome?.message).toMatch(/require READ COMMITTED/);
+          expect(outcome?.hint).toMatch(/retrying at this isolation level/);
+          await client.query("ROLLBACK");
+          // The rejection precedes the advisory lock: nothing was locked by that attempt.
+          await client.query(`BEGIN ISOLATION LEVEL ${level}`);
+          await client.query("SAVEPOINT attempt");
+          expect(await code(client.query(eventSql, [target, actor, 2]))).toBe(
+            "0A000",
+          );
+          await client.query("ROLLBACK TO SAVEPOINT attempt");
+          const locks = await client.query(
+            "SELECT count(*)::int AS n FROM pg_locks WHERE pid = pg_backend_pid() AND locktype = 'advisory'",
+          );
+          expect(locks.rows[0]).toEqual({ n: 0 });
+        } finally {
+          await client.query("ROLLBACK").catch(() => undefined);
+          await client.end();
+        }
         expect(
           (
-            await ready.runtime.query<{ event_sequence: number }>(
-              "SELECT event_sequence FROM claim_state_events WHERE claim_id=$1 ORDER BY event_sequence",
+            await ready.runtime.query(
+              "SELECT 1 FROM claim_state_events WHERE claim_id=$1",
               [target],
             )
-          ).rows.map((r) => r.event_sequence),
-        ).toEqual([1, 2, 4]);
+          ).rowCount,
+        ).toBe(0);
       },
-      60000,
     );
 
-    it("keeps strict append order under mixed-isolation stress across many rounds", async () => {
+    it("rejects READ UNCOMMITTED too: only the literal READ COMMITTED setting is supported", async () => {
+      const actor = await account(ready);
+      const target = await claim(ready);
+      const client = await runtimeClient(ready, "READ UNCOMMITTED");
+      try {
+        expect(
+          (await client.query("SHOW transaction_isolation")).rows[0],
+        ).toEqual({ transaction_isolation: "read uncommitted" });
+        expect(await code(client.query(eventSql, [target, actor, 1]))).toBe(
+          "0A000",
+        );
+      } finally {
+        await client.query("ROLLBACK").catch(() => undefined);
+        await client.end();
+      }
+    });
+
+    it("declares the guard VOLATILE so its queries take a fresh snapshot and see rows of the same statement", async () => {
+      const rows = await ready.owner.query<{
+        proname: string;
+        provolatile: string;
+      }>(
+        "SELECT proname, provolatile FROM pg_proc WHERE proname IN ('guard_claim_event_order','guard_pronunciation_lineage') ORDER BY 1",
+      );
+      expect(rows.rows).toEqual([
+        { proname: "guard_claim_event_order", provolatile: "v" },
+        { proname: "guard_pronunciation_lineage", provolatile: "v" },
+      ]);
+    });
+
+    it("keeps strict append order under mixed-isolation stress: READ COMMITTED appenders serialize, others are rejected", async () => {
       const actor = await account(ready);
       const levels = ["READ COMMITTED", "REPEATABLE READ", "SERIALIZABLE"];
       for (let round = 0; round < 15; round += 1) {
@@ -1327,7 +1303,7 @@ suite("Migration 002 persistence profile on disposable PostgreSQL 17", () => {
             ),
           );
           const results = await Promise.all(
-            clients.map(async (client) => {
+            clients.map(async (client, index) => {
               const sequence = 1 + Math.floor(Math.random() * 14);
               const outcome = await code(
                 client.query(eventSql, [target, actor, sequence]),
@@ -1335,11 +1311,17 @@ suite("Migration 002 persistence profile on disposable PostgreSQL 17", () => {
               const ended = await code(
                 client.query(outcome === "OK" ? "COMMIT" : "ROLLBACK"),
               );
-              return outcome === "OK" ? ended : outcome;
+              return {
+                level: levels[index % levels.length],
+                result: outcome === "OK" ? ended : outcome,
+              };
             }),
           );
-          for (const result of results)
-            expect(["OK", "40001", "23514", "23505"]).toContain(result);
+          for (const { level, result } of results) {
+            if (level === "READ COMMITTED")
+              expect(["OK", "23514"]).toContain(result);
+            else expect(result).toBe("0A000");
+          }
         } finally {
           await Promise.all(clients.map((c) => c.end()));
         }
@@ -1355,51 +1337,96 @@ suite("Migration 002 persistence profile on disposable PostgreSQL 17", () => {
         if (accepted.length > 0) expect(accepted[0]).toBe(1);
       }
     }, 120000);
+  });
 
-    it.each(["REPEATABLE READ", "SERIALIZABLE"])(
-      "%s: racing appenders keep strict append order; the losers fail safely",
-      async (level) => {
-        const actor = await account(ready);
-        const target = await claim(ready);
-        await ready.runtime.query(eventSql, [target, actor, 1]);
-        const clients = await Promise.all(
-          Array.from({ length: 10 }, () => runtimeClient(ready, level)),
+  describe("regression: a higher-isolation transaction must never persist a sequence below a committed maximum", () => {
+    const variants = [
+      "explicit transaction id before the competitor writes",
+      "transaction id from an earlier event append to a different claim",
+      "transaction id from an earlier non-event write to a different claim",
+      "no transaction id before the competitor writes",
+    ] as const;
+    type Variant = (typeof variants)[number];
+
+    async function scenario(level: string, variant: Variant) {
+      const actor = await account(ready);
+      const target = await claim(ready);
+      // 1. Persist sequence 1 for the claim.
+      await ready.runtime.query(eventSql, [target, actor, 1]);
+      const other = variant.startsWith("transaction id from an earlier event")
+        ? await claim(ready)
+        : undefined;
+      // 2. Transaction A begins and captures its snapshot (its first statement).
+      const a = await runtimeClient(ready, level);
+      const detail: Record<string, unknown> = { level, variant };
+      const xid = async () =>
+        (
+          await a.query<{ xid: string }>(
+            "SELECT pg_current_xact_id()::text AS xid",
+          )
+        ).rows[0]?.xid;
+      try {
+        const snapshot = await a.query<{
+          snapshot: string;
+          xmin: string;
+          xmax: string;
+          xip: string[];
+        }>(
+          "SELECT pg_current_snapshot()::text AS snapshot, pg_snapshot_xmin(pg_current_snapshot())::text AS xmin, pg_snapshot_xmax(pg_current_snapshot())::text AS xmax, COALESCE((SELECT array_agg(x::text) FROM pg_snapshot_xip(pg_current_snapshot()) x), '{}') AS xip",
         );
-        try {
-          await Promise.all(
-            clients.map((c) =>
-              c.query("SELECT count(*) FROM claim_state_events"),
-            ),
+        detail.snapshot = snapshot.rows[0];
+        // 3. A obtains its transaction id before any competing write.
+        if (variant.startsWith("explicit")) {
+          detail.aXid = await xid();
+        } else if (variant.startsWith("transaction id from an earlier event")) {
+          // Legitimate before the repair; unsupported (rejected) at this isolation level afterwards.
+          detail.earlierWrite = await code(
+            a.query(eventSql, [other, actor, 1]),
           );
-          const results = await Promise.all(
-            clients.map(async (client, index) => {
-              const outcome = await code(
-                client.query(eventSql, [target, actor, index + 2]),
-              );
-              const ended = await code(
-                client.query(outcome === "OK" ? "COMMIT" : "ROLLBACK"),
-              );
-              return outcome === "OK" ? ended : outcome;
-            }),
-          );
-          expect(
-            results.filter((r) => r === "OK").length,
-          ).toBeGreaterThanOrEqual(1);
-          for (const result of results)
-            expect(["OK", "40001", "23514"]).toContain(result);
-        } finally {
-          await Promise.all(clients.map((c) => c.end()));
+          if (detail.earlierWrite === "OK") detail.aXid = await xid();
+        } else if (
+          variant.startsWith("transaction id from an earlier non-event")
+        ) {
+          await a.query(claimSql, [hash(), "confirmed"]);
+          detail.aXid = await xid();
         }
-        const rows = await ready.owner.query<{ event_sequence: number }>(
-          "SELECT event_sequence FROM claim_state_events WHERE claim_id=$1 ORDER BY xmin::text::bigint",
+        // 4. Transaction B appends sequence 5 to the claim and commits.
+        await ready.runtime.query(eventSql, [target, actor, 5]);
+        detail.bXid = (
+          await ready.owner.query<{ xid: string }>(
+            "SELECT xmin::text AS xid FROM claim_state_events WHERE claim_id=$1 AND event_sequence=5",
+            [target],
+          )
+        ).rows[0]?.xid;
+        // 5. A attempts sequence 3, then commits.
+        detail.attempt = await code(a.query(eventSql, [target, actor, 3]));
+        detail.commit = await code(a.query("COMMIT"));
+      } finally {
+        await a.query("ROLLBACK").catch(() => undefined);
+        await a.end();
+      }
+      detail.rows = (
+        await ready.runtime.query<{ event_sequence: number }>(
+          "SELECT event_sequence FROM claim_state_events WHERE claim_id=$1 ORDER BY event_sequence",
           [target],
-        );
-        const accepted = rows.rows.map((r) => r.event_sequence);
-        expect(accepted).toEqual([...accepted].sort((a, b) => a - b));
-        expect(new Set(accepted).size).toBe(accepted.length);
-        if (accepted.length > 0) expect(accepted[0]).toBe(1);
-      },
-      60000,
-    );
+        )
+      ).rows.map((r) => r.event_sequence);
+      return detail;
+    }
+
+    for (const level of ["REPEATABLE READ", "SERIALIZABLE"])
+      for (const variant of variants)
+        it(`${level} / ${variant}: sequence 3 cannot persist after sequence 5`, async () => {
+          const detail = await scenario(level, variant);
+          // The invariant itself (this assertion failed against candidate 386acd22).
+          expect(detail.rows, JSON.stringify(detail)).toEqual([1, 5]);
+          // The repaired guard rejects explicitly as unsupported; where A's own earlier event append was
+          // already rejected, A's transaction is aborted and the later statement fails with 25P02.
+          expect(
+            detail.earlierWrite === "0A000" ? "25P02" : "0A000",
+            JSON.stringify(detail),
+          ).toBe(detail.attempt);
+          expect(detail.commit).toBe("OK");
+        }, 30000);
   });
 });

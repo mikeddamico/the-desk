@@ -46,29 +46,31 @@ ALTER TABLE claim_state_events ADD CONSTRAINT claim_state_events_event_sequence_
 ALTER TABLE claim_state_events ADD CONSTRAINT claim_state_events_claim_id_event_sequence_key UNIQUE (claim_id, event_sequence);
 
 -- Append-order guard. Positive/unique constraints cannot express "strictly above every accepted sequence".
--- Mechanism: a per-claim transaction advisory lock serializes appenders and is held to commit; the accepted maximum
--- is then read. The lock alone is not sufficient: a REPEATABLE READ/SERIALIZABLE transaction reads one snapshot
--- taken before the lock was granted, so a competitor's commit could be invisible to the maximum query. Outside
--- READ COMMITTED (where each statement takes a fresh snapshot after the lock) the guard therefore proves the
--- snapshot is current - no transaction was in progress when it was taken and no other transaction has been
--- assigned a transaction id since - and otherwise fails safely with serialization_failure (SQLSTATE 40001) so the
--- caller retries in a new transaction. The first accepted sequence is 1; later ones must exceed the accepted
--- maximum (gaps above it are allowed; earlier or unused-gap sequences below it are rejected).
+-- Supported boundary: claim-event appends require READ COMMITTED. Mechanism: a per-claim transaction advisory
+-- lock serializes appenders and is held to commit; the accepted maximum is then read by a VOLATILE function,
+-- which takes a fresh snapshot for each query, so under READ COMMITTED it sees every append committed before the
+-- lock was granted. The lock alone is NOT sufficient at REPEATABLE READ/SERIALIZABLE: there one snapshot is
+-- fixed before the lock is granted, and no function of that snapshot or of the transaction id can prove that
+-- no competitor committed since (a transaction can obtain its id before a competitor writes). Those isolation
+-- levels are therefore rejected explicitly, before any lock or read, with an unsupported-operation error
+-- (SQLSTATE 0A000); retrying at the same isolation level cannot succeed. Only the literal setting
+-- 'read committed' is accepted (READ UNCOMMITTED, which PostgreSQL executes as READ COMMITTED, reports
+-- 'read uncommitted' and is rejected too). The first accepted sequence is 1; later ones must exceed the accepted maximum (gaps above it are
+-- allowed; earlier or unused-gap sequences below it are rejected with 23514).
 -- Privileges: runs with the caller's rights; runtime already holds SELECT/INSERT and advisory-lock functions are
 -- executable by everyone, so no privilege is expanded and no SECURITY DEFINER is introduced.
-CREATE FUNCTION guard_claim_event_order() RETURNS trigger LANGUAGE plpgsql
+CREATE FUNCTION guard_claim_event_order() RETURNS trigger LANGUAGE plpgsql VOLATILE
 SET search_path = pg_catalog, public, pg_temp AS $$
 DECLARE accepted_maximum integer;
 BEGIN
+  IF current_setting('transaction_isolation') <> 'read committed' THEN
+    RAISE EXCEPTION 'claim state event appends require READ COMMITTED isolation (this transaction is %)', current_setting('transaction_isolation')
+      USING ERRCODE = '0A000', HINT = 'Append in a new READ COMMITTED transaction; retrying at this isolation level cannot succeed.';
+  END IF;
   IF NEW.claim_id IS NULL OR NEW.event_sequence IS NULL THEN
     RAISE EXCEPTION 'claim state event requires claim and sequence' USING ERRCODE = '23502';
   END IF;
   PERFORM pg_advisory_xact_lock(182736452, hashtext(NEW.claim_id::text));
-  IF current_setting('transaction_isolation') <> 'read committed'
-    AND (EXISTS (SELECT 1 FROM pg_snapshot_xip(pg_current_snapshot()))
-      OR pg_current_xact_id() <> pg_snapshot_xmax(pg_current_snapshot())) THEN
-    RAISE EXCEPTION 'claim event append needs a current snapshot; retry in a new transaction' USING ERRCODE = '40001';
-  END IF;
   SELECT max(event_sequence) INTO accepted_maximum FROM claim_state_events WHERE claim_id = NEW.claim_id;
   IF accepted_maximum IS NULL THEN
     IF NEW.event_sequence <> 1 THEN
