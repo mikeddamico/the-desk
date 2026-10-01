@@ -1,5 +1,12 @@
 import { randomBytes, randomUUID } from "node:crypto";
-import { readFile, mkdtemp, writeFile, rm, copyFile } from "node:fs/promises";
+import {
+  readFile,
+  readdir,
+  mkdtemp,
+  writeFile,
+  rm,
+  copyFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { setTimeout } from "node:timers/promises";
@@ -1095,7 +1102,7 @@ suite("PostgreSQL 17 foundation under effective capability roles", () => {
   it("closes claim/evidence registries and requires auditor identity and valid hashes", async () => {
     const s = await seed();
     const claimSql =
-      "INSERT INTO claims(content_hash,claim_kind,origin,subject_domain,subject,predicate,value,initial_usage_class) VALUES ($1,$2,$3,$4,'{}','result','{}','assertable')";
+      "INSERT INTO claims(content_hash,claim_kind,origin,subject_domain,subject,predicate,value,initial_usage_class,initial_status) VALUES ($1,$2,$3,$4,'{}','result','{}','assertable','confirmed')";
     await runtime.query(claimSql, [
       hash(),
       "event_fact",
@@ -1224,12 +1231,13 @@ suite("PostgreSQL 17 foundation under effective capability roles", () => {
   it("later migration-owned tables inherit SELECT/INSERT without runtime DDL or mutation grants", async () => {
     const dir = await mkdtemp(join(tmpdir(), "desk-migrations-"));
     try {
-      await copyFile(
-        "migrations/001_foundation.sql",
-        join(dir, "001_foundation.sql"),
-      );
+      // Copy every real migration so the dir matches the ledger, then add the probe after them.
+      for (const name of (await readdir("migrations")).filter((n) =>
+        /^\d{3}_.*\.sql$/.test(n),
+      ))
+        await copyFile(join("migrations", name), join(dir, name));
       await writeFile(
-        join(dir, "002_privilege_probe.sql"),
+        join(dir, "003_privilege_probe.sql"),
         "CREATE TABLE privilege_probe(id uuid PRIMARY KEY);\n",
       );
       await migrate(migrator, dir);
@@ -1251,7 +1259,7 @@ suite("PostgreSQL 17 foundation under effective capability roles", () => {
     } finally {
       await migrator.query("DROP TABLE IF EXISTS privilege_probe");
       await migrator.query(
-        "DELETE FROM desk_internal.schema_migrations WHERE migration_name='002_privilege_probe.sql'",
+        "DELETE FROM desk_internal.schema_migrations WHERE migration_name='003_privilege_probe.sql'",
       );
       await rm(dir, { recursive: true, force: true });
     }
