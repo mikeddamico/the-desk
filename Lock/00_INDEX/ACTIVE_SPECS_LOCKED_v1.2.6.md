@@ -1,8 +1,8 @@
-# The Desk - Active Specs Manifest v1.2.6 (INACTIVE SUCCESSOR - PROPOSED)
+# The Desk - Active Specs Manifest v1.2.6
 
-**Status:** INACTIVE SUCCESSOR - PROPOSED. Not selected: FINAL LOCK v1.2.5 (`ACTIVE_SPECS_LOCKED_v1.2.5.md`) remains the active manifest until a later activation. If activated, this manifest would supersede it
+**Status:** LOCKED FOR BUILD 1 IMPLEMENTATION. FINAL LOCK v1.2.6 is the active selection and supersedes FINAL LOCK v1.2.5 (`ACTIVE_SPECS_LOCKED_v1.2.5.md`, retained byte-identical as history).
 **Date:** October 1, 2026
-**Purpose:** Proposed single implementation-facing authority index after the v1.2.6 authority-resolution tranche and, before that, after the independent Codex/Claude dry runs, v1.2.1 corrective lock, the bounded v1.2.4 executable-contract hotfix, and the v1.2.5 persistence-contract activation.
+**Purpose:** Single implementation-facing authority index after the v1.2.6 authority-resolution activation and, before that, after the independent Codex/Claude dry runs, v1.2.1 corrective lock, the bounded v1.2.4 executable-contract hotfix, and the v1.2.5 persistence-contract activation.
 
 | Document | Version | Status | Required by | Owns |
 |---|---:|---|---|---|
@@ -33,11 +33,11 @@
 | Episode Input Package | v0.1 | SUPERSEDED | None | Historical only |
 | Script Spec | v0.1 | SUPERSEDED | None | Historical only |
 
-## v1.2.6 successor (proposed; inactive)
+## v1.2.6 activation
 
-If activated, this Lock selects Hashing v0.1.5 (SHA-256 `a78ac9478b8ee9a55caae21ba07fd1106e110ba6cd30de807181cd4a15a10e89`), the Writing Build 1-2 Fixture-Profile Addendum v0.1 (SHA-256 `79ea43076b0b5ca68916f8e12ac3457e48c6ad31a9bf5f1c47034fcb1de7f55f`), Fixture v0.4.6 (ZIP SHA-256 `7e1bb1108cdd84e47269b9ab2dab20ba934fcec64d44262f86d2b505616b0747`), Coding Handoff v0.5.5, Contract Trace v0.5.5 and Implementation Readiness Closure v1.2.6. Claims Policy v0.1.2, Evidence Package v0.2.2, Writing Spec v0.2.3, Performance & Render v0.1.4, Showrunner v0.1.3 and the other rows above are unchanged. It makes no database/schema, migration, lifecycle, product-intent, dependency or product-implementation change, broadens no Build 1 or Build 2 scope, and does not begin Completion A, Completion B or the A5 retry/operation work.
+This Lock activation selects Hashing v0.1.5 (SHA-256 `a78ac9478b8ee9a55caae21ba07fd1106e110ba6cd30de807181cd4a15a10e89`), the Writing Build 1-2 Fixture-Profile Addendum v0.1 (SHA-256 `79ea43076b0b5ca68916f8e12ac3457e48c6ad31a9bf5f1c47034fcb1de7f55f`), Fixture v0.4.6 (ZIP SHA-256 `7e1bb1108cdd84e47269b9ab2dab20ba934fcec64d44262f86d2b505616b0747`), Coding Handoff v0.5.5, Contract Trace v0.5.5 and Implementation Readiness Closure v1.2.6. Claims Policy v0.1.2, Evidence Package v0.2.2, Writing Spec v0.2.3, Performance & Render v0.1.4, Showrunner v0.1.3 and the other rows above are unchanged. It makes no database/schema, migration, lifecycle, product-intent, dependency or product-implementation change, broadens no Build 1 or Build 2 scope, and does not begin Completion A, Completion B or the A5 retry/operation work.
 
-Each proposed successor file of this tranche (Hashing v0.1.5, the Writing Build 1-2 Fixture-Profile Addendum v0.1, Contract Trace v0.5.5, Coding Handoff v0.5.5, Implementation Readiness Closure v1.2.6) carries a header that says "INACTIVE SUCCESSOR" and that it is proposed for a later FINAL LOCK v1.2.6; that wording records its pre-activation authorship state and is superseded by an activation manifest that selects it unchanged. Claims Policy v0.1.2, Evidence Package v0.2.2, Writing Spec v0.2.3 and Performance & Render v0.1.4 are not part of this change: they stay byte-identical to the bytes bound by Fixtures v0.4.5 and v0.4.6, and their policy source hashes are unchanged. FINAL LOCK v1.2.5 remains the active selection until a later activation.
+Pre-activation status notices. Hashing v0.1.5, the Writing Build 1-2 Fixture-Profile Addendum v0.1, Contract Trace v0.5.5, Coding Handoff v0.5.5 and Implementation Readiness Closure v1.2.6 were authored as successor candidates and their headers still say "INACTIVE SUCCESSOR" and "proposed for FINAL LOCK v1.2.6" (and the earlier-selected Claims, Evidence Package, Writing, Performance & Render files retain their v1.2.5-era notices). That wording records each file's pre-activation authorship state. **This manifest's selection supersedes those status notices without changing the governed bytes**: the selected files are activated unchanged, remain byte-identical to the bytes bound by Fixture v0.4.6 where the fixture pins them (Hashing v0.1.5 and the addendum, by SHA-256 in `config/policy_versions.json`), and are not edited, re-pinned or regenerated. Claims Policy v0.1.2, Evidence Package v0.2.2, Writing Spec v0.2.3 and Performance & Render v0.1.4 are unchanged.
 
 Every v1.2.5 and earlier Lock file, including Hashing v0.1.4, Trace v0.5.4, Handoff v0.5.4, Closure v1.2.5 and Fixture v0.4.5, is retained byte-identical as history.
 
@@ -62,3 +62,10 @@ If active documents appear to conflict, stop and surface the conflict. Do not si
 ## Build 1 implementation boundary
 
 General architecture review is closed. Build 1 must still prove an isolated staging deployment and correlation to hosted error tracking before Build 1 is called complete (Technical Architecture v1.0 Build 1; Handoff v0.5.5 Done-when items 12-13). Subsequent implementation follows Handoff v0.5.5 and begins with mechanical conformance against Fixture v0.4.6. Migration 002 (append-order and isolation guard) is merged at the v1.2.5 baseline; the durable event-identity and operation/retry semantics (A5) are unresolved and are not discharged by it.
+
+## Limits of this activation
+
+- Authority activation does not complete A1 and does not update the production fixture loader or any runtime.
+- Stage fingerprints keep their existing closed key sets (Hashing v0.1.5 §5); the addendum is bound through model-run provenance (context manifest, prompt manifests and typed rows, policy map), not through gate fingerprints.
+- Any future change to the addendum requires a fresh invalidation and version review.
+- A5 durable event-retry convergence, READY/operator authorization and cross-manifest cached-take acceptance remain unresolved.
