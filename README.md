@@ -1,6 +1,8 @@
 # The Desk — Build 1 Foundation
 
-Foundation implementation for FINAL LOCK v1.2.3: Node.js 24/strict TypeScript, explicit validated configuration, structured redacted logging, PostgreSQL forward migrations and least-privilege roles, immutable editorial lineage, canonical identity primitives, and Frozen Walking-Skeleton Fixture v0.4.3 conformance.
+Foundation implementation: Node.js 24/strict TypeScript, explicit validated configuration, structured redacted logging, PostgreSQL forward migrations and least-privilege roles, immutable editorial lineage, canonical identity primitives, and fixture conformance.
+
+Current implementation authority is FINAL LOCK v1.2.5 (`Lock/00_INDEX/ACTIVE_SPECS_LOCKED_v1.2.5.md`), whose executable contract is Frozen Walking-Skeleton Fixture v0.4.5. The Foundation code in this repository was authored against FINAL LOCK v1.2.3 and Fixture v0.4.3; its fixture loader and conformance tests have not yet been updated to Fixture v0.4.5, and Migration 002 is not implemented. Both are later Completion A work and are not part of the Lock activation.
 
 ## Local checks
 
