@@ -18,6 +18,8 @@ export type Outcome<R> =
   | { kind: "created"; record: R }
   /** Identical retry; `record` is the STORED record. */
   | { kind: "converged"; record: R }
+  /** A5.2: the logical slot is reserved by a DIFFERENT authored identity. Nothing was written; the caller MUST NOT perform. */
+  | { kind: "held_by_other"; record: R }
   /** The same identity exists with different immutable data (or the identity is occupied by a different record). */
   | { kind: "conflict"; code: string; stored: unknown; detail: string }
   /** Invalid request or guard rejection; nothing was written. */
