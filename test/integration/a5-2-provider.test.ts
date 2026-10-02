@@ -25,6 +25,7 @@ import {
   type ProviderEnv,
 } from "../support/a5-provider.js";
 import { accountIds } from "../support/a5-fixture.js";
+import { within } from "../support/pg-wait.js";
 
 const databaseUrl = process.env.TEST_DATABASE_URL;
 const suite = databaseUrl ? describe : describe.skip;
@@ -364,16 +365,20 @@ suite("A5.2 outcome (one event per call; costs are exact decimal text)", () => {
 
   it("two concurrent DIFFERENT outcomes for one call: exactly one is stored, the other conflicts", async () => {
     const r = await reserved();
-    const [a, b] = await Promise.all([
-      recordProviderOutcome(
-        pe.runtime(),
-        outcome(r.provider_call_id, { event_type: "succeeded" }),
-      ),
-      recordProviderOutcome(
-        pe.runtime(),
-        outcome(r.provider_call_id, { event_type: "terminal_failure" }),
-      ),
-    ]);
+    const [a, b] = await within(
+      Promise.all([
+        recordProviderOutcome(
+          pe.runtime(),
+          outcome(r.provider_call_id, { event_type: "succeeded" }),
+        ),
+        recordProviderOutcome(
+          pe.runtime(),
+          outcome(r.provider_call_id, { event_type: "terminal_failure" }),
+        ),
+      ]),
+      30000,
+      "concurrent outcome writers",
+    );
     expect([a.kind, b.kind].sort()).toEqual(["conflict", "created"]);
     expect(
       await pe.rows(

@@ -481,7 +481,17 @@ export async function persistEvidencePackage(
   const payloadJson = JSON.stringify(parsed.payload);
   return runCommand(pool, async (tx) => {
     const requestVerification = await validateReferences(tx, parsed, options);
-    for (let round = 0; round < 3; round += 1) {
+    // READ COMMITTED: every statement has a fresh snapshot, so an id that looked free (or occupied) at one read can change before the
+    // next. An "occupied by a different record" verdict is therefore only final after ONE full re-read of the semantic (hash) lookups:
+    // an identical governed winner committed across the boundary then converges, while an unrelated occupant (no package with this
+    // hash) is still a conflict. The re-read is taken at most once, so the loop stays bounded.
+    let occupiedRechecked = false;
+    const recheckOccupied = (): boolean => {
+      if (occupiedRechecked) return false;
+      occupiedRechecked = true;
+      return true;
+    };
+    for (let round = 0; round < 4; round += 1) {
       // 1. an existing typed package with this governed hash: reuse after validating what is stored
       const byHash = (
         await tx.query(`${artifactSelect} WHERE p.package_hash = $1`, [
@@ -535,7 +545,7 @@ export async function persistEvidencePackage(
       ).rows[0] as ArtifactRow | undefined;
       if (existing) {
         // the typed row may have been committed between the two reads (the winner writes both in one statement): re-read once more
-        if (existing.evidence_package_id !== null && round < 2) continue;
+        if (existing.evidence_package_id !== null && round < 3) continue;
         if (existing.evidence_package_id !== null)
           return {
             kind: "conflict",
@@ -572,13 +582,16 @@ export async function persistEvidencePackage(
           "SELECT 1 FROM evidence_packages WHERE evidence_package_id = $1::uuid",
           [pkg.evidence_package_id],
         );
-        if (occupied.rows.length > 0)
+        if (occupied.rows.length > 0) {
+          // possibly the identical winner completing this very artifact between the two reads: re-read before judging
+          if (recheckOccupied()) continue;
           return {
             kind: "conflict",
             code: "evidence_package_id_occupied",
             stored: null,
             detail: "the authored package id belongs to a different record",
           };
+        }
         const done = await tx.attempt(
           `INSERT INTO evidence_packages (evidence_package_id, artifact_id, package_hash) VALUES ($1::uuid, $2::uuid, $3)`,
           [pkg.evidence_package_id, existing.artifact_id, parsed.hash],
@@ -607,6 +620,11 @@ export async function persistEvidencePackage(
         "SELECT 1 FROM evidence_packages WHERE evidence_package_id = $1::uuid",
         [pkg.evidence_package_id],
       );
+      if (
+        (occupiedArtifact.rows.length > 0 || occupiedPackage.rows.length > 0) &&
+        recheckOccupied()
+      )
+        continue;
       if (occupiedArtifact.rows.length > 0 || occupiedPackage.rows.length > 0)
         return {
           kind: "conflict",

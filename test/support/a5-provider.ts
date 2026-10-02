@@ -231,8 +231,156 @@ export async function providerEnv(
       ),
     rows,
     close: async () => {
-      await Promise.all(pools.map((p) => p.end().catch(() => undefined)));
+      // bounded: a pool that cannot drain (a worker blocked on a lock) gets its backends terminated instead of hanging the suite
+      const ended = await Promise.all(
+        pools.map((p) => settledWithin(p.end(), 5000)),
+      );
+      if (ended.some((ok) => !ok))
+        await env.owner
+          .query(
+            "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = $1 AND pid <> pg_backend_pid()",
+            [env.name],
+          )
+          .catch(() => undefined);
       await env.close();
     },
   };
+}
+
+// ---- bounded cleanup ------------------------------------------------------------------------------------------------------
+/** True when `promise` settled within `ms` (the timer is always cleared). */
+async function settledWithin(
+  promise: Promise<unknown>,
+  ms: number,
+): Promise<boolean> {
+  let timer: NodeJS.Timeout | undefined;
+  try {
+    return await Promise.race([
+      promise.then(
+        () => true,
+        () => true,
+      ),
+      new Promise<boolean>((resolve) => {
+        timer = setTimeout(() => {
+          resolve(false);
+        }, ms);
+      }),
+    ]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+export interface DrainSpec {
+  owner: pg.Pool;
+  database: string;
+  /** application_name LIKE patterns of every session this scenario started (workers, children's adapters). */
+  apps: string[];
+  /** worker promises that may still be pending (e.g. blocked on a lock). */
+  promises: Promise<unknown>[];
+  pools: pg.Pool[];
+  settleMs?: number;
+  endMs?: number;
+}
+
+/**
+ * Bounded cleanup that cannot hang on a pending database worker: wait (bounded) for the workers; if any is still pending its
+ * backends are TERMINATED (so its query rejects) and it is awaited again (bounded); then every pool is ended (bounded). Returns
+ * diagnostics instead of throwing, so a caller can keep its ORIGINAL failure (see `scoped`).
+ */
+export async function drain(spec: DrainSpec): Promise<string[]> {
+  const settleMs = spec.settleMs ?? 5000;
+  const endMs = spec.endMs ?? 5000;
+  const diagnostics: string[] = [];
+  const terminate = async (): Promise<void> => {
+    try {
+      await spec.owner.query(
+        `SELECT pg_terminate_backend(pid) FROM pg_stat_activity
+          WHERE datname = $1 AND pid <> pg_backend_pid() AND application_name LIKE ANY($2::text[])`,
+        [spec.database, spec.apps],
+      );
+    } catch (error) {
+      diagnostics.push(
+        `terminate failed: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+  };
+  const all = Promise.allSettled(spec.promises);
+  if (!(await settledWithin(all, settleMs))) {
+    diagnostics.push(
+      `workers still pending after ${String(settleMs)} ms; their backends were terminated`,
+    );
+    await terminate();
+    if (!(await settledWithin(all, settleMs)))
+      diagnostics.push("workers still pending after backend termination");
+  }
+  // A pool can fail to drain even when no tracked promise is pending (a checked-out client, a late query): end it ONCE, and if it
+  // misses its deadline terminate the scenario's backends and wait (bounded) for the end and for the sessions to disappear.
+  const ends = spec.pools.map((pool) => pool.end());
+  let ended = await Promise.all(ends.map((e) => settledWithin(e, endMs)));
+  if (ended.some((ok) => !ok)) {
+    diagnostics.push(
+      `pool.end exceeded ${String(endMs)} ms; scoped backends were terminated`,
+    );
+    await terminate();
+    ended = await Promise.all(ends.map((e) => settledWithin(e, endMs)));
+    if (ended.some((ok) => !ok))
+      diagnostics.push(
+        `pool.end still pending ${String(endMs)} ms after termination`,
+      );
+  }
+  const deadline = Date.now() + endMs;
+  for (;;) {
+    const left = await spec.owner
+      .query(
+        `SELECT count(*)::int AS n FROM pg_stat_activity WHERE datname = $1 AND pid <> pg_backend_pid() AND application_name LIKE ANY($2::text[])`,
+        [spec.database, spec.apps],
+      )
+      .then((r) => (r.rows[0] as { n: number }).n)
+      .catch(() => -1);
+    if (left === 0) break;
+    if (Date.now() >= deadline) {
+      diagnostics.push(
+        `${String(left)} scoped backend(s) not released within ${String(endMs)} ms`,
+      );
+      break;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+  return diagnostics;
+}
+
+/** Runs `body`; ALWAYS runs the bounded `cleanup`; the body's original failure is preserved and cleanup diagnostics are appended. */
+export async function scoped(
+  body: () => Promise<void>,
+  cleanup: () => Promise<string[]>,
+): Promise<void> {
+  let failure: unknown;
+  try {
+    await body();
+  } catch (error) {
+    failure = error;
+  }
+  let diagnostics: string[];
+  try {
+    diagnostics = await cleanup();
+  } catch (error) {
+    diagnostics = [
+      `cleanup threw: ${error instanceof Error ? error.message : String(error)}`,
+    ];
+  }
+  if (failure !== undefined) {
+    if (diagnostics.length === 0)
+      throw failure instanceof Error
+        ? failure
+        : new Error(JSON.stringify(failure));
+    const original =
+      failure instanceof Error ? failure.message : JSON.stringify(failure);
+    throw new Error(
+      `${original}; cleanup diagnostics: ${diagnostics.join(" | ")}`,
+      { cause: failure },
+    );
+  }
+  if (diagnostics.length > 0)
+    throw new Error(`cleanup failed: ${diagnostics.join(" | ")}`);
 }
