@@ -25,7 +25,7 @@ const code = (fn: () => unknown): string => {
   try {
     fn();
   } catch (e) {
-    return e instanceof ProfileRejected ? e.code : String((e as Error).message);
+    return e instanceof ProfileRejected ? e.code : (e as Error).message;
   }
   return "accepted";
 };
@@ -108,7 +108,7 @@ describe("base request labels (related path)", () => {
     clone(
       must(file.actual_blocks.find((b) => b.render_block_sequence === n))
         .input_record,
-    ) as Obj;
+    );
 
   it("equivalent spellings of an application anchor and a participant label hash identically", () => {
     const rename = (turnSpelling: string, appSpelling: string): string => {
@@ -152,7 +152,7 @@ describe("base request labels (related path)", () => {
     expect(code(() => requestBaseHash(r))).toBe("duplicate_turn_anchor");
     const v = block(3);
     const voices = v.voice_versions as Record<string, Obj>;
-    const [name, entry] = Object.entries(voices)[0] as [string, Obj];
+    const [name, entry] = must(Object.entries(voices)[0]);
     voices[`${name}${NFC}`] = clone(entry);
     voices[`${name}${NFD}`] = clone(entry);
     expect(code(() => requestBaseHash(v))).toBe("duplicate_voice_participant");
