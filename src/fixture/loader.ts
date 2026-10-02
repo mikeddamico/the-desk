@@ -6,6 +6,10 @@ import { fileURLToPath } from "node:url";
 
 import { z } from "zod";
 
+import {
+  parseLexicalJson,
+  type LexicalValue,
+} from "../knowledge/lexical-json.js";
 import { openFixturePack, type Pack } from "./pack.js";
 import { parseFoundationRows, type FixtureRows } from "./rows.js";
 
@@ -22,6 +26,14 @@ export function loadFixtureJson(member: string): unknown {
 
 export function loadFixtureBytes(member: string): Buffer {
   return fixturePack().member(member);
+}
+
+/**
+ * The 58 offline claim-event vectors read from the pinned member's RAW BYTES with the lexical reader, so the one lexical float
+ * (CE-G05 step 2, cursor `event_sequence: 1.0`) survives as a `LexicalNumber` instead of collapsing to 1 under `JSON.parse`.
+ */
+export function loadClaimEventConformance(): LexicalValue {
+  return parseLexicalJson(loadFixtureBytes("claim_event_conformance.json"));
 }
 
 export function loadFoundationRows(): FixtureRows {

@@ -26,7 +26,6 @@ import { canonicalJson } from "../identity/canonical-json.js";
 import { evidenceBodyHash, rawBytesHash } from "../identity/domains.js";
 import {
   claimContentHash,
-  claimFrozenStateHash,
   derivationOutputHash,
   fixtureSupportObjectHash,
   supportHashFor,
@@ -51,6 +50,12 @@ import {
   verifyGateResults,
   verifyRenderRequests,
 } from "./derive.js";
+import {
+  ClaimStateError,
+  frozenStateHash,
+  reduceClaimState,
+} from "../knowledge/claim-state.js";
+import { verifyFrozenEntry } from "../knowledge/state-cursor.js";
 import type { Pack } from "./pack.js";
 import type { Row, Tables } from "./rows.js";
 
@@ -75,7 +80,7 @@ function expectEqual(
     throw new FixtureVerificationError(code, detail);
 }
 function asVerificationError(error: unknown): unknown {
-  return error instanceof DerivationError
+  return error instanceof DerivationError || error instanceof ClaimStateError
     ? new FixtureVerificationError(error.code, error.message)
     : error;
 }
@@ -248,14 +253,25 @@ export function verifyRows(
       c.content_hash,
       str(c.claim_id),
     );
-    claimState.set(
-      str(c.claim_id),
-      claimFrozenStateHash({
-        claim_content_hash: c.content_hash,
-        state: c.initial_status,
-        effective_usage_class: c.initial_usage_class,
-      }),
-    );
+    // Reduction over the PERSISTED claim events (zero in the base load) with the fixture's explicit ceiling. The fixture asserts
+    // no external usage ceiling (vector limits), so `assertable` is the stated frozen-time input, not an inferred one.
+    try {
+      const reduced = reduceClaimState(
+        {
+          claim_id: str(c.claim_id),
+          initial_status: c.initial_status,
+          initial_usage_class: c.initial_usage_class,
+        },
+        rows("claim_state_events").filter((e) => e.claim_id === c.claim_id),
+        { ceiling: "assertable" },
+      );
+      claimState.set(
+        str(c.claim_id),
+        frozenStateHash(str(c.content_hash), reduced),
+      );
+    } catch (error) {
+      throw asVerificationError(error);
+    }
   }
   for (const s of rows("claim_supports")) {
     const kind = str(s.support_kind);
@@ -464,6 +480,30 @@ export function verifyRows(
       c.frozen_state_hash,
       claimState.get(str(c.claim_id)),
     );
+    // Entry-level state: cursor, reduced/effective usage and status against the persisted prefix (frozen-time ceiling
+    // stated above; the live ceiling equals it, so a persisted later event is the only possible live difference).
+    const claimRow = must(
+      rows("claims").find((x) => x.claim_id === c.claim_id),
+      "package claim row",
+    );
+    try {
+      verifyFrozenEntry({
+        entry: c,
+        claim: {
+          claim_id: str(claimRow.claim_id),
+          content_hash: str(claimRow.content_hash),
+          initial_status: claimRow.initial_status,
+          initial_usage_class: claimRow.initial_usage_class,
+        },
+        liveEvents: rows("claim_state_events").filter(
+          (e) => e.claim_id === c.claim_id,
+        ),
+        frozenCeiling: "assertable",
+        currentCeiling: "assertable",
+      });
+    } catch (error) {
+      throw asVerificationError(error);
+    }
   }
   for (const e of manifest.evidence)
     expectEqual(

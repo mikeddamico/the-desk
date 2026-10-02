@@ -84,3 +84,15 @@ Validate real calendar dates, hours 00–23, and explicit UTC `Z`. Preserve vali
 - Not covered here: claim reduction, prefix freezing, durable retry (A5), READY authorization, cached-take acceptance,
   audio bytes (never written to the database). A concurrent runtime writer can deadlock with the loader's table locks, in
   which case the loader aborts atomically.
+
+## Claim state freeze (A3, read-only)
+
+`freezeClaims(db, claimIds, ceilings)` (`src/knowledge/claim-log.ts`) reads the requested claims and their events in a
+single statement and returns manifest-shaped frozen entries (`state_event_cursor` is `null` or
+`{claim_state_event_id, event_sequence}`). It works at any isolation level, takes no lock, writes nothing and never blocks an
+appender; appends keep requiring `READ COMMITTED` and the Migration 002 per-claim lock. A freeze is a consistent
+sequence-prefix because commit order equals sequence order per claim. `ceilings` (frozen-time external usage ceilings) is
+required for every claim: nothing is inferred. Verify a stored entry later with `verifyFrozenEntry` and a separately supplied
+current ceiling; the result lists what was verified and what could not be (historical visibility, unavailable frozen ceiling).
+Sequence allocation, event identity and retry convergence (A5) are not implemented: a retried event is rejected by the
+database, not converged.
