@@ -24,8 +24,6 @@ import {
 import { verifyAddendumBindings } from "../identity/addendum-binding.js";
 import { canonicalJson } from "../identity/canonical-json.js";
 import { evidenceBodyHash, rawBytesHash } from "../identity/domains.js";
-import { fingerprint } from "../identity/fingerprints.js";
-import { checkFixtureRequestOwnership } from "../identity/fixture-render-ownership.js";
 import {
   claimContentHash,
   claimFrozenStateHash,
@@ -45,8 +43,14 @@ import {
   promptManifestArtifactHash,
   reconcileTypedManifestFields,
 } from "../identity/prompt-manifest.js";
-import { requestBaseHash } from "../identity/request.js";
 import { showConfigVersionHash } from "../identity/show-config.js";
+import {
+  DerivationError,
+  compareShippedStages,
+  deriveStages,
+  verifyGateResults,
+  verifyRenderRequests,
+} from "./derive.js";
 import type { Pack } from "./pack.js";
 import type { Row, Tables } from "./rows.js";
 
@@ -69,6 +73,11 @@ function expectEqual(
 ): void {
   if (canonicalJson(actual) !== canonicalJson(expected))
     throw new FixtureVerificationError(code, detail);
+}
+function asVerificationError(error: unknown): unknown {
+  return error instanceof DerivationError
+    ? new FixtureVerificationError(error.code, error.message)
+    : error;
 }
 function must<T>(value: T | undefined | null, what: string): T {
   if (value === undefined || value === null)
@@ -164,15 +173,6 @@ export function verifyShippedCopies(tables: Tables, ctx: FixtureContext): void {
     );
   }
 }
-
-const stageNames = [
-  "claims_writing",
-  "performance",
-  "semantic_audit",
-  "render",
-  "assembly",
-  "ready_candidate",
-] as const;
 
 /** Verifies a row set (shipped snapshot or rows read back) against the shipped context. Throws on the first failure. */
 export function verifyRows(
@@ -582,120 +582,62 @@ export function verifyRows(
     );
   }
 
-  // ---- render: base requests per block
-  const renderBlocks = rows("render_blocks");
-  for (const block of renderBlocks) {
-    const shipped = must(
-      ctx.blocks.find((b) => b.render_block_sequence === block.sequence),
-      "block record",
-    );
-    checkFixtureRequestOwnership(shipped.input_record, ctx.scriptContext);
-    const hash = requestBaseHash(shipped.input_record);
-    expectEqual(
-      "base_request_hash_mismatch",
-      hash,
-      block.base_request_hash,
-      `rb${str(block.sequence)}`,
-    );
-    expectEqual("base_request_expected_mismatch", hash, shipped.expected_hash);
+  // ---- render requests: rebuilt from the actual render-block, speaker, turn, voice, pronunciation, intent and script rows
+  const scriptArtifact = scripts[2];
+  try {
+    verifyRenderRequests({
+      tables,
+      pass2ScriptArtifactId: str(scriptArtifact?.artifact_id),
+      pass2Turns: (scriptArtifact?.canonical_payload as Obj).turns as Obj[],
+      shippedBlocks: ctx.blocks,
+      shippedScriptContext: ctx.scriptContext,
+    });
+  } catch (error) {
+    throw asVerificationError(error);
+  }
+  for (const block of rows("render_blocks"))
     if (
       !(payload("render_manifest").render_blocks as Obj[]).some(
-        (b) => b.base_request_hash === hash,
+        (b) => b.base_request_hash === block.base_request_hash,
       )
     )
       throw new FixtureVerificationError(
         "render_manifest_block_missing",
         str(block.sequence),
       );
-  }
 
-  // ---- stage fingerprints (six) and the rows that carry them
-  const stored = new Map<string, string>();
-  for (const stage of stageNames) {
-    const gate = must(ctx.gates[stage], stage);
-    const recomputed = fingerprint(stage, gate.input_projection);
-    expectEqual(
-      "stage_fingerprint_mismatch",
-      recomputed,
-      gate.fingerprint,
-      stage,
-    );
-    stored.set(stage, recomputed);
+  // ---- six stage projections derived from rows and recomputed upstream identities; shipped copies are comparison targets
+  let derived;
+  try {
+    derived = deriveStages({
+      tables,
+      hashes: {
+        brief: hashOf("showrunner_brief"),
+        package: hashOf("evidence_package"),
+        pass2Script: str(pass2),
+        direction: hashOf("performance_direction"),
+        renderManifest: hashOf("render_manifest"),
+        assemblyRecipe: hashOf("assembly_recipe"),
+        masterAssemblyMap: hashOf("master_assembly_map"),
+      },
+      policyVersions: Object.fromEntries(
+        Object.entries(ctx.policyMap.policies as Record<string, Obj>).map(
+          ([name, entry]) => [name, str(entry.version_id)],
+        ),
+      ),
+      productionAttempt,
+      boundConfigHash: str(boundConfig.config_hash),
+    });
+    compareShippedStages(derived, ctx.gates);
+    verifyGateResults(tables, derived);
+  } catch (error) {
+    throw asVerificationError(error);
   }
-  const proj = (s: string): Obj => must(ctx.gates[s], s).input_projection;
-  expectEqual(
-    "stage_package_binding",
-    proj("claims_writing").package_hash,
-    hashOf("evidence_package"),
-  );
-  expectEqual(
-    "stage_brief_binding",
-    proj("claims_writing").brief_hash,
-    hashOf("showrunner_brief"),
-  );
-  expectEqual(
-    "stage_script_binding",
-    proj("claims_writing").script_hash,
-    pass2,
-  );
-  expectEqual(
-    "stage_direction_binding",
-    proj("performance").performance_direction_hash,
-    hashOf("performance_direction"),
-  );
-  expectEqual(
-    "stage_render_binding",
-    proj("render").render_manifest_hash,
-    hashOf("render_manifest"),
-  );
-  expectEqual(
-    "stage_audit_binding",
-    proj("render").audit_input_fingerprint,
-    stored.get("semantic_audit"),
-  );
-  expectEqual(
-    "stage_assembly_binding",
-    proj("assembly").assembly_recipe_hash,
-    hashOf("assembly_recipe"),
-  );
-  expectEqual(
-    "stage_map_binding",
-    proj("assembly").master_assembly_map_hash,
-    hashOf("master_assembly_map"),
-  );
-  expectEqual(
-    "stage_ready_assembly",
-    proj("ready_candidate").assembly_gate_fingerprint,
-    stored.get("assembly"),
-  );
-  expectEqual(
-    "stage_ready_config",
-    proj("ready_candidate").show_config_version_hash,
-    boundConfig.config_hash,
-  );
-  expectEqual(
-    "stage_ready_attempt",
-    proj("ready_candidate").attempt_id,
-    productionAttempt.attempt_id,
-  );
-  const allowed = new Set([
-    stored.get("claims_writing"),
-    stored.get("performance"),
-    stored.get("render"),
-    stored.get("assembly"),
-    stored.get("semantic_audit"),
-  ]);
-  for (const g of rows("gate_results"))
-    if (!allowed.has(str(g.input_fingerprint)))
-      throw new FixtureVerificationError(
-        "gate_result_fingerprint_unknown",
-        str(g.gate_result_id),
-      );
   for (const a of rows("audit_runs"))
     expectEqual(
       "audit_fingerprint_mismatch",
       a.input_fingerprint,
-      stored.get("semantic_audit"),
+      derived.fingerprints.semantic_audit,
     );
 
   // ---- turns per script version: anchors are unique WITHIN a script version (never globally across the 51 rows)

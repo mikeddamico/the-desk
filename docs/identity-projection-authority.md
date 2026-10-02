@@ -32,4 +32,11 @@ All other projections (canonical serializer, domains, stage fingerprints, knowle
 
 The loader reuses the A1 modules above (`scriptHash`, `showConfigVersionHash`, `verifyAddendumBindings`, `fingerprint`,
 `requestBaseHash`, `checkFixtureRequestOwnership`) both on the shipped snapshot and on rows read back from the database.
-Request specimens are verified as shipped bytes, not regenerated, and the lexical JSON `1.0` reducer case remains open.
+All six stage projections are derived from rows and recomputed upstream identities (shipped projections and fingerprints
+are comparison targets only); each gate result is checked against the stage its gate key governs, its declared
+`fingerprint_stage` and that stage's derived fingerprint. Each render block's request record is rebuilt from the
+render-block, speaker-map, turn, voice, pronunciation, intent and script rows, owned against the actual bound script, hashed
+and compared to `base_request_hash`, and the shipped record is reconciled field by field. Fields no row carries (gate-set
+label, model/adapter identities, generation settings, scene config, text-transform names, pronunciation placement
+offsets, context recipe label) are shipped-sourced. Request specimens are verified as shipped bytes, not regenerated, and
+the lexical JSON `1.0` reducer case remains open.

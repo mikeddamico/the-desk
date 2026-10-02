@@ -3,13 +3,13 @@ import { execFile } from "node:child_process";
 import { copyFile, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { setTimeout as sleep } from "node:timers/promises";
 import { promisify } from "node:util";
 
-import type pg from "pg";
+import pg from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { migrate } from "../../src/db/migrations.js";
+import { createMigrationPool } from "../../src/db/pool.js";
 import { allTables, families } from "../../src/fixture/families.js";
 import { FIXTURE_V046_PINS } from "../../src/fixture/pins.js";
 import {
@@ -17,7 +17,13 @@ import {
   FixtureTargetNotEmptyError,
   persistFixture,
 } from "../../src/fixture/persist.js";
-import { FixtureVerificationError } from "../../src/fixture/verify.js";
+import { openFixturePack } from "../../src/fixture/pack.js";
+import type { Row, Tables } from "../../src/fixture/rows.js";
+import { VerifiedFixture } from "../../src/fixture/snapshot.js";
+import {
+  FixtureVerificationError,
+  verifyRows,
+} from "../../src/fixture/verify.js";
 import {
   scriptHash,
   showrunnerBriefHash,
@@ -25,6 +31,7 @@ import {
 } from "../../src/identity/artifacts.js";
 import { showConfigVersionHash } from "../../src/identity/show-config.js";
 import { TestCluster, type DbEnv } from "../support/db-env.js";
+import { backendPid, waitForBlocked, within } from "../support/pg-wait.js";
 import {
   consistentPack,
   editRows,
@@ -319,76 +326,215 @@ suite("Fixture v0.4.6 load (A2)", () => {
     expect(total(await counts(partial.owner))).toBe(0);
   }, 120000);
 
-  it("concurrent loads: exactly one commits, the other fails as non-empty, 398 rows in total", async () => {
+  it("verification over rows read back from PostgreSQL rejects a committed row-level tamper that the shipped snapshot never saw", async () => {
     const env = await fresh();
-    const results = await Promise.allSettled([
-      persistFixture(env.migrator),
-      persistFixture(env.migrator),
-    ]);
-    expect(results.filter((r) => r.status === "fulfilled")).toHaveLength(1);
-    const failed = results.find((r) => r.status === "rejected");
-    expect(failed?.status).toBe("rejected");
-    expect(
-      failed?.status === "rejected" ? failed.reason : undefined,
-    ).toBeInstanceOf(FixtureTargetNotEmptyError);
-    expect(total(await counts(env.owner))).toBe(398);
-  }, 180000);
-
-  it("an unrelated writer cannot race the emptiness check: the loader waits for it, then sees its row (or proceeds if it rolls back)", async () => {
-    const env = await fresh();
-    const writer = await env.migrator.connect();
-    await writer.query("BEGIN");
-    await writer.query(
-      "INSERT INTO accounts(display_name, actor_kind) VALUES ('racing writer', 'service')",
+    await persistFixture(env.migrator);
+    const fixture = VerifiedFixture.fromPack(openFixturePack());
+    const readAll = async (): Promise<Tables> => {
+      const out: Record<string, Row[]> = {};
+      for (const family of families)
+        out[family.table] = (
+          await env.owner.query<Row>(
+            `SELECT ${family.columns.map((c) => `"${c}"`).join(", ")} FROM "${family.table}"`,
+          )
+        ).rows.map((row) =>
+          Object.fromEntries(
+            Object.entries(row).map(([k, v]) => [
+              k,
+              v instanceof Date ? v.toISOString().replace(/\.000Z$/, "Z") : v,
+            ]),
+          ),
+        );
+      return out;
+    };
+    // untouched persisted rows pass the same verification the loader runs
+    verifyRows(await readAll(), fixture.context, fixture.historical);
+    // tamper a render-affecting voice field directly in the database (triggers bypassed by the superuser session only)
+    const tamper = await env.owner.connect();
+    try {
+      await tamper.query("SET session_replication_role = replica");
+      await tamper.query(
+        `UPDATE voice_profile_versions SET render_fields = jsonb_set(render_fields, '{provider_voice_id}', '"fixture_voice_other"')
+          WHERE voice_profile_version_id = (SELECT voice_profile_version_id FROM voice_profile_versions ORDER BY voice_profile_version_id LIMIT 1)`,
+      );
+    } finally {
+      tamper.release();
+    }
+    const tampered = await readAll();
+    let caught: unknown;
+    try {
+      verifyRows(tampered, fixture.context, fixture.historical);
+    } catch (error) {
+      caught = error;
+    }
+    expect(caught).toBeInstanceOf(FixtureVerificationError);
+    expect((caught as FixtureVerificationError).code).toBe(
+      "base_request_hash_mismatch",
     );
-    let settled = false;
-    const load = persistFixture(env.migrator).then(
-      (v) => {
-        settled = true;
-        return v;
-      },
-      (e: unknown) => {
-        settled = true;
-        throw e;
-      },
-    );
-    await sleep(1500);
-    expect(settled).toBe(false); // blocked on the table locks while the writer's transaction is open
-    await writer.query("COMMIT");
-    writer.release();
-    expect(await rejects(load)).toBeInstanceOf(FixtureTargetNotEmptyError);
-    expect(total(await counts(env.owner))).toBe(1);
-
-    const env2 = await fresh();
-    const writer2 = await env2.migrator.connect();
-    await writer2.query("BEGIN");
-    await writer2.query(
-      "INSERT INTO accounts(display_name, actor_kind) VALUES ('rolled back', 'service')",
-    );
-    const load2 = persistFixture(env2.migrator);
-    await sleep(1500);
-    await writer2.query("ROLLBACK");
-    writer2.release();
-    await load2;
-    expect(total(await counts(env2.owner))).toBe(398);
   }, 240000);
 
-  it("the loader coordinates with migrations through the existing migration advisory lock", async () => {
+  // Concurrency proofs use INDEPENDENT sessions: every actor has its own pool and backend, so no actor ever waits for a
+  // client-side connection. createMigrationPool (max 1, unchanged) is instantiated once per loader. A lock wait is accepted only
+  // when PostgreSQL reports it (pg_locks / pg_stat_activity / pg_blocking_pids).
+  const loaderPool = (env: DbEnv): pg.Pool =>
+    createMigrationPool({ MIGRATION_DATABASE_URL: env.migratorUrl });
+  const MIGRATION_LOCK = { classid: 182736451, objid: 1 };
+
+  it("concurrent loads: both queue in PostgreSQL behind the migration lock, then exactly one commits", async () => {
     const env = await fresh();
-    const holder = await env.migrator.connect();
-    await holder.query("BEGIN");
-    await holder.query("SELECT pg_advisory_xact_lock(182736451, 1)");
-    let settled = false;
-    const load = persistFixture(env.migrator).then(() => {
-      settled = true;
+    const holder = loaderPool(env);
+    const loaderA = loaderPool(env);
+    const loaderB = loaderPool(env);
+    const session = await holder.connect();
+    try {
+      await session.query("BEGIN");
+      await session.query("SELECT pg_advisory_xact_lock(182736451, 1)");
+      const holderPid = await backendPid(session);
+      const a = persistFixture(loaderA);
+      const b = persistFixture(loaderB);
+      const blocked = await waitForBlocked(
+        env.owner,
+        env.name,
+        (found) =>
+          new Set(
+            found
+              .filter(
+                (w) =>
+                  w.locktype === "advisory" &&
+                  w.blockers.includes(holderPid) &&
+                  w.pid !== holderPid,
+              )
+              .map((w) => w.pid),
+          ).size === 2,
+      );
+      const pids = blocked.map((w) => w.pid);
+      expect(new Set([holderPid, ...pids]).size).toBe(3); // three distinct backends
+      for (const w of blocked) {
+        expect(w.wait_event_type).toBe("Lock");
+        expect(w.classid).toBe(MIGRATION_LOCK.classid);
+        expect(w.objid).toBe(MIGRATION_LOCK.objid);
+      }
+      expect(total(await counts(env.owner))).toBe(0);
+      await session.query("COMMIT");
+      const settled = await within(
+        Promise.allSettled([a, b]),
+        120000,
+        "concurrent loads",
+      );
+      expect(settled.filter((r) => r.status === "fulfilled")).toHaveLength(1);
+      const failed = settled.find((r) => r.status === "rejected");
+      expect(
+        failed?.status === "rejected" ? failed.reason : undefined,
+      ).toBeInstanceOf(FixtureTargetNotEmptyError);
+      expect(total(await counts(env.owner))).toBe(398);
+    } finally {
+      await session.query("ROLLBACK").catch(() => undefined);
+      session.release();
+      await Promise.all([holder.end(), loaderA.end(), loaderB.end()]);
+    }
+  }, 240000);
+
+  it("a COMMITTED unrelated write blocks the loader inside PostgreSQL on the table locks and is then rejected as non-empty", async () => {
+    const env = await fresh();
+    const loader = loaderPool(env);
+    const writerPool = new pg.Pool({
+      connectionString: env.migratorUrl,
+      options: "-c role=desk_migrator",
+      max: 1,
     });
-    await sleep(1500);
-    expect(settled).toBe(false);
-    await holder.query("COMMIT");
-    holder.release();
-    await load;
-    expect(total(await counts(env.owner))).toBe(398);
-  }, 120000);
+    const writer = await writerPool.connect();
+    try {
+      await writer.query("BEGIN");
+      await writer.query(
+        "INSERT INTO accounts(display_name, actor_kind) VALUES ('racing writer', 'service')",
+      );
+      const writerPid = await backendPid(writer);
+      const load = persistFixture(loader);
+      const [blocked] = await waitForBlocked(env.owner, env.name, (found) =>
+        found.some(
+          (w) =>
+            w.relation === "accounts" &&
+            w.mode === "ShareRowExclusiveLock" &&
+            w.blockers.includes(writerPid),
+        ),
+      );
+      expect(blocked?.pid).not.toBe(writerPid);
+      expect(blocked?.wait_event_type).toBe("Lock");
+      expect(total(await counts(env.owner))).toBe(0); // the writer has not committed; nothing is visible, nothing loaded
+      await writer.query("COMMIT");
+      const error = await within(rejects(load), 60000, "blocked loader");
+      expect(error).toBeInstanceOf(FixtureTargetNotEmptyError);
+      expect(total(await counts(env.owner))).toBe(1); // only the committed unrelated row
+    } finally {
+      await writer.query("ROLLBACK").catch(() => undefined);
+      writer.release();
+      await Promise.all([writerPool.end(), loader.end()]);
+    }
+  }, 240000);
+
+  it("a ROLLED-BACK unrelated write blocks the loader inside PostgreSQL and then lets the load proceed", async () => {
+    const env = await fresh();
+    const loader = loaderPool(env);
+    const writerPool = new pg.Pool({
+      connectionString: env.migratorUrl,
+      options: "-c role=desk_migrator",
+      max: 1,
+    });
+    const writer = await writerPool.connect();
+    try {
+      await writer.query("BEGIN");
+      await writer.query(
+        "INSERT INTO accounts(display_name, actor_kind) VALUES ('rolled back', 'service')",
+      );
+      const writerPid = await backendPid(writer);
+      const load = persistFixture(loader);
+      await waitForBlocked(env.owner, env.name, (found) =>
+        found.some(
+          (w) =>
+            w.relation === "accounts" &&
+            w.blockers.includes(writerPid) &&
+            w.pid !== writerPid,
+        ),
+      );
+      await writer.query("ROLLBACK");
+      const result = await within(load, 120000, "unblocked loader");
+      expect(result.rows).toBe(398);
+      expect(total(await counts(env.owner))).toBe(398);
+    } finally {
+      await writer.query("ROLLBACK").catch(() => undefined);
+      writer.release();
+      await Promise.all([writerPool.end(), loader.end()]);
+    }
+  }, 240000);
+
+  it("the loader blocks in PostgreSQL on the existing migration advisory lock held by another session, then proceeds", async () => {
+    const env = await fresh();
+    const loader = loaderPool(env);
+    const holderPool = loaderPool(env);
+    const holder = await holderPool.connect();
+    try {
+      await holder.query("BEGIN");
+      await holder.query("SELECT pg_advisory_xact_lock(182736451, 1)");
+      const holderPid = await backendPid(holder);
+      const load = persistFixture(loader);
+      const [blocked] = await waitForBlocked(env.owner, env.name, (found) =>
+        found.some(
+          (w) => w.locktype === "advisory" && w.blockers.includes(holderPid),
+        ),
+      );
+      expect(blocked?.pid).not.toBe(holderPid);
+      expect(blocked?.application_name).toBe("the-desk-migrator");
+      expect(blocked?.classid).toBe(MIGRATION_LOCK.classid);
+      expect(blocked?.objid).toBe(MIGRATION_LOCK.objid);
+      expect(total(await counts(env.owner))).toBe(0);
+      await holder.query("COMMIT");
+      expect((await within(load, 120000, "unblocked loader")).rows).toBe(398);
+    } finally {
+      await holder.query("ROLLBACK").catch(() => undefined);
+      holder.release();
+      await Promise.all([holderPool.end(), loader.end()]);
+    }
+  }, 240000);
 
   it("the dev/test CLI loads once, refuses a second run and refuses staging/production without writing", async () => {
     const env = await fresh();
