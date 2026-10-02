@@ -883,8 +883,10 @@ describe("documented incompleteness of the chain proof (not claimed as independe
 
 describe("predecessor stability: unchanged contracts keep their identities", () => {
   it("the existing stage-fingerprint function still reproduces the v0.4.3 vectors, and v0.4.3 constants are not promoted to v0.4.6", async () => {
-    const { loadFingerprintVectors } = await import("../src/fixture/loader.js");
-    const old = loadFingerprintVectors().fingerprints;
+    const { loadV043FingerprintVectors } = await import(
+      "./support/fixture-v043.js"
+    );
+    const old = loadV043FingerprintVectors().fingerprints;
     const current = fixtureJson("gate_fingerprint_inputs.json") as Record<
       string,
       { fingerprint: string }

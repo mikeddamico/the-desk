@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   assertDestructiveOperationAllowed,
+  assertFixtureLoadAllowed,
   loadConfig,
   loadMigrationConfig,
 } from "../src/config.js";
@@ -40,6 +41,22 @@ describe("environment and security foundation", () => {
     expect(() => {
       assertDestructiveOperationAllowed(production, "destroy-production");
     }).toThrow(/denied/);
+  });
+
+  it("restricts the fixture load to development and test", () => {
+    expect(() => {
+      assertFixtureLoadAllowed(loadConfig(base));
+    }).not.toThrow();
+    for (const DESK_ENV of ["staging", "production"] as const)
+      expect(() => {
+        assertFixtureLoadAllowed(
+          loadConfig({
+            ...base,
+            DESK_ENV,
+            DEPLOYED_COMMIT: "deadbeef".repeat(5),
+          }),
+        );
+      }).toThrow(/restricted/);
   });
 
   it("redacts protected logging fields", async () => {

@@ -48,6 +48,16 @@ export function loadConfig(
   return schema.parse(environment);
 }
 
+/** The synthetic fixture load is a development/test tool; staging use is a Completion B decision. */
+export function assertFixtureLoadAllowed(
+  config: Pick<Config, "DESK_ENV">,
+): void {
+  if (!["development", "test"].includes(config.DESK_ENV))
+    throw new Error(
+      "Fixture loading is restricted to DESK_ENV development or test",
+    );
+}
+
 export function assertDestructiveOperationAllowed(
   config: Config,
   confirmation: string | undefined,

@@ -67,3 +67,20 @@ Before a destructive staging migration, take a provider snapshot, restore into a
 ## Semantic timestamps
 
 Validate real calendar dates, hours 00–23, and explicit UTC `Z`. Preserve valid RFC 3339 fractional digits exactly as supplied. The active lock does not define fractional precision or trailing-zero normalization. Per repair-task adjudication, no trim/pad rule is introduced. Fractional canonicalization requires later spec adjudication before semantically equivalent fractional representations become hash-identical.
+
+## Frozen Fixture v0.4.6 load (A2, development/test only)
+
+`npm run db:load-fixture` loads the 398 foundation rows of the pinned v0.4.6 pack through the migration pool (role
+`desk_migrator`). It refuses unless `DESK_ENV` is `development` or `test`; it is not part of any deployment or image.
+
+- The pack is verified before any write: pinned ZIP and PACK_MEMBERS hashes, exact member set, safe names, bounded reads,
+  per-member hashes. Archival members are hashed only, never parsed or inserted.
+- The target must be empty. One transaction takes the migration advisory lock, checks the migration ledger on the same
+  connection, locks all 46 tables (`SHARE ROW EXCLUSIVE`, alphabetical), checks emptiness, inserts in a row-level
+  foreign-key order, reads back every persisted column and re-runs the A1 hash/binding checks over the persisted rows.
+  Any failure rolls everything back; a repeated load fails with `FixtureTargetNotEmptyError` and changes nothing.
+- jsonb is compared semantically (canonical JSON), not byte-for-byte. The historical direction artifact keeps its null
+  disposition.
+- Not covered here: claim reduction, prefix freezing, durable retry (A5), READY authorization, cached-take acceptance,
+  audio bytes (never written to the database). A concurrent runtime writer can deadlock with the loader's table locks, in
+  which case the loader aborts atomically.

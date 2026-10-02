@@ -4,11 +4,9 @@ import { fingerprint, type StageName } from "../src/identity/fingerprints.js";
 
 describe("exact stage projections", () => {
   it("rejects missing, extra and another stage's fields for all six locked projections", () => {
-    for (const [stage, vector] of Object.entries(
-      loadFingerprintVectors().fingerprints,
-    )) {
+    for (const [stage, vector] of Object.entries(loadFingerprintVectors())) {
       const input = vector.input_projection;
-      expect(fingerprint(stage as StageName, input)).toBe(vector.expected_hash);
+      expect(fingerprint(stage as StageName, input)).toBe(vector.fingerprint);
       expect(() =>
         fingerprint(stage as StageName, {
           ...input,
@@ -26,7 +24,7 @@ describe("exact stage projections", () => {
     }
   });
   it("validates the exact nested assembly lineage and hash types", () => {
-    const vector = loadFingerprintVectors().fingerprints.assembly;
+    const vector = loadFingerprintVectors().assembly;
     if (!vector) throw new Error("Missing locked assembly vector");
     const input = vector.input_projection;
     const lineage = input.selected_take_lineage;

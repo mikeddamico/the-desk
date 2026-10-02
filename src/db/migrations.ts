@@ -81,8 +81,12 @@ export async function migrate(pool: Pool, directory?: string): Promise<void> {
   }
 }
 
-export async function verifyMigrationIntegrity(
-  pool: Pool,
+/**
+ * Ledger check on an existing client, inside the CALLER's transaction and advisory lock (the migration lock
+ * `pg_advisory_xact_lock(182736451, 1)` must already be held). Throws exactly what {@link verifyMigrationIntegrity} throws.
+ */
+export async function assertMigrationLedgerCurrent(
+  client: PoolClient,
   directory?: string,
 ): Promise<void> {
   const expected = new Map(
@@ -91,18 +95,25 @@ export async function verifyMigrationIntegrity(
       migration.checksum,
     ]),
   );
+  const applied = await appliedMigrations(client);
+  for (const row of applied.rows) {
+    if (expected.get(row.migration_name) !== row.checksum)
+      throw new Error(`Migration integrity failure: ${row.migration_name}`);
+    expected.delete(row.migration_name);
+  }
+  if (expected.size > 0)
+    throw new Error(`Pending migrations: ${[...expected.keys()].join(", ")}`);
+}
+
+export async function verifyMigrationIntegrity(
+  pool: Pool,
+  directory?: string,
+): Promise<void> {
   const client = await pool.connect();
   try {
     await client.query("BEGIN");
     await client.query("SELECT pg_advisory_xact_lock(182736451, 1)");
-    const applied = await appliedMigrations(client);
-    for (const row of applied.rows) {
-      if (expected.get(row.migration_name) !== row.checksum)
-        throw new Error(`Migration integrity failure: ${row.migration_name}`);
-      expected.delete(row.migration_name);
-    }
-    if (expected.size > 0)
-      throw new Error(`Pending migrations: ${[...expected.keys()].join(", ")}`);
+    await assertMigrationLedgerCurrent(client, directory);
     await client.query("COMMIT");
   } catch (error) {
     await client.query("ROLLBACK");
