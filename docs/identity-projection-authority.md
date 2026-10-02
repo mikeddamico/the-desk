@@ -23,8 +23,8 @@ All other projections (canonical serializer, domains, stage fingerprints, knowle
 ## Proof limits (not claimed as solved)
 
 1. **Raw request specimens.** The rendered-request specimen bytes are shipped fixture-template data. TypeScript reads them as exact bytes, checks that each embeds the recomputed upstream hashes and that its raw hash is the manifest's `rendered_request_hash`, but does not regenerate them. The Python validator rebuilds them; that is not TypeScript coverage and is not claimed.
-2. **Lexical JSON `1.0`.** `JSON.parse` cannot distinguish `1.0` from `1`; the `sequence_not_integer` reducer vector needs a lexical-aware loader and reducer, which are outside A1 (Completion A).
-3. **Not part of A1:** the production fixture loader (it still targets the v0.4.3 ZIP), the claim reducer, the workflow runner, persistence of any of these hashes, A5 durable event-retry convergence, READY/operator authorization and cross-manifest cached-take acceptance.
+2. **Lexical JSON `1.0`.** `JSON.parse` cannot distinguish `1.0` from `1`. The one lexical float in the shipped vectors is vector CE-G05 step 2 (a cursor `event_sequence` of `1.0`, expected `cursor_sequence_type`; earlier text called it the `sequence_not_integer` vector, which is the append-side vector using `true` and `"1"`). A3 reads that source with a bounded lexical reader (see "A3 claim reducer and prefix freeze").
+3. **Not part of A1:** the production fixture loader (delivered by A2), the claim reducer (delivered by A3), the workflow runner, persistence of any of these hashes, A5 durable event-retry convergence, READY/operator authorization and cross-manifest cached-take acceptance.
 4. **Stage fingerprints keep their closed key sets**; the addendum is bound through model provenance, not through gate fingerprints. A future addendum change needs a fresh invalidation/version review (the dependency-chain tests show which identities move).
 5. Fixture-scoped Layer B helpers (scope, context, correction, historical-null) and the ownership checks apply only to Fixture v0.4.6 content and are not product policy. The historical direction artifact is verified separately and the archived fixtures are never co-loaded.
 
@@ -40,3 +40,48 @@ and compared to `base_request_hash`, and the shipped record is reconciled field 
 label, model/adapter identities, generation settings, scene config, text-transform names, pronunciation placement
 offsets, context recipe label) are shipped-sourced. Request specimens are verified as shipped bytes, not regenerated, and
 the lexical JSON `1.0` reducer case remains open.
+
+## A3 claim reducer and prefix freeze
+
+Owners: Claims v0.1.2 section 4.4 (statuses, reducer table, order, append invariant), Evidence Package v0.2.2 section 9.3
+(prefix freeze, cursor), Hashing v0.1.5 section 12.1 (the three-field `claim-frozen-state-v1`, reused unchanged from A1),
+Fixture v0.4.6 `claim_event_conformance.json` (58 offline vectors).
+
+- **Order and validation.** `src/knowledge/claim-state.ts` reduces by `event_sequence` only (never UUID, array order or
+  `occurred_at`), validates the initial fields, every event row, claim locality and the accepted-log shape (first sequence 1,
+  unique, gaps above the maximum allowed). A through-sequence reduction never replaces cursor validation.
+- **Cursor and freeze.** `src/knowledge/state-cursor.ts` implements the cursor check with the shipped validator's error
+  precedence and `freezeClaimPrefix`. `src/knowledge/claim-log.ts` reads claims AND events in ONE SQL statement (one
+  snapshot; zero-event claims preserved; missing claims rejected; stored content hashes recomputed) and freezes all
+  requested claims from it. Read-only: freeze creates no event and takes no lock.
+- **Ceilings are required inputs.** A frozen entry is verified against an independently supplied frozen-time ceiling (or an
+  explicit "unavailable", reported as a verification limit); the live reduction uses a separately supplied current ceiling. A
+  stricter current permission is a material live difference and never invalidates a historically consistent entry. The
+  ceiling is never inferred from an entry. No status, support, rights, exposure or sensitivity mapping and no permissions
+  engine exists (authority gap: no active owner defines one).
+- **Lexical boundary.** `src/knowledge/lexical-json.ts` reads RAW source: integer lexemes stay numbers; any other lexeme
+  (`1.0`, `1e0`, fractions) and unsafe integers become frozen `LexicalNumber` markers (never rounded into acceptance;
+  rejected by the canonical serializer, so they cannot be hashed). A value already produced by `JSON.parse` or node-pg has lost
+  its lexeme: such a value is validated as an object (type and range), not as source. PostgreSQL `jsonb` keeps `1.0` in
+  `::text` but normalizes `1e0` to `1`, so an exponent form is distinguishable only in file/byte sources. No global pg parser
+  override is installed.
+- **Payload number boundary.** `event_payload` numbers follow the governed JSON policy of the A1 serializer (semantic numbers are safe
+  integers; exact decimals are strings). At the payload boundary, before the payload is copied, an integer-valued lexical marker
+  (`1e0`, `1.0`, `-1E1`) becomes the number it denotes (identical to `JSON.parse` and jsonb for the same source), so
+  raw-source and native-source events are equal and hash alike; any other number (`1.5`, an unsafe integer, `-0`, non-finite)
+  and any non-JSON value is rejected as `invalid_payload`. A marker is never turned into an ordinary object. Sequence and cursor
+  values are not normalized and stay strict. The A1 serializer is unchanged.
+- **Runtime row validation.** `checkCursor` validates `accepted`, `visible` and `prefix` rows at runtime (TypeScript types are not
+  guarantees): exact seven-key row and claim locality, then a strict positive integer sequence, with the shipped validator's
+  `visible_*`/`prefix_*` codes and order (`accepted_*` is added for caller-supplied accepted rows), then a full parse
+  (`*_row_invalid`).
+- **UUIDs.** Event, claim, actor and cursor ids must be literal canonical UUIDs (lowercase, hyphenated 8-4-4-4-12). No version or
+  variant restriction is imposed: no active requirement states one (the Trace's "canonical v4" remark describes Fixture content and the
+  predecessor validator). The fixture loader's own v4 row check is unchanged.
+- **Tamper detection is bounded.** The frozen-state hash excludes actor, time, reason and intermediate history. Cursor
+  mismatches and changes to the resulting state or usage are detected; a reason-only edit, or an edit that preserves the
+  reduction, is not (characterized in `test/integration/claim-freeze.test.ts`). Whether every event visible at the freeze
+  instant was included cannot be proved after the fact from a cursor alone.
+- **Not delivered (A5, unresolved):** sequence allocation, durable authored event identity and retry convergence. The offline
+  vectors model retry identity but the database rejects retried identities and never converges
+  (characterized, not solved). Package assembly/persistence, READY authorization and cached-take acceptance are also out of scope.
