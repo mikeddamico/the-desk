@@ -85,3 +85,55 @@ Fixture v0.4.6 `claim_event_conformance.json` (58 offline vectors).
 - **Not delivered (A5, unresolved):** sequence allocation, durable authored event identity and retry convergence. The offline
   vectors model retry identity but the database rejects retried identities and never converges
   (characterized, not solved). Package assembly/persistence, READY authorization and cached-take acceptance are also out of scope.
+
+## A4 database read-back proof
+
+Grounded in Handoff v0.5.5 Done-when 6-8, Hashing v0.1.5 section 14.1 (35+1 artifact registry, every row needs a resolvable
+consumer) and the Fixture's `persistence_expectations.json` (deferred database proof: FK / privilege / immutable-trigger execution).
+A2 already compares every persisted column to the shipped row and verifies the persisted rows; A4 adds row-derived checks (so
+the SAME code proves the shipped snapshot and rows read back), an independent post-commit reader and database-behavior tests.
+
+- **Row checks (`ledger.ts`, `assembly.ts`, `bindings.ts`, `obligations.ts`).** Provider ledger (15 calls / 15 events, one
+  succeeded terminal event, cost text exactly `0.0000` USD, generated seconds as the exact decimal of the take frames, take/call/block
+  request binding, rb06 reroll chain and causal timestamps), request-to-WAV mapping against the rows (the shipped mapping is a
+  comparison target), assembly recipe/map/frame relationships and audio metadata, package support/evidence/rights snapshot
+  (a package may only RESTRICT its rights version), artifact registry and governed consumers (kind-checked; includes the
+  `revalidation_result` snapshot edge), script claim/evidence use rows against the script payload (spans, frozen state hash,
+  documented use-mode restrictions, quotation/paraphrase permission), version/brief/direction/intent/manifest rows against their
+  payloads, and typed obligations against the declared records. **Fixture-scoped** facts (counts, `0.0000`, the rb06 chain,
+  causal timestamps, the 44-byte canonical WAV header) are labeled in the modules; none is product policy.
+- **Declared obligation records.** `provenance/OBLIGATION_RECONCILIATION.json` records v0.4.5-era values; v0.4.6 supersedes some
+  only through `provenance/v0.4.6/IDENTITY_TRANSITION.json`. A persisted value must equal the declared one or the value the
+  transition inventory maps it to. Formats are field-specific (hex64, `v1:` tagged, `fixture_stub:op:hex`, `v1:hex:take`; a TTS
+  `request_fingerprint` is `v1:`-tagged, a model one is bare hex). Nulls are allowed only at declared exact locations (never by
+  leaf name); the historical direction keeps its exact row/path disposition. FORMAT, declared VALUE and independent RECOMPUTATION
+  are distinct: nothing in `obligations.ts` recomputes a hash.
+- **Exact numerics.** `numeric` compares as exact decimal text and `bigint` as exact integer digits (never `Number`); a bigint
+  reaches the verifier as a number only when it is an exact safe integer. The A1 serializer is unchanged.
+- **Post-commit reader.** `readFixtureRows` is the single reader (used inside A2's load transaction without nesting).
+  `verifyPersistedFixture(pool)` pins ONE runtime-role connection and owns a REPEATABLE READ READ ONLY transaction (always
+  ended and released); `verifyPersistedFixtureOnSnapshot(client)` requires an already-open consistent snapshot and never ends it. The
+  reader takes only ACCESS SHARE locks. It verifies the LOADED BASE state: claim events appended after the load change the reduced
+  claim state and are reported by the claim comparison (use the A3 freeze verifier for live differences).
+- **Limits.** Gate RE-EXECUTION (GA-1) stays in the later workflow tranche; audio bytes are not in the database (only hashes and frame
+  metadata are verified here); request specimens are shipped bytes, not regenerated; immutable-relation UPDATE/DELETE trigger execution is
+  demonstrated only on relations that hold a loaded row (the empty ones are checked in the catalog only); the claim-use
+  mode rules enforce only what Claims Policy v0.1.2 states (section 11 rule 1: a silent claim is linked with `relied_on_silent` only; section 25: a
+  `hedged_only` claim cannot be `asserted`) and nothing is inferred beyond it, so this is not an exhaustive permission engine (authority gap
+  GA-5: no active text enumerates the remaining pairs, e.g. a non-spoken `relied_on_silent` link on an assertable claim is not forbidden; hedge and
+  attribution wording, rights and exposure are not row-checkable); A5 is untouched.
+
+### A4 repair notes
+
+- **Transaction-state enforcement.** `verifyPersistedFixtureOnSnapshot` proves an explicit open transaction with a `SAVEPOINT` /
+  `RELEASE SAVEPOINT` probe: PostgreSQL raises `25P01` outside a transaction block (session defaults such as
+  `default_transaction_isolation` / `default_transaction_read_only` cannot fake one) and `25P02` in an aborted block; a released savepoint
+  leaves the caller's transaction, isolation level and snapshot untouched and never begins, commits or rolls back. The earlier
+  `transaction_timestamp()` comparison could not distinguish statements inside one millisecond.
+- **Evidence uses and the frozen package.** Each evidence use must resolve exactly one frozen `manifest.evidence` entry carrying the
+  unit's rights version, and quotation/paraphrase must be allowed by BOTH that frozen entry and the governing rights ceiling; a unit that merely
+  also supports a silent claim is NOT restricted: no active text clearly forbids an independent, permitted proposition from such a unit, so
+  claim-specific evidence linkage and semantic-leakage validation belong to the later owning checks (Claims section 22 gates, semantic audit), and
+  structural acceptance here does not prove the absence of leakage. Package membership is unique and
+  exact (claims and evidence) against the durable rows. These are semantic-helper checks; an edited stored package also changes its
+  hashed manifest and is caught by the artifact hash in the full pipeline (a separate layer).

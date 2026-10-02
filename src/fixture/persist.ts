@@ -50,22 +50,33 @@ const values = (family: Family, row: Row): unknown[] =>
       : row[c],
   );
 
+/** A pg Pool, PoolClient or Client. Readers below issue plain SELECTs only (ACCESS SHARE; they never block a writer). */
+export interface Queryable {
+  query(
+    text: string,
+    values?: unknown[],
+  ): Promise<{ rows: Row[]; rowCount: number | null }>;
+}
+
 /** Loads column types once so persisted values can be compared to fixture values by type, not by text. */
-async function columnTypes(client: PoolClient): Promise<Map<string, string>> {
-  const result = await client.query<{
-    table_name: string;
-    column_name: string;
-    data_type: string;
-  }>(
+export async function columnTypes(db: Queryable): Promise<Map<string, string>> {
+  const result = await db.query(
     "SELECT table_name, column_name, data_type FROM information_schema.columns WHERE table_schema = 'public'",
   );
   return new Map(
-    result.rows.map((r) => [`${r.table_name}.${r.column_name}`, r.data_type]),
+    result.rows.map((r) => [
+      `${String(r.table_name)}.${String(r.column_name)}`,
+      String(r.data_type),
+    ]),
   );
 }
 
-/** Semantic equality of one persisted value and its fixture value (jsonb by canonical value, timestamps by instant). */
-function sameValue(
+/**
+ * Exact equality of one persisted value and its fixture value, by column type: jsonb by canonical value, timestamps by instant,
+ * numeric by exact decimal TEXT (never through floating point; the fixture carries exact decimals as strings, e.g. "0.0000", and
+ * PostgreSQL numeric keeps scale), bigint by exact integer digits.
+ */
+export function sameValue(
   type: string | undefined,
   persisted: unknown,
   shipped: unknown,
@@ -81,29 +92,137 @@ function sameValue(
       typeof shipped === "string" &&
       persisted.getTime() === Date.parse(shipped)
     );
-  if (type === "numeric" || type === "bigint")
-    return Number(persisted) === Number(shipped);
+  if (type === "numeric")
+    return typeof persisted === "string" && persisted === shipped;
+  if (type === "bigint") {
+    if (typeof persisted !== "string") return false;
+    if (typeof shipped === "string")
+      return /^-?\d+$/.test(shipped) && persisted === shipped;
+    return (
+      typeof shipped === "number" &&
+      Number.isSafeInteger(shipped) &&
+      persisted === String(shipped)
+    );
+  }
   return persisted === shipped;
 }
 
-const toShape = (value: unknown): unknown =>
-  value instanceof Date ? value.toISOString().replace(/\.000Z$/, "Z") : value;
+/**
+ * Persisted shape handed to the row verifier: timestamps as semantic UTC text, bigint as a number only when it is an exact safe
+ * integer (otherwise the read fails), numeric kept as its exact decimal text. Never rounds.
+ */
+export function toShape(type: string | undefined, value: unknown): unknown {
+  if (value instanceof Date) return value.toISOString().replace(/\.000Z$/, "Z");
+  if (type === "bigint" && typeof value === "string") {
+    const n = Number(value);
+    if (!Number.isSafeInteger(n) || String(n) !== value)
+      throw new FixtureReadBackError("bigint_not_exact_safe_integer", value);
+    return n;
+  }
+  return value;
+}
 
+export interface RawFixtureRows {
+  /** Raw pg-typed rows per family, ordered by primary key. */
+  raw: Record<string, Row[]>;
+  types: Map<string, string>;
+}
+
+/**
+ * Reads every family (ordered by primary key). This is the ONE reader used both inside A2's load transaction (the caller's
+ * existing transaction: no BEGIN, COMMIT, isolation change or lock here) and by the post-commit verifier. A single consistent
+ * snapshot across the 40 statements is the CALLER's responsibility: the loader holds SHARE ROW EXCLUSIVE locks on every table;
+ * the post-commit verifier owns a REPEATABLE READ READ ONLY transaction.
+ */
+export async function readFixtureRows(db: Queryable): Promise<RawFixtureRows> {
+  const types = await columnTypes(db);
+  const raw: Record<string, Row[]> = {};
+  for (const family of families) {
+    const result = await db.query(
+      `SELECT ${family.columns.map((c) => `"${c}"`).join(", ")} FROM "${family.table}" ORDER BY ${family.primaryKey.map((c) => `"${c}"`).join(", ")}`,
+    );
+    raw[family.table] = result.rows;
+  }
+  return { raw, types };
+}
+
+export function shapeRows(rows: RawFixtureRows): Record<string, Row[]> {
+  return Object.fromEntries(
+    Object.entries(rows.raw).map(([table, list]) => [
+      table,
+      list.map((r) =>
+        Object.fromEntries(
+          Object.entries(r).map(([k, v]) => [
+            k,
+            toShape(rows.types.get(`${table}.${k}`), v),
+          ]),
+        ),
+      ),
+    ]),
+  );
+}
+
+/** Bindings that exist only in the database (read-only SELECTs). */
+export async function databaseBindingChecks(db: Queryable): Promise<void> {
+  const checks: [string, string][] = [
+    [
+      "attempts_left_pending",
+      "SELECT count(*) AS n FROM program_run_attempts WHERE state <> 'PENDING'",
+    ],
+    [
+      "runs_left_pending",
+      "SELECT count(*) AS n FROM program_runs WHERE state <> 'PENDING'",
+    ],
+    [
+      "run_config_not_bound_by_attempt",
+      "SELECT count(*) AS n FROM program_runs r JOIN program_run_attempts a USING (program_run_id) WHERE r.show_config_version_id IS DISTINCT FROM a.show_config_version_id",
+    ],
+    [
+      "publication_enabled",
+      "SELECT count(*) AS n FROM program_run_attempts a JOIN program_runs r USING (program_run_id) WHERE a.publication_enabled IS NOT FALSE OR r.publication_enabled IS NOT FALSE",
+    ],
+    [
+      "reroll_chain_unresolved",
+      "SELECT count(*) AS n FROM provider_calls c WHERE c.reroll_trigger_id IS NOT NULL AND NOT EXISTS (SELECT 1 FROM reroll_triggers t JOIN provider_calls s ON s.provider_call_id = t.source_provider_call_id WHERE t.reroll_trigger_id = c.reroll_trigger_id AND s.provider_call_id = c.reroll_of_provider_call_id)",
+    ],
+    [
+      "take_without_succeeded_call",
+      "SELECT count(*) AS n FROM render_takes t WHERE NOT EXISTS (SELECT 1 FROM provider_call_events e WHERE e.provider_call_id = t.provider_call_id AND e.event_type = 'succeeded' AND e.response_artifact_id = t.audio_artifact_id)",
+    ],
+  ];
+  for (const [code, sql] of checks) {
+    const n = Number((await db.query(sql)).rows[0]?.n);
+    if (n !== 0) throw new FixtureReadBackError(code, String(n));
+  }
+  for (const table of [
+    "claim_state_events",
+    "episodes",
+    "episode_versions",
+    "review_decisions",
+    "repair_requests",
+    "repair_plans",
+    "repair_plan_decisions",
+  ]) {
+    const n = Number(
+      (await db.query(`SELECT count(*) AS n FROM "${table}"`)).rows[0]?.n,
+    );
+    if (n !== 0) throw new FixtureReadBackError("minted_state_present", table);
+  }
+}
+
+/** A2's in-transaction read-back: compare every persisted column, then verify the persisted rows. */
 async function readBack(
   client: PoolClient,
   fixture: VerifiedFixture,
 ): Promise<void> {
-  const types = await columnTypes(client);
-  const persisted: Record<string, Row[]> = {};
+  const rows = await readFixtureRows(client);
   for (const family of families) {
-    const result = await client.query<Row>(
-      `SELECT ${family.columns.map((c) => `"${c}"`).join(", ")} FROM "${family.table}" ORDER BY ${family.primaryKey.map((c) => `"${c}"`).join(", ")}`,
-    );
+    const result = rows.raw[family.table] ?? [];
     const shipped = fixture.rows.tables[family.table] ?? [];
-    if (result.rows.length !== shipped.length)
+    if (result.length !== shipped.length)
       throw new FixtureReadBackError(
         "persisted_count_mismatch",
-        `${family.table}: ${String(result.rows.length)}`,
+        `${family.table}: ${String(result.length)}`,
       );
     // persistence_expectations.base_run_insert: runs are inserted PENDING with null config/publication and the FIRST attempt
     // binds them atomically (attempt trigger). The expected persisted values are therefore the attempt's, derived from the
@@ -114,7 +233,7 @@ async function readBack(
         if (!bound.has(String(attempt.program_run_id)))
           bound.set(String(attempt.program_run_id), attempt);
     const byKey = new Map(
-      result.rows.map((r) => [
+      result.map((r) => [
         JSON.stringify(family.primaryKey.map((k) => r[k])),
         r,
       ]),
@@ -145,7 +264,7 @@ async function readBack(
         }
         if (
           !sameValue(
-            types.get(`${family.table}.${column}`),
+            rows.types.get(`${family.table}.${column}`),
             found[column],
             row[column],
           )
@@ -156,60 +275,110 @@ async function readBack(
           );
       }
     }
-    persisted[family.table] = result.rows.map((r) =>
-      Object.fromEntries(Object.entries(r).map(([k, v]) => [k, toShape(v)])),
-    );
   }
   // Recompute every A1 hash and binding over the PERSISTED rows (not the shipped records).
-  verifyRows(persisted, fixture.context, fixture.historical);
-  // Bindings that exist only in the database.
-  const checks: [string, string][] = [
-    [
-      "attempts_left_pending",
-      "SELECT count(*) AS n FROM program_run_attempts WHERE state <> 'PENDING'",
-    ],
-    [
-      "runs_left_pending",
-      "SELECT count(*) AS n FROM program_runs WHERE state <> 'PENDING'",
-    ],
-    [
-      "run_config_not_bound_by_attempt",
-      "SELECT count(*) AS n FROM program_runs r JOIN program_run_attempts a USING (program_run_id) WHERE r.show_config_version_id IS DISTINCT FROM a.show_config_version_id",
-    ],
-    [
-      "publication_enabled",
-      "SELECT count(*) AS n FROM program_run_attempts a JOIN program_runs r USING (program_run_id) WHERE a.publication_enabled IS NOT FALSE OR r.publication_enabled IS NOT FALSE",
-    ],
-    [
-      "reroll_chain_unresolved",
-      "SELECT count(*) AS n FROM provider_calls c WHERE c.reroll_trigger_id IS NOT NULL AND NOT EXISTS (SELECT 1 FROM reroll_triggers t JOIN provider_calls s ON s.provider_call_id = t.source_provider_call_id WHERE t.reroll_trigger_id = c.reroll_trigger_id AND s.provider_call_id = c.reroll_of_provider_call_id)",
-    ],
-    [
-      "take_without_succeeded_call",
-      "SELECT count(*) AS n FROM render_takes t WHERE NOT EXISTS (SELECT 1 FROM provider_call_events e WHERE e.provider_call_id = t.provider_call_id AND e.event_type = 'succeeded' AND e.response_artifact_id = t.audio_artifact_id)",
-    ],
-  ];
-  for (const [code, sql] of checks) {
-    const n = Number((await client.query<{ n: string }>(sql)).rows[0]?.n);
-    if (n !== 0) throw new FixtureReadBackError(code, String(n));
-  }
-  for (const table of [
-    "claim_state_events",
-    "episodes",
-    "episode_versions",
-    "review_decisions",
-    "repair_requests",
-    "repair_plans",
-    "repair_plan_decisions",
-  ]) {
-    const n = Number(
-      (
-        await client.query<{ n: string }>(
-          `SELECT count(*) AS n FROM "${table}"`,
-        )
-      ).rows[0]?.n,
+  verifyRows(shapeRows(rows), fixture.context, fixture.historical);
+  await databaseBindingChecks(client);
+}
+
+export interface PersistedVerification {
+  rows: number;
+  families: number;
+}
+
+async function assertSnapshotClient(
+  client: PoolClient,
+  role: string,
+): Promise<void> {
+  const who = (await client.query<{ u: string }>("SELECT current_user AS u"))
+    .rows[0]?.u;
+  if (who !== role)
+    throw new FixtureReadBackError(
+      "verifier_role",
+      `expected ${role}, effective ${String(who)}`,
     );
-    if (n !== 0) throw new FixtureReadBackError("minted_state_present", table);
+  const level = (
+    await client.query<{ v: string }>(
+      "SELECT current_setting('transaction_isolation') AS v",
+    )
+  ).rows[0]?.v;
+  const readOnly = (
+    await client.query<{ v: string }>(
+      "SELECT current_setting('transaction_read_only') AS v",
+    )
+  ).rows[0]?.v;
+  if (
+    (level !== "repeatable read" && level !== "serializable") ||
+    readOnly !== "on"
+  )
+    throw new FixtureReadBackError(
+      "verifier_snapshot_not_pinned",
+      `${String(level)} read_only=${String(readOnly)}`,
+    );
+  // Deterministic transaction-state enforcement. SAVEPOINT is only legal inside an open transaction block: in autocommit
+  // PostgreSQL itself raises 25P01 (whatever the session defaults say), in an aborted block 25P02. A released savepoint leaves the
+  // caller's transaction, isolation level and snapshot untouched and never commits, rolls back or begins anything.
+  try {
+    await client.query("SAVEPOINT desk_snapshot_probe");
+  } catch (error) {
+    const sqlstate = (error as { code?: string }).code;
+    if (sqlstate === "25P01")
+      throw new FixtureReadBackError("verifier_not_in_transaction");
+    if (sqlstate === "25P02")
+      throw new FixtureReadBackError("verifier_transaction_aborted");
+    throw error;
+  }
+  await client.query("RELEASE SAVEPOINT desk_snapshot_probe");
+}
+
+/**
+ * Post-commit verification on an ALREADY-OPEN consistent snapshot (the caller owns the transaction). Requires the effective role,
+ * REPEATABLE READ (or SERIALIZABLE) READ ONLY, and an explicit open transaction; it never begins, commits or rolls back.
+ */
+export async function verifyPersistedFixtureOnSnapshot(
+  client: PoolClient,
+  pack: Pack = openFixturePack(),
+  options: { role?: string } = {},
+): Promise<PersistedVerification> {
+  await assertSnapshotClient(client, options.role ?? "desk_runtime");
+  const fixture = VerifiedFixture.fromPack(pack);
+  const rows = await readFixtureRows(client);
+  const shaped = shapeRows(rows);
+  verifyRows(shaped, fixture.context, fixture.historical);
+  await databaseBindingChecks(client);
+  return {
+    rows: Object.values(shaped).reduce((n, r) => n + r.length, 0),
+    families: families.length,
+  };
+}
+
+/**
+ * Post-commit verification with an explicitly owned snapshot: pins ONE connection from `pool`, begins REPEATABLE READ READ ONLY
+ * (so all 40 family reads and the SQL binding checks see one snapshot; no write-blocking lock is taken), verifies, and always
+ * ends the transaction and releases the connection. The pool should authenticate as desk_runtime. Verifies the LOADED BASE state:
+ * claim events appended after the load change the reduced claim state and are reported by the claim comparison (use the A3
+ * freeze verifier for live differences).
+ */
+export async function verifyPersistedFixture(
+  pool: Pool,
+  pack: Pack = openFixturePack(),
+  options: { role?: string } = {},
+): Promise<PersistedVerification> {
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY");
+    const result = await verifyPersistedFixtureOnSnapshot(
+      client,
+      pack,
+      options,
+    );
+    await client.query("COMMIT");
+    return result;
+  } catch (error) {
+    await client.query("ROLLBACK").catch(() => undefined);
+    throw error;
+  } finally {
+    client.release();
   }
 }
 
@@ -263,7 +432,8 @@ export async function persistFixture(
       ),
     };
   } catch (error) {
-    await client.query("ROLLBACK");
+    // never let a failing ROLLBACK (for example a dead connection) mask the original failure
+    await client.query("ROLLBACK").catch(() => undefined);
     throw error;
   } finally {
     client.release();
