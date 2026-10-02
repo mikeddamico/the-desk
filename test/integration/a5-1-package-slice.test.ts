@@ -18,10 +18,12 @@ import {
   attemptIds,
   fixturePackageArtifact,
   fixtureUnits,
+  prepareUnitsAndSupports,
+  rebuildPackage,
   seedPrerequisites,
   sliceInput,
 } from "../support/a5-fixture.js";
-import { childBackends, observe, spawnChild } from "../support/a5-crash.js";
+import { observe, withChild } from "../support/a5-crash.js";
 import { backendPid, waitForBlocked } from "../support/pg-wait.js";
 
 const databaseUrl = process.env.TEST_DATABASE_URL;
@@ -60,9 +62,8 @@ const count = async (env: DbEnv, table: string): Promise<number> =>
   Number((await ownerRows(env, `SELECT count(*) AS n FROM ${table}`))[0]?.n);
 const idle = (pool: pg.Pool): boolean =>
   pool.totalCount === pool.idleCount && pool.waitingCount === 0;
-const persistUnits = async (pool: pg.Pool): Promise<void> => {
-  for (const u of fixtureUnits())
-    expect((await persistEvidenceUnit(pool, u)).kind).toBe("created");
+const persistUnits = async (env: DbEnv, pool: pg.Pool): Promise<void> => {
+  await prepareUnitsAndSupports(env.migrator, pool);
 };
 /** Runs statements as the database owner with user triggers bypassed (session_replication_role = replica): simulates another writer / tampering. */
 const forge = async (
@@ -111,7 +112,7 @@ suite(
       const env = await fresh();
       const pool = actorPool(env);
       try {
-        await persistUnits(pool);
+        await persistUnits(env, pool);
         const pkg = fixturePackageArtifact();
         const a = await persistEvidencePackage(pool, pkg);
         expect(a.kind).toBe("created");
@@ -139,13 +140,18 @@ suite(
             evidence_package_id: pkg.evidence_package_id,
           },
         });
-        expect(await count(env, "artifacts")).toBe(1);
+        expect(
+          await count(
+            env,
+            "artifacts WHERE artifact_type = 'evidence_package'",
+          ),
+        ).toBe(1);
         expect(await count(env, "evidence_packages")).toBe(1);
         // the package is stored exactly as authored (schema_version etc. are the caller's, not defaults)
         const row = (
           await ownerRows(
             env,
-            "SELECT schema_version, storage_uri, byte_size FROM artifacts",
+            "SELECT schema_version, storage_uri, byte_size FROM artifacts WHERE artifact_type = 'evidence_package'",
           )
         )[0];
         expect(row).toEqual({
@@ -165,13 +171,18 @@ suite(
       const pool = actorPool(env);
       const pools = [0, 1, 2, 3].map(() => actorPool(env));
       try {
-        await persistUnits(pool);
+        await persistUnits(env, pool);
         const outcomes = await Promise.all(
           pools.map((p) => persistEvidencePackage(p, fixturePackageArtifact())),
         );
         expect(outcomes.filter((o) => o.kind === "created")).toHaveLength(1);
         expect(outcomes.filter((o) => o.kind === "converged")).toHaveLength(3);
-        expect(await count(env, "artifacts")).toBe(1);
+        expect(
+          await count(
+            env,
+            "artifacts WHERE artifact_type = 'evidence_package'",
+          ),
+        ).toBe(1);
         expect(await count(env, "evidence_packages")).toBe(1);
         expect(pools.every(idle)).toBe(true);
         // observed wait: a second session blocks on an uncommitted competitor artifact
@@ -179,7 +190,7 @@ suite(
         const p2 = actorPool(env2);
         const holder = await env2.owner.connect();
         try {
-          await persistUnits(p2);
+          await persistUnits(env2, p2);
           const pkg = fixturePackageArtifact();
           const hash = (outcomes[0] as { record: { package_hash: string } })
             .record.package_hash;
@@ -218,7 +229,12 @@ suite(
             kind: "converged",
             record: { reused: true, artifact_id: pkg.artifact_id },
           });
-          expect(await count(env2, "artifacts")).toBe(1);
+          expect(
+            await count(
+              env2,
+              "artifacts WHERE artifact_type = 'evidence_package'",
+            ),
+          ).toBe(1);
         } finally {
           holder.release();
           await p2.end();
@@ -235,12 +251,12 @@ suite(
       const pool = actorPool(env);
       const holder = await env.owner.connect();
       try {
-        await persistUnits(pool);
+        await persistUnits(env, pool);
         const pkg = fixturePackageArtifact();
         const hash = parsePackage(pkg).hash;
         await forge(env, [
           ["DELETE FROM evidence_packages"],
-          ["DELETE FROM artifacts"],
+          ["DELETE FROM artifacts WHERE artifact_type = 'evidence_package'"],
         ]);
         await holder.query("BEGIN");
         await holder.query(
@@ -260,7 +276,12 @@ suite(
         );
         await holder.query("ROLLBACK");
         expect((await pending).kind).toBe("created");
-        expect(await count(env, "artifacts")).toBe(1);
+        expect(
+          await count(
+            env,
+            "artifacts WHERE artifact_type = 'evidence_package'",
+          ),
+        ).toBe(1);
       } finally {
         holder.release();
         await pool.end();
@@ -272,7 +293,7 @@ suite(
       const env = await fresh();
       const pool = actorPool(env);
       try {
-        await persistUnits(pool);
+        await persistUnits(env, pool);
         const pkg = fixturePackageArtifact();
         await persistEvidencePackage(pool, pkg);
         await forge(env, [["DELETE FROM evidence_packages"]]);
@@ -284,18 +305,23 @@ suite(
             artifact_id: pkg.artifact_id,
           },
         });
-        expect(await count(env, "artifacts")).toBe(1);
+        expect(
+          await count(
+            env,
+            "artifacts WHERE artifact_type = 'evidence_package'",
+          ),
+        ).toBe(1);
         expect(await count(env, "evidence_packages")).toBe(1);
         // an artifact with this hash but a different stored manifest (forged by another writer) and no typed row
         await forge(env, [
           ["DELETE FROM evidence_packages"],
           [
-            'UPDATE artifacts SET canonical_payload = \'{"manifest":{"forged":true}}\'::jsonb',
+            "UPDATE artifacts SET canonical_payload = '{\"manifest\":{\"forged\":true}}'::jsonb WHERE artifact_type = 'evidence_package'",
           ],
         ]);
         expect(await persistEvidencePackage(pool, pkg)).toMatchObject({
           kind: "conflict",
-          code: "artifact_differs_for_hash",
+          code: "stored_package_invalid",
         });
         expect(await count(env, "evidence_packages")).toBe(0);
       } finally {
@@ -308,7 +334,7 @@ suite(
       const env = await fresh();
       const pool = actorPool(env);
       try {
-        await persistUnits(pool);
+        await persistUnits(env, pool);
         const pkg = fixturePackageArtifact();
         expect((await persistEvidencePackage(pool, pkg)).kind).toBe("created");
         const alt = alternatePackage(); // a different manifest (hash)
@@ -335,16 +361,21 @@ suite(
           kind: "conflict",
           code: "evidence_package_id_occupied",
         });
-        expect(await count(env, "artifacts")).toBe(1);
+        expect(
+          await count(
+            env,
+            "artifacts WHERE artifact_type = 'evidence_package'",
+          ),
+        ).toBe(1);
         // K5: the stored artifact for this hash holds a different manifest (forged row; typed row present)
         await forge(env, [
           [
-            'UPDATE artifacts SET canonical_payload = \'{"manifest":{"forged":true}}\'::jsonb',
+            "UPDATE artifacts SET canonical_payload = '{\"manifest\":{\"forged\":true}}'::jsonb WHERE artifact_type = 'evidence_package'",
           ],
         ]);
         expect(await persistEvidencePackage(pool, pkg)).toMatchObject({
           kind: "conflict",
-          code: "manifest_differs_for_hash",
+          code: "stored_package_invalid",
         });
       } finally {
         await pool.end();
@@ -362,19 +393,16 @@ suite(
           kind: "rejected",
           code: "package_evidence_unit_not_found",
         });
-        await persistUnits(pool);
+        await persistUnits(env, pool);
         const mutate = (
           fn: (m: {
             evidence: Record<string, Json>[];
             claims: Record<string, Json>[];
           }) => void,
-        ) => {
-          const p = fixturePackageArtifact();
-          const payload = p.canonical_payload as Record<string, Json>;
-          delete payload.package_hash; // keep the hash field consistent with the mutated manifest
-          fn(payload.manifest as never);
-          return p;
-        };
+        ) =>
+          rebuildPackage((payload) => {
+            fn(payload.manifest as never);
+          });
         expect(
           await persistEvidencePackage(
             pool,
@@ -402,7 +430,10 @@ suite(
                 "d1250008-0000-4000-8000-0000000000ff";
             }),
           ),
-        ).toMatchObject({ kind: "rejected", code: "package_claim_not_found" });
+        ).toMatchObject({
+          kind: "rejected",
+          code: "package_reference_unresolved",
+        });
         expect(
           await persistEvidencePackage(
             pool,
@@ -430,8 +461,16 @@ suite(
         ).toMatchObject({ kind: "rejected", code: "package_units_mismatch" });
         expect(
           await persistEvidencePackage(pool, { ...pkg, schema_version: "" }),
-        ).toMatchObject({ kind: "rejected", code: "invalid_schema_version" });
-        expect(await count(env, "artifacts")).toBe(0);
+        ).toMatchObject({
+          kind: "rejected",
+          code: "artifact_schema_version_unknown",
+        });
+        expect(
+          await count(
+            env,
+            "artifacts WHERE artifact_type = 'evidence_package'",
+          ),
+        ).toBe(0);
         expect(await count(env, "evidence_packages")).toBe(0);
         expect(idle(pool)).toBe(true);
       } finally {
@@ -444,7 +483,7 @@ suite(
       const env = await fresh();
       const pool = actorPool(env);
       try {
-        await persistUnits(pool);
+        await persistUnits(env, pool);
         const a = await persistEvidencePackage(pool, fixturePackageArtifact());
         const b = await persistEvidencePackage(pool, alternatePackage());
         const pa = (a as { record: { evidence_package_id: string } }).record
@@ -507,7 +546,7 @@ suite(
         const pool = actorPool(env);
         const holder = await env.owner.connect();
         try {
-          await persistUnits(pool);
+          await persistUnits(env, pool);
           const a = await persistEvidencePackage(
             pool,
             fixturePackageArtifact(),
@@ -554,22 +593,13 @@ suite(
       const env = await fresh();
       const pool = actorPool(env);
       try {
-        const configs = await ownerRows(
-          env,
-          "SELECT show_config_version_id FROM show_config_versions ORDER BY version_number",
-        );
-        expect(configs.length).toBeGreaterThanOrEqual(2);
-        await env.owner
-          .query(
-            "UPDATE program_run_attempts SET show_config_version_id = $1 WHERE attempt_id = $2",
-            [must(configs[0]).show_config_version_id, attemptIds()[1]],
-          )
-          .catch(() => undefined);
-        const rows = await ownerRows(
+        // two distinct show-config versions were established at creation by the test prerequisites (no mutation, no swallowed error)
+        const before = await ownerRows(
           env,
           "SELECT show_config_version_id::text AS c FROM program_run_attempts ORDER BY attempt_id",
         );
-        await persistUnits(pool);
+        expect(new Set(before.map((r) => r.c)).size).toBe(2);
+        await persistUnits(env, pool);
         const a = await persistEvidencePackage(pool, fixturePackageArtifact());
         const pa = (a as { record: { evidence_package_id: string } }).record
           .evidence_package_id;
@@ -580,13 +610,9 @@ suite(
           ).toBe("created");
         const bound = await ownerRows(
           env,
-          "SELECT DISTINCT evidence_package_id::text AS p, count(DISTINCT show_config_version_id) AS configs FROM program_run_attempts GROUP BY 1",
+          "SELECT evidence_package_id::text AS p, count(DISTINCT show_config_version_id)::int AS configs, count(*)::int AS attempts FROM program_run_attempts GROUP BY 1",
         );
-        expect(bound).toHaveLength(1);
-        // records how many distinct configs were actually exercised (the fixture runs themselves share one version)
-        expect(Number(bound[0]?.configs)).toBe(
-          new Set(rows.map((r) => r.c)).size,
-        );
+        expect(bound).toEqual([{ p: pa, configs: 2, attempts: 2 }]);
       } finally {
         await pool.end();
         await env.close();
@@ -597,12 +623,22 @@ suite(
       const env = await fresh();
       const pool = actorPool(env);
       try {
+        await persistUnits(env, pool);
         const before = await evidenceSliceStatus(pool, sliceInput());
         expect(before.complete).toBe(false);
         expect(before.binding).toBe("unbound");
         const r = await runEvidenceSlice(pool, sliceInput());
         expect(r.complete).toBe(true);
-        expect(r.steps.filter((s) => s.outcome === "created")).toHaveLength(18);
+        // units and supports pre-exist (the package needs the claims\' support rows): S1 converges; the package and the binding are created
+        expect(
+          r.steps.filter((s) => s.outcome === "created").map((s) => s.step),
+        ).toEqual(["S2_evidence_package", "S3_binding"]);
+        expect(
+          r.steps
+            .filter((s) => s.step === "S1_evidence_unit")
+            .every((s) => s.outcome === "converged"),
+        ).toBe(true);
+        expect(r.snapshotVerification).toBe("verified");
         const again = await runEvidenceSlice(pool, sliceInput());
         expect(again.complete).toBe(true);
         expect(again.steps.every((s) => s.outcome === "converged")).toBe(true);
@@ -619,10 +655,13 @@ suite(
     it("W1: re-entry after a kill at each fault point (child held until the parent observes the database fact) equals an uninterrupted run", async () => {
       const reference = await fresh();
       const refPool = actorPool(reference);
+      await persistUnits(reference, refPool);
       await runEvidenceSlice(refPool, sliceInput());
       const expected = await endState(reference);
       await refPool.end();
       await reference.close();
+      // The package's claims need their support rows, which reference the units: units and supports exist before the slice runs
+      // (S1 therefore converges here; unit CREATION after a kill is covered by W1b).
       const total = unitIds().length;
       const facts: Record<string, (env: DbEnv) => Promise<boolean>> = {
         after_s1: async (env) =>
@@ -637,23 +676,23 @@ suite(
         const env = await fresh();
         const pool = actorPool(env);
         try {
-          const child = spawnChild({
-            url: env.runtimeUrl,
-            tag: fault,
-            fault,
-            scenario: "slice",
-            attemptIndex: 0,
-          });
-          await child.held;
-          await observe(() => fact(env), `${fault}: database fact`);
-          const done = await child.kill();
+          await persistUnits(env, pool);
+          const done = await withChild(
+            env.owner,
+            env.name,
+            {
+              url: env.runtimeUrl,
+              tag: fault,
+              fault,
+              scenario: "slice",
+              attemptIndex: 0,
+            },
+            async () => {
+              await observe(() => fact(env), `${fault}: database fact`);
+            },
+          );
           expect(done.signal).toBe("SIGKILL");
           expect(done.stdout).not.toContain("COMPLETED_WITHOUT_FAULT");
-          await observe(
-            async () =>
-              (await childBackends(env.owner, env.name, fault)).length === 0,
-            "child backends gone",
-          );
           // interrupted state is exactly the checkpoint the fault names
           if (fault !== "after_bind_commit")
             expect(
@@ -684,10 +723,95 @@ suite(
       }
     }, 300000);
 
+    it("W1b: unit creation survives a kill after COMMIT (lost acknowledgement): the identical resend converges", async () => {
+      const env = await fresh();
+      const pool = actorPool(env);
+      try {
+        const first = must(fixtureUnits()[0]);
+        const done = await withChild(
+          env.owner,
+          env.name,
+          {
+            url: env.runtimeUrl,
+            tag: "w1b",
+            fault: "after_commit_before_return",
+            scenario: "unit",
+            unitIndex: 0,
+          },
+          async () => {
+            await observe(
+              async () => (await count(env, "evidence_units")) === 1,
+              "unit committed",
+            );
+          },
+        );
+        expect(done.signal).toBe("SIGKILL");
+        expect((await persistEvidenceUnit(pool, first)).kind).toBe("converged");
+        expect(await count(env, "evidence_units")).toBe(1);
+      } finally {
+        await pool.end();
+        await env.close();
+      }
+    }, 120000);
+
+    it("harness controls: a missing fault point and a failing observation terminate within bounds and release the child and its backends", async () => {
+      const env = await fresh();
+      try {
+        // the child completes without ever reaching the named fault point: reported as a failure, never as a recovery
+        const t0 = Date.now();
+        await expect(
+          withChild(
+            env.owner,
+            env.name,
+            {
+              url: env.runtimeUrl,
+              tag: "ctl1",
+              fault: "no_such_fault_point",
+              scenario: "unit",
+              unitIndex: 0,
+            },
+            () => Promise.resolve(),
+            20000,
+          ),
+        ).rejects.toThrow(/completed without reaching the fault point/);
+        expect(Date.now() - t0).toBeLessThan(25000);
+        // the child IS held, but the database fact never becomes true: the observation times out, the child is killed anyway
+        await expect(
+          withChild(
+            env.owner,
+            env.name,
+            {
+              url: env.runtimeUrl,
+              tag: "ctl2",
+              fault: "after_commit_before_return",
+              scenario: "unit",
+              unitIndex: 1,
+            },
+            async () => {
+              await observe(
+                () => Promise.resolve(false),
+                "a fact that never holds",
+                1500,
+              );
+            },
+          ),
+        ).rejects.toThrow(/database fact not observed/);
+        const alive = await ownerRows(
+          env,
+          "SELECT pid FROM pg_stat_activity WHERE datname = $1 AND application_name LIKE 'a5child_ctl%'",
+          [env.name],
+        );
+        expect(alive).toHaveLength(0);
+      } finally {
+        await env.close();
+      }
+    }, 120000);
+
     it("W2: a changed input on re-entry conflicts at the first differing step and nothing is overwritten; an unrelated package is rejected before any write", async () => {
       const env = await fresh();
       const pool = actorPool(env);
       try {
+        await persistUnits(env, pool);
         expect((await runEvidenceSlice(pool, sliceInput())).complete).toBe(
           true,
         );
@@ -727,7 +851,12 @@ suite(
             code: "slice_units_package_mismatch",
           });
           expect(await count(env2, "evidence_units")).toBe(0);
-          expect(await count(env2, "artifacts")).toBe(0);
+          expect(
+            await count(
+              env2,
+              "artifacts WHERE artifact_type = 'evidence_package'",
+            ),
+          ).toBe(0);
           // a package that validates but whose entry disagrees with the supplied unit
           const entryMismatch = sliceInput();
           must(entryMismatch.units[0]).unit.evidence_type = "analysis";

@@ -1,9 +1,8 @@
 # A5.1 durable command helpers and one bounded workflow slice
 
 Scope: `src/runtime/` (command transactions, evidence-unit persistence, claim-event append, evidence-package persistence and
-binding, `runEvidenceSlice`). **Not** the minimal durable workflow/command runner (no scheduler, step registry or generic
-checkpoint store), and **not** Completion A. No migration, privilege, dependency, Lock or fixture change. Provider
-reservation/outcome commands (A5.2) are held for separate review.
+binding, `runEvidenceSlice`). It is a bounded slice over three convergent commands; Completion A as a whole is NOT complete. No
+migration, privilege, dependency, Lock or fixture change. Provider reservation/outcome commands (A5.2) are held for separate review.
 
 ## Which identities are authored and which are database-generated
 
@@ -28,13 +27,26 @@ reservation/outcome commands (A5.2) are held for separate review.
 - Evidence provenance/locator snapshot: no durable column exists. `snapshot.status` is `verified` only against an explicitly identified
   persisted package (by package hash); otherwise `not_supplied` or `unverifiable`. Row convergence is reported separately
   (`comparison: "row_only" | "row_and_snapshot_verified"`). Full Evidence Package 24.1 completion therefore remains outstanding.
-- Packages: the hash is not validation. Evidence entries are checked against the persisted unit and rights rows, claim entries against
-  the persisted claim rows, and the slice requires the package's evidence set to equal its units. A preexisting artifact without its typed
-  row (another writer) is completed only when its manifest equals the request's; otherwise `artifact_differs_for_hash`.
+- Packages: the hash is not validation. A package is validated against the active profile (`package-profile.ts`: the governed
+  `evidence-package/2.0` payload/manifest labels, the evidence_package row's inherited `fixture-v0.4.5` label, required fields and types,
+  closed key sets, in-manifest references; unknown labels are rejected, missing or malformed arrays are never defaulted) and reconciled
+  with the persisted rows: evidence entries against unit and rights rows; claim entries against the claim rows (identity, kind/origin/
+  domain/predicate/value, `subject_ref` against the bounded fixture representation `subject = {entity_ref}`, initial fields, explicit
+  cursor/prefix and frozen state/hash through the accepted A3 `verifyFrozenEntry`); each SELECTED support ref against its own persisted `claim_supports` row for that claim
+  (id, kind, role, targets, hash) and its exact target hash (Claims 4.3: evidence `content_hash`, derivation `output_hash`, carrier
+  `artifacts.content_hash`). Evidence 9 freezes the selected refs; no clause requires them to equal every support row the claim has
+  now, so later lawful support rows neither invalidate nor are demanded of a frozen package, and no support-sufficiency policy is inferred. The A3 verifier cannot reproduce the frozen-time usage ceiling; that limit is returned in
+  `verification.limits`. The same validation runs on reuse by hash, on completion of an untyped artifact another writer stored, on every
+  binding path (first, same-package retry, race winner) and when a stored package is read for snapshot verification or slice status.
+- One normalized JSON representation (every own key preserved, including `__proto__`) is hashed, compared and stored.
 - Cross-config package sharing is a persistence characterization only; it establishes no editorial eligibility.
 
 ## Outstanding (not claimed)
 
-Minimal workflow runner and Completion A; run/attempt creation identity and lifecycle transition retry; take selection and gate-result
-retry identity; READY/operator authorization; package construction; the durable provenance snapshot; provider reservation/outcome and
-reconciliation (A5.2); production retry/timeout values; cross-config eligibility.
+Handoff v0.5.5 Done-when items still to be demonstrated: 10 (a database/workflow concurrency guard preventing duplicate paid work:
+provider reservation/outcome commands, A5.2, held); item 9 is offered by this slice for review, not self-accepted. Build 2 path steps not
+implemented here: persisting a program attempt (run/attempt creation identity), lifecycle transitions and `transition_attempt` retry,
+evaluation path through VALIDATED, provider-call identity, takes and reroll, READY/operator authorization. Also outstanding: take
+selection and gate-result retry identity, package construction (selection/scoring), the durable provenance/locator snapshot (no column; verified
+only against an explicitly identified persisted package, so full Evidence 24.1 completion remains outstanding), lease/takeover,
+production retry values, and cross-config editorial eligibility.

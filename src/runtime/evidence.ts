@@ -10,10 +10,11 @@
 // full 24.1 completion.
 import type { Pool } from "pg";
 
-import { normalizeString } from "../identity/canonical-json.js";
+import { canonicalJson, normalizeString } from "../identity/canonical-json.js";
 import { evidenceBodyHash } from "../identity/domains.js";
 import {
   assertJson,
+  isJsonObject,
   isUnique,
   Rejection,
   requireHex64,
@@ -27,6 +28,7 @@ import {
   type Row,
   type Tx,
 } from "./command.js";
+import { readStoredPackageByHash } from "./package.js";
 
 export interface AuthoredRights {
   rights_version_id: string;
@@ -91,8 +93,10 @@ const unitSelect = (extra = ""): string =>
 const rightsSelect = (extra = ""): string =>
   `SELECT rights_version_id::text, source_identity, policy, ${utcText("created_at")} AS created_at${extra} FROM rights_versions`;
 
-function validate(input: PersistEvidenceUnitInput): void {
-  const { unit, rights } = input;
+/** Validates the request and returns its NORMALIZED form: the one representation that is compared and stored. */
+function validate(raw: PersistEvidenceUnitInput): PersistEvidenceUnitInput {
+  const { unit } = raw;
+  const rights = raw.rights;
   requireUuid(unit.evidence_unit_id, "evidence_unit_id");
   requireUuid(unit.rights_version_id, "unit.rights_version_id");
   requireUuid(rights.rights_version_id, "rights.rights_version_id");
@@ -126,7 +130,24 @@ function validate(input: PersistEvidenceUnitInput): void {
     rights.source_identity === ""
   )
     throw new Rejection("invalid_source_identity");
-  assertJson(rights.policy, "rights.policy");
+  const policy = assertJson(rights.policy, "rights.policy");
+  if (!isJsonObject(policy))
+    throw new Rejection(
+      "rights_policy_not_object",
+      "a rights policy is a JSON object",
+    );
+  const input: PersistEvidenceUnitInput = {
+    ...raw,
+    rights: { ...rights, policy },
+    ...(raw.snapshot
+      ? {
+          snapshot: {
+            ...raw.snapshot,
+            locator: assertJson(raw.snapshot.locator, "snapshot.locator"),
+          },
+        }
+      : {}),
+  };
   const s = input.snapshot;
   if (s) {
     if (s.evidence_unit_id !== unit.evidence_unit_id)
@@ -138,9 +159,7 @@ function validate(input: PersistEvidenceUnitInput): void {
     ] as const)
       if (typeof s[k] !== "string" || s[k] === "")
         throw new Rejection("invalid_snapshot", k);
-    assertJson(s.locator, "snapshot.locator");
-    const covered = (rights.policy as { covered_source_identities?: Json })
-      .covered_source_identities;
+    const covered = policy.covered_source_identities;
     if (!Array.isArray(covered) || !covered.includes(s.source_identity))
       throw new Rejection(
         "snapshot_source_not_covered_by_rights",
@@ -151,6 +170,7 @@ function validate(input: PersistEvidenceUnitInput): void {
     requireHex64(input.verifySnapshotAgainstPackageHash, "package hash");
     if (!s) throw new Rejection("snapshot_required_for_verification");
   }
+  return input;
 }
 
 export async function rightsDifference(
@@ -236,10 +256,11 @@ export async function unitDifference(
 
 export async function persistEvidenceUnit(
   pool: Pool,
-  input: PersistEvidenceUnitInput,
+  raw: PersistEvidenceUnitInput,
 ): Promise<Outcome<StoredEvidenceUnit>> {
+  let input: PersistEvidenceUnitInput;
   try {
-    validate(input);
+    input = validate(raw);
   } catch (error) {
     if (error instanceof Rejection)
       return { kind: "rejected", code: error.code, detail: error.message };
@@ -371,33 +392,42 @@ async function snapshotStatus(
       status: "unverifiable",
       reason: "no_durable_snapshot_column_and_no_package_identified",
     };
-  const pkg = await tx.query(
-    `SELECT a.canonical_payload #> '{manifest,evidence}' AS evidence
-       FROM evidence_packages p JOIN artifacts a ON a.artifact_id = p.artifact_id WHERE p.package_hash = $1`,
-    [hash],
-  );
-  const row = pkg.rows[0];
-  if (!row)
+  return compareSnapshotToPackage(tx, s, hash);
+}
+
+/**
+ * Compares a supplied governed snapshot with the manifest entry of the persisted package identified by its governed hash.
+ * Read-only. `unverifiable` when that package is not persisted; a disagreement is reported as `{ conflict }`.
+ */
+export async function compareSnapshotToPackage(
+  tx: Pick<Tx, "query">,
+  s: ProvenanceSnapshot,
+  hash: string,
+): Promise<SnapshotStatus | { conflict: string }> {
+  const stored = await readStoredPackageByHash(tx, hash);
+  if (stored.state === "absent")
     return {
       status: "unverifiable",
       reason: "identified_package_not_persisted",
     };
-  const entries = (
-    Array.isArray(row.evidence) ? (row.evidence as Row[]) : []
-  ).filter((e) => e.evidence_unit_id === s.evidence_unit_id);
+  if (stored.state === "invalid")
+    return {
+      status: "unverifiable",
+      reason: `identified_package_invalid: ${stored.detail}`,
+    };
+  const entries = stored.parsed.evidence.filter(
+    (e) => e.evidence_unit_id === s.evidence_unit_id,
+  );
   const [e] = entries;
   if (!e) throw new Rejection("snapshot_unit_not_in_identified_package");
   if (entries.length > 1) throw new Rejection("package_evidence_ambiguous");
-  // jsonb equality for the locator (key order and integer spelling are irrelevant), exact text for the identities.
-  const same = await tx.query("SELECT ($1::jsonb = $2::jsonb) AS same", [
-    JSON.stringify(e.locator ?? null),
-    JSON.stringify(s.locator),
-  ]);
+  // the validated, normalized entry: exact text for the identities, canonical value equality for the locator
   const differs = [
-    e.acquisition_ref !== s.acquisition_ref && "acquisition_ref",
-    e.source_identity !== s.source_identity && "source_identity",
-    e.source_item_identity !== s.source_item_identity && "source_item_identity",
-    same.rows[0]?.same !== true && "locator",
+    e.raw.acquisition_ref !== s.acquisition_ref && "acquisition_ref",
+    e.raw.source_identity !== s.source_identity && "source_identity",
+    e.raw.source_item_identity !== s.source_item_identity &&
+      "source_item_identity",
+    canonicalJson(e.locator) !== canonicalJson(s.locator) && "locator",
   ].filter(Boolean);
   if (differs.length > 0)
     return { conflict: `snapshot differs in ${differs.join(",")}` };

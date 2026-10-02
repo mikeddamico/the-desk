@@ -1,11 +1,12 @@
 // A5.1 bounded workflow slice: S1 evidence units -> S2 evidence package -> S3 attempt binding.
-// This is ONE slice over three convergent commands, NOT the minimal durable workflow/command runner: there is no scheduler, step
-// registry or generic checkpoint store. The checkpoints are the committed rows themselves; re-entry after a crash or a lost
-// acknowledgement is "run the slice again": finished steps converge and the first unfinished step proceeds. A changed input at any
-// step is a conflict and stops the slice. The attempt is a PRECONDITION (an existing PENDING attempt); run/attempt creation,
-// lifecycle transitions, READY, gates and provider work are not part of it.
+// This is ONE bounded slice over three convergent commands; it does not complete Completion A. The checkpoints are the committed
+// rows themselves; re-entry after a crash or a lost acknowledgement is "run the slice again": finished steps converge and the first
+// unfinished step proceeds. A changed input at any step is a conflict and stops the slice. The attempt is a PRECONDITION (an existing
+// PENDING attempt). The actual unfinished coverage is named in docs/a5-1-durable-commands.md: provider reservation/outcome and the
+// duplicate-paid-work guard (Done-when 10, A5.2), run/attempt creation and lifecycle transitions, and the Build 2 path after binding.
 import type { Pool } from "pg";
 
+import { canonicalJson } from "../identity/canonical-json.js";
 import {
   faultPoint,
   Rejection,
@@ -14,6 +15,7 @@ import {
   type Tx,
 } from "./command.js";
 import {
+  compareSnapshotToPackage,
   persistEvidenceUnit,
   rightsDifference,
   unitDifference,
@@ -23,6 +25,7 @@ import {
   bindPackage,
   parsePackage,
   persistEvidencePackage,
+  readStoredPackageByHash,
   type AuthoredPackage,
 } from "./package.js";
 
@@ -32,7 +35,11 @@ export interface SliceInput {
   pkg: AuthoredPackage;
 }
 export interface StepResult {
-  step: "S1_evidence_unit" | "S2_evidence_package" | "S3_binding";
+  step:
+    | "S1_evidence_unit"
+    | "S2_evidence_package"
+    | "S2_snapshot_verification"
+    | "S3_binding";
   subject: string;
   outcome: Outcome<unknown>["kind"];
   code?: string;
@@ -43,6 +50,12 @@ export interface SliceResult {
   /** The step that stopped the slice (conflict/rejected), if any. */
   stoppedAt?: StepResult;
   evidencePackageId?: string;
+  /**
+   * `verified`: every supplied governed snapshot was durably compared against the persisted package (by its governed hash).
+   * `not_supplied`: no unit carried a snapshot (row-only; no claim of full Evidence 24.1 provenance verification).
+   * `partial`: some units carried none.
+   */
+  snapshotVerification?: "verified" | "not_supplied" | "partial";
 }
 
 const record = (
@@ -56,15 +69,16 @@ const record = (
   ...("code" in o ? { code: o.code } : {}),
 });
 
-function preflight(input: SliceInput): string[] {
+function preflight(input: SliceInput): {
+  unitIds: string[];
+  packageHash: string;
+} {
   requireUuid(input.attemptId, "attemptId");
   const parsed = parsePackage(input.pkg);
   const unitIds = input.units.map((u) => u.unit.evidence_unit_id);
   if (new Set(unitIds).size !== unitIds.length)
     throw new Rejection("slice_unit_duplicate");
-  const entries = new Map(
-    parsed.evidence.map((e) => [e.evidence_unit_id as string, e]),
-  );
+  const entries = new Map(parsed.evidence.map((e) => [e.evidence_unit_id, e]));
   if ([...unitIds].sort().join() !== [...entries.keys()].sort().join())
     throw new Rejection(
       "slice_units_package_mismatch",
@@ -81,8 +95,21 @@ function preflight(input: SliceInput): string[] {
         "slice_unit_package_entry_mismatch",
         u.unit.evidence_unit_id,
       );
+    // a supplied governed snapshot must agree with THIS supplied package's entry (before anything is written)
+    const snap = u.snapshot;
+    if (
+      snap &&
+      (snap.acquisition_ref !== e.raw.acquisition_ref ||
+        snap.source_identity !== e.raw.source_identity ||
+        snap.source_item_identity !== e.raw.source_item_identity ||
+        canonicalJson(snap.locator) !== canonicalJson(e.locator))
+    )
+      throw new Rejection(
+        "slice_snapshot_package_entry_mismatch",
+        u.unit.evidence_unit_id,
+      );
   }
-  return unitIds;
+  return { unitIds, packageHash: parsed.hash };
 }
 
 export async function runEvidenceSlice(
@@ -91,8 +118,9 @@ export async function runEvidenceSlice(
 ): Promise<SliceResult> {
   const steps: StepResult[] = [];
   let unitIds: string[];
+  let packageHash: string;
   try {
-    unitIds = preflight(input);
+    ({ unitIds, packageHash } = preflight(input));
   } catch (error) {
     if (error instanceof Rejection) {
       const stopped: StepResult = {
@@ -111,7 +139,10 @@ export async function runEvidenceSlice(
     stoppedAt: s,
   });
   for (const u of input.units) {
-    const o = await persistEvidenceUnit(pool, u);
+    const o = await persistEvidenceUnit(pool, {
+      ...u,
+      ...(u.snapshot ? { verifySnapshotAgainstPackageHash: packageHash } : {}),
+    });
     const s = record("S1_evidence_unit", u.unit.evidence_unit_id, o);
     steps.push(s);
     if (o.kind !== "created" && o.kind !== "converged") return stop(s);
@@ -123,6 +154,31 @@ export async function runEvidenceSlice(
   const s2 = record("S2_evidence_package", input.pkg.artifact_id, pk);
   steps.push(s2);
   if (pk.kind !== "created" && pk.kind !== "converged") return stop(s2);
+  // The package is now durable: verify every supplied snapshot against ITS governed hash (also on re-entry).
+  const supplied = input.units.filter((u) => u.snapshot);
+  for (const u of supplied) {
+    const snap = u.snapshot;
+    if (!snap) continue;
+    const v = await compareSnapshotToPackage(
+      { query: (t, p) => pool.query(t, p) },
+      snap,
+      packageHash,
+    );
+    const ok = "status" in v && v.status === "verified";
+    const sv: StepResult = {
+      step: "S2_snapshot_verification",
+      subject: u.unit.evidence_unit_id,
+      outcome: ok ? "converged" : "conflict",
+      ...(ok
+        ? {}
+        : {
+            code:
+              "conflict" in v ? "provenance_snapshot" : "snapshot_unverified",
+          }),
+    };
+    steps.push(sv);
+    if (!ok) return stop(sv);
+  }
   await faultPoint("after_package_commit");
   // Bind the STORED package id (a package reused by hash keeps its original ids).
   const bound = await bindPackage(pool, {
@@ -138,17 +194,32 @@ export async function runEvidenceSlice(
     complete: true,
     steps,
     evidencePackageId: pk.record.evidence_package_id,
+    snapshotVerification:
+      supplied.length === 0
+        ? "not_supplied"
+        : supplied.length === input.units.length
+          ? "verified"
+          : "partial",
   };
 }
 
 export interface SliceStatus {
   units: Record<string, "identical" | "missing" | "differs">;
-  package: "persisted_by_hash" | "absent" | "manifest_differs";
+  package:
+    | "persisted_by_hash"
+    | "absent"
+    | "manifest_differs"
+    | "stored_invalid";
   binding:
     | "bound_to_package"
     | "unbound"
     | "bound_to_other"
     | "attempt_missing";
+  /** Per unit: the supplied snapshot against the persisted package identified by the supplied package's governed hash. */
+  snapshots: Record<
+    string,
+    "verified" | "unverifiable" | "conflict" | "not_supplied"
+  >;
   complete: boolean;
 }
 
@@ -157,7 +228,7 @@ export async function evidenceSliceStatus(
   pool: Pool,
   input: SliceInput,
 ): Promise<SliceStatus> {
-  preflight(input);
+  const { packageHash } = preflight(input);
   const tx: Pick<Tx, "query"> = { query: (t, v) => pool.query(t, v) };
   const units: SliceStatus["units"] = {};
   for (const u of input.units) {
@@ -169,18 +240,34 @@ export async function evidenceSliceStatus(
         ? "differs"
         : "identical";
   }
+  const snapshots: SliceStatus["snapshots"] = {};
+  for (const u of input.units) {
+    if (!u.snapshot) {
+      snapshots[u.unit.evidence_unit_id] = "not_supplied";
+      continue;
+    }
+    const v = await compareSnapshotToPackage(tx, u.snapshot, packageHash);
+    snapshots[u.unit.evidence_unit_id] =
+      "conflict" in v
+        ? "conflict"
+        : v.status === "verified"
+          ? "verified"
+          : "unverifiable";
+  }
   const parsed = parsePackage(input.pkg);
-  const pk = await pool.query(
-    `SELECT p.evidence_package_id::text AS id, (a.canonical_payload #> '{manifest}' = $2::jsonb) AS same
-       FROM evidence_packages p JOIN artifacts a ON a.artifact_id = p.artifact_id WHERE p.package_hash = $1`,
-    [parsed.hash, JSON.stringify(parsed.manifest)],
-  );
-  const prow = pk.rows[0] as { id: string; same: boolean } | undefined;
-  const pkgState: SliceStatus["package"] = !prow
-    ? "absent"
-    : prow.same
-      ? "persisted_by_hash"
-      : "manifest_differs";
+  // the package identified by the supplied package's governed hash, validated AS STORED (never completed from a manifest match alone)
+  const stored = await readStoredPackageByHash(tx, parsed.hash);
+  const pkgState: SliceStatus["package"] =
+    stored.state === "absent"
+      ? "absent"
+      : stored.state === "invalid"
+        ? "stored_invalid"
+        : canonicalJson(stored.parsed.manifest) ===
+            canonicalJson(parsed.manifest)
+          ? "persisted_by_hash"
+          : "manifest_differs";
+  const prow =
+    stored.state === "valid" ? { id: stored.evidence_package_id } : undefined;
   const at = await pool.query(
     "SELECT evidence_package_id::text AS bound FROM program_run_attempts WHERE attempt_id = $1::uuid",
     [input.attemptId],
@@ -197,8 +284,12 @@ export async function evidenceSliceStatus(
     units,
     package: pkgState,
     binding,
+    snapshots,
     complete:
       Object.values(units).every((s) => s === "identical") &&
+      Object.values(snapshots).every(
+        (s) => s === "verified" || s === "not_supplied",
+      ) &&
       pkgState === "persisted_by_hash" &&
       binding === "bound_to_package",
   };

@@ -1,19 +1,24 @@
-// A5.1 Evidence Package persistence and binding (Evidence Package 5.1, 23-24; Foundation 001 `bind_evidence_package`).
+// A5.1 Evidence Package persistence and binding (Evidence Package 5.1, 9, 9.3, 10, 23-24; Foundation 001 `bind_evidence_package`).
 // Package identity is the governed PACKAGE hash (A1 evidencePackageHash = hash of the manifest ONLY, so execution metadata such as
 // created_at / frozen_at / selector_run_id / artifact ids never participates and a package may be reused by hash). Evidence identity
 // is the authored evidence UUID; body hashes are never an identity here.
-// The hash is NOT validation: before a package is accepted or bound its evidence entries are checked against the persisted unit and
-// rights rows, its claim entries against the persisted claim rows, and (when the caller names the slice's units) its evidence set must
-// equal that set exactly.
+// The hash is NOT validation. Before a package is persisted, reused, completed or bound it is validated against the active profile
+// (package-profile.ts: schema labels, required fields and types, references) and reconciled with the persisted rows: evidence entries
+// against unit and rights rows, claim entries against the claim rows through the accepted A3 frozen-entry verifier (initial fields,
+// explicit cursor/prefix, frozen state and hash), each SELECTED support ref against its own claim_supports row and exact target hash (not against every current row of the claim). One
+// normalized payload representation is hashed, compared and stored. No selection, scoring, scope or eligibility policy is implemented.
 import type { Pool } from "pg";
 
-import { evidencePackageHash } from "../identity/artifacts.js";
+import { canonicalJson, normalizeString } from "../identity/canonical-json.js";
+import { evidenceBodyHash } from "../identity/domains.js";
+import { supportHashFor } from "../identity/knowledge.js";
+import { readClaimLogs } from "../knowledge/claim-log.js";
+import { ClaimStateError } from "../knowledge/claim-state.js";
+import { verifyFrozenEntry } from "../knowledge/state-cursor.js";
 import {
-  assertJson,
+  isJsonObject,
   isUnique,
   Rejection,
-  requireHex64,
-  requireTimestamp,
   requireUuid,
   rethrow,
   runCommand,
@@ -23,17 +28,29 @@ import {
   type Row,
   type Tx,
 } from "./command.js";
+import {
+  parseArtifactFields,
+  parsePayload,
+  type ParsedPackage,
+} from "./package-profile.js";
+
+export { parsePayload } from "./package-profile.js";
 
 export interface AuthoredPackage {
   artifact_id: string;
   evidence_package_id: string;
-  /** artifacts.schema_version is NOT NULL and has no default: the caller supplies the governed value (the fixture uses its own). */
+  /** artifacts.schema_version has no default: the caller supplies the profile's governed label (see ARTIFACT_SCHEMA_LABELS). */
   schema_version: string;
   /** The whole artifact payload; `manifest` is what is hashed. */
   canonical_payload: Json;
   storage_uri: string | null;
   byte_size: number | null;
   created_at: string;
+}
+export interface PackageVerification {
+  verified: string[];
+  /** Named limits of what the accepted A3 verifier could not independently reproduce (for example the frozen-time usage ceiling). */
+  limits: string[];
 }
 export interface StoredPackage {
   artifact_id: string;
@@ -43,157 +60,383 @@ export interface StoredPackage {
   reused: boolean;
   /** True when a typed package row was added to an artifact another writer had already stored. */
   completed_existing_artifact: boolean;
+  verification: PackageVerification;
 }
 export interface PersistPackageOptions {
   /** The evidence unit ids the package must contain EXACTLY (the slice's units). */
   expectedUnitIds?: readonly string[];
 }
 
-interface Parsed {
-  hash: string;
-  manifest: Record<string, Json>;
-  evidence: Record<string, Json>[];
-  claims: Record<string, Json>[];
-}
-const isObj = (v: unknown): v is Record<string, Json> =>
-  typeof v === "object" && v !== null && !Array.isArray(v);
-
-/** Pure request validation (no database). */
-export function parsePackage(pkg: AuthoredPackage): Parsed {
-  requireUuid(pkg.artifact_id, "artifact_id");
+/** Pure request validation (no database): artifact row fields, id agreement, then the governed payload profile. */
+export function parsePackage(pkg: AuthoredPackage): ParsedPackage {
   requireUuid(pkg.evidence_package_id, "evidence_package_id");
-  if (typeof pkg.schema_version !== "string" || pkg.schema_version === "")
-    throw new Rejection("invalid_schema_version");
-  if (pkg.storage_uri !== null && typeof pkg.storage_uri !== "string")
-    throw new Rejection("invalid_storage_uri");
+  parseArtifactFields(pkg);
+  const parsed = parsePayload(pkg.canonical_payload);
+  if (parsed.payload.artifact_id !== pkg.artifact_id)
+    throw new Rejection("package_artifact_id_mismatch");
+  if (parsed.payload.id !== pkg.evidence_package_id)
+    throw new Rejection("package_id_mismatch");
+  return parsed;
+}
+
+/**
+ * The ACTIVE bounded fixture representation of a claim subject: every persisted claim carries `subject = {"entity_ref": <string>}`
+ * and the package freezes it as `subject_ref`. This is not a universal subject mapper: any other persisted shape is refused.
+ */
+export function claimSubjectRef(subject: unknown): string {
   if (
-    pkg.byte_size !== null &&
-    (!Number.isSafeInteger(pkg.byte_size) || pkg.byte_size < 0)
+    !isJsonObject(subject) ||
+    Object.keys(subject).join() !== "entity_ref" ||
+    typeof subject.entity_ref !== "string" ||
+    subject.entity_ref === ""
   )
-    throw new Rejection("invalid_byte_size");
-  requireTimestamp(pkg.created_at, "artifact.created_at");
-  const payload = assertJson(pkg.canonical_payload, "canonical_payload");
-  if (isObj(payload)) {
-    if (
-      payload.artifact_id !== undefined &&
-      payload.artifact_id !== pkg.artifact_id
-    )
-      throw new Rejection("package_artifact_id_mismatch");
-    if (payload.id !== undefined && payload.id !== pkg.evidence_package_id)
-      throw new Rejection("package_id_mismatch");
-  }
-  return parsePayload(payload);
+    throw new Rejection(
+      "package_claim_subject_unsupported",
+      "only the bounded fixture representation {entity_ref} is supported",
+    );
+  return subject.entity_ref;
 }
 
-/** Manifest-level validation of a stored or authored artifact payload. */
-export function parsePayload(payload: Json): Parsed {
-  if (!isObj(payload) || !isObj(payload.manifest))
-    throw new Rejection("package_manifest_missing");
-  const hash = evidencePackageHash(payload);
-  if (payload.package_hash !== undefined && payload.package_hash !== hash)
-    throw new Rejection("package_hash_field_mismatch");
-  const evidence = payload.manifest.evidence;
-  const claims = payload.manifest.claims;
-  if (!Array.isArray(evidence) || !evidence.every(isObj))
-    throw new Rejection("package_evidence_missing");
-  if (!Array.isArray(claims) || !claims.every(isObj))
-    throw new Rejection("package_claims_missing");
-  const eIds = evidence.map((e) =>
-    requireUuid(e.evidence_unit_id, "evidence entry"),
-  );
-  if (new Set(eIds).size !== eIds.length)
-    throw new Rejection("package_evidence_duplicate");
-  const cIds = claims.map((c) => requireUuid(c.claim_id, "claim entry"));
-  if (new Set(cIds).size !== cIds.length)
-    throw new Rejection("package_claim_duplicate");
-  for (const c of claims)
-    requireHex64(c.claim_content_hash, "claim_content_hash");
-  return { hash, manifest: payload.manifest, evidence, claims };
-}
-
+const asObj = (v: unknown): Record<string, Json> | undefined =>
+  isJsonObject(v) ? v : undefined;
 const list = (v: Json | undefined): Json[] => (Array.isArray(v) ? v : []);
 
-/** Package entries against the persisted unit, rights and claim rows (the same relationships the fixture verifier enforces). */
+/** The slice's units must be EXACTLY the package's evidence set (checked on request, stored, retry and race-winner paths alike). */
+function assertUnitSet(p: ParsedPackage, options: PersistPackageOptions): void {
+  if (!options.expectedUnitIds) return;
+  const ids = p.evidence.map((e) => e.evidence_unit_id);
+  if ([...ids].sort().join() !== [...options.expectedUnitIds].sort().join())
+    throw new Rejection(
+      "package_units_mismatch",
+      "the package's evidence set differs from the slice's units",
+    );
+}
+
+interface UnitRow {
+  evidence_unit_id: string;
+  content_hash: string;
+  evidence_type: string;
+  rights_version_id: string;
+  canonical_content: string;
+  policy: unknown;
+}
+
+/** Package entries against persisted rows. Throws {@link Rejection}; returns what the A3 verifier could and could not prove. */
 async function validateReferences(
-  tx: Tx,
-  p: Parsed,
+  tx: Pick<Tx, "query">,
+  p: ParsedPackage,
   options: PersistPackageOptions,
-): Promise<void> {
-  const ids = p.evidence.map((e) => e.evidence_unit_id as string);
-  if (options.expectedUnitIds) {
-    const want = [...options.expectedUnitIds].sort().join();
-    if ([...ids].sort().join() !== want)
-      throw new Rejection(
-        "package_units_mismatch",
-        "the package's evidence set differs from the slice's units",
-      );
-  }
+): Promise<PackageVerification> {
+  const ids = p.evidence.map((e) => e.evidence_unit_id);
+  assertUnitSet(p, options);
   const units = await tx.query(
-    `SELECT u.evidence_unit_id::text, u.content_hash, u.evidence_type, u.rights_version_id::text, r.policy
+    `SELECT u.evidence_unit_id::text, u.content_hash, u.evidence_type, u.rights_version_id::text, u.canonical_content, r.policy
        FROM evidence_units u JOIN rights_versions r USING (rights_version_id) WHERE u.evidence_unit_id = ANY($1::uuid[])`,
     [ids],
   );
   const byId = new Map(
-    units.rows.map((r) => [r.evidence_unit_id as string, r]),
+    (units.rows as unknown as UnitRow[]).map((r) => [r.evidence_unit_id, r]),
   );
   for (const e of p.evidence) {
-    const id = e.evidence_unit_id as string;
+    const id = e.evidence_unit_id;
     const u = byId.get(id);
     if (!u) throw new Rejection("package_evidence_unit_not_found", id);
-    const policy = u.policy as Record<string, Json>;
+    const policy = asObj(u.policy);
+    if (!policy) throw new Rejection("rights_policy_malformed", id);
+    const covered = policy.covered_source_identities;
+    const ceiling = asObj(policy.consumer_exposure_ceiling);
+    if (
+      !Array.isArray(covered) ||
+      !ceiling ||
+      typeof policy.quotation_permission !== "boolean" ||
+      typeof policy.paraphrase_permission !== "boolean"
+    )
+      throw new Rejection("rights_policy_malformed", id);
+    // Hashing 12.2 (bounded fixture body profile): canonical_content is a JSON string holding the exact NFC body and content_hash is
+    // SHA256(UTF8(body)). Recomputed for EVERY selected row, not only support targets, so the shared checker protects first
+    // persistence, reuse, binding, snapshot verification and slice status alike.
+    if (
+      typeof u.canonical_content !== "string" ||
+      normalizeString(u.canonical_content) !== u.canonical_content
+    )
+      throw new Rejection(
+        typeof u.canonical_content === "string"
+          ? "package_evidence_body_hash_mismatch"
+          : "package_evidence_body_shape",
+        id,
+      );
+    if (evidenceBodyHash(u.canonical_content) !== u.content_hash)
+      throw new Rejection("package_evidence_body_hash_mismatch", id);
     if (
       e.content_hash !== u.content_hash ||
       e.evidence_type !== u.evidence_type ||
       e.rights_version_id !== u.rights_version_id ||
-      !list(policy.covered_source_identities).includes(
-        e.source_identity ?? null,
-      )
+      !covered.includes(e.source_identity)
     )
       throw new Rejection("package_evidence_fields", id);
     if (
-      (e.quote_permission === true && policy.quotation_permission !== true) ||
-      (e.paraphrase_permission === true &&
-        policy.paraphrase_permission !== true)
+      (e.quote_permission && !policy.quotation_permission) ||
+      (e.paraphrase_permission && !policy.paraphrase_permission)
     )
       throw new Rejection("package_evidence_permission_exceeds_rights", id);
-    const ceiling = isObj(policy.consumer_exposure_ceiling)
-      ? policy.consumer_exposure_ceiling
-      : {};
-    const exposure = isObj(e.consumer_exposure) ? e.consumer_exposure : {};
-    for (const consumer of Object.keys(exposure))
-      if (!list(ceiling[consumer]).includes(exposure[consumer] ?? null))
+    for (const [consumer, mode] of Object.entries(e.consumer_exposure))
+      if (!list(ceiling[consumer]).includes(mode))
         throw new Rejection(
           "package_evidence_exposure_exceeds_rights",
           `${id} ${consumer}`,
         );
   }
-  const claimIds = p.claims.map((c) => c.claim_id as string);
-  const claims = await tx.query(
-    `SELECT claim_id::text, content_hash, claim_kind, origin, subject_domain, predicate FROM claims WHERE claim_id = ANY($1::uuid[])`,
-    [claimIds],
-  );
-  const claimById = new Map(claims.rows.map((r) => [r.claim_id as string, r]));
+  const verification: PackageVerification = { verified: [], limits: [] };
+  if (p.claims.length === 0) return verification;
+  let logs;
+  try {
+    logs = await readClaimLogs(
+      tx,
+      p.claims.map((c) => c.claim_id),
+    );
+  } catch (error) {
+    if (error instanceof ClaimStateError)
+      throw new Rejection(
+        error.code === "claim_not_found"
+          ? "package_claim_not_found"
+          : "package_claim_unreadable",
+        error.message,
+      );
+    throw error;
+  }
+  const limits = new Set<string>();
   const evidenceSet = new Set(ids);
-  for (const c of p.claims) {
-    const id = c.claim_id as string;
-    const row = claimById.get(id);
-    if (!row) throw new Rejection("package_claim_not_found", id);
+  const supportRows = await tx.query(
+    `SELECT claim_support_id::text, claim_id::text, support_kind, support_role, evidence_unit_id::text,
+            derivation_run_id::text, external_support_identity, support_hash
+       FROM claim_supports WHERE claim_id = ANY($1::uuid[])`,
+    [p.claims.map((c) => c.claim_id)],
+  );
+  for (const [i, c] of p.claims.entries()) {
+    const log = logs[i];
+    if (!log) throw new Error("claim log missing");
+    const row = log.claim;
+    const entry = c.raw;
     if (
       c.claim_content_hash !== row.content_hash ||
-      c.kind !== row.claim_kind ||
-      c.origin !== row.origin ||
-      c.subject_domain !== row.subject_domain ||
-      c.predicate !== row.predicate
+      entry.kind !== row.claim_kind ||
+      entry.origin !== row.origin ||
+      entry.subject_domain !== row.subject_domain ||
+      entry.predicate !== row.predicate ||
+      canonicalJson(entry.value) !== canonicalJson(row.value)
     )
-      throw new Rejection("package_claim_fields", id);
-    for (const ref of list(c.support_refs)) {
-      const unit = isObj(ref) ? ref.evidence_unit_id : null;
-      if (typeof unit === "string" && !evidenceSet.has(unit))
+      throw new Rejection("package_claim_fields", c.claim_id);
+    if (entry.subject_ref !== claimSubjectRef(row.subject))
+      throw new Rejection("package_claim_subject_mismatch", c.claim_id);
+    try {
+      const v = verifyFrozenEntry({
+        entry,
+        claim: {
+          claim_id: row.claim_id,
+          content_hash: row.content_hash,
+          initial_status: row.initial_status,
+          initial_usage_class: row.initial_usage_class,
+        },
+        liveEvents: log.events,
+        frozenCeiling: { unavailable: true },
+        currentCeiling: "assertable",
+      });
+      for (const l of v.limits) limits.add(l);
+    } catch (error) {
+      if (error instanceof ClaimStateError)
         throw new Rejection(
-          "package_support_unit_not_in_package",
-          `${id} ${unit}`,
+          `package_claim_state_${error.code}`,
+          `${c.claim_id}: ${error.message}`,
         );
+      throw error;
     }
+    // support refs: Evidence 9 freezes the SELECTED refs/hashes; Claims 4.3 defines target/role/hash validation. Neither requires
+    // the selected set to equal every support row the claim has now, so a later lawful support row neither invalidates the frozen
+    // package nor is demanded of it (no support-sufficiency or selection policy is inferred). Every SELECTED ref must match its own
+    // persisted row for THIS claim (id, kind, role, targets, hash) and resolve to its exact target.
+    const rows = supportRows.rows.filter((r) => r.claim_id === c.claim_id);
+    for (const ref of c.support_refs) {
+      const stored = rows.find(
+        (r) => r.claim_support_id === ref.claim_support_id,
+      );
+      if (
+        stored?.support_kind !== ref.support_kind ||
+        stored.support_role !== ref.support_role ||
+        stored.evidence_unit_id !== ref.evidence_unit_id ||
+        stored.derivation_run_id !== ref.derivation_run_id ||
+        stored.external_support_identity !== ref.external_support_identity ||
+        stored.support_hash !== ref.support_hash
+      )
+        throw new Rejection("package_support_rows_mismatch", c.claim_id);
+      await resolveSupportHash(tx, ref, byId, evidenceSet, c.claim_id);
+    }
+  }
+  verification.verified.push(
+    "evidence entries against unit and rights rows",
+    "claim entries: identity, initial fields, cursor/prefix, frozen state and hash (accepted A3 verifier)",
+    "support refs against claim_supports rows and their exact target hashes",
+  );
+  verification.limits.push(...limits);
+  return verification;
+}
+
+async function resolveSupportHash(
+  tx: Pick<Tx, "query">,
+  ref: ParsedPackage["claims"][number]["support_refs"][number],
+  units: Map<string, UnitRow>,
+  evidenceSet: Set<string>,
+  claimId: string,
+): Promise<void> {
+  const where = `${claimId} ${ref.claim_support_id}`;
+  let expected: string;
+  switch (ref.support_kind) {
+    case "evidence": {
+      const id = ref.evidence_unit_id;
+      const unit = id === null ? undefined : units.get(id);
+      if (id === null || !evidenceSet.has(id) || !unit)
+        throw new Rejection("package_support_unit_not_in_package", where);
+      expected = supportHashFor("evidence", {
+        evidenceBody: unit.canonical_content,
+      });
+      break;
+    }
+    case "derivation": {
+      const run = await tx.query(
+        "SELECT output, output_hash FROM derivation_runs WHERE derivation_run_id = $1::uuid",
+        [ref.derivation_run_id],
+      );
+      if (!run.rows[0])
+        throw new Rejection("package_support_target_not_found", where);
+      // Claims 4.3: a derivation support hash equals derivation_runs.output_hash (and the accepted A1 output projection agrees)
+      expected = supportHashFor("derivation", {
+        derivationOutput: run.rows[0].output,
+      });
+      if (run.rows[0].output_hash !== expected)
+        throw new Rejection("package_support_hash_mismatch", where);
+      break;
+    }
+    case "signal":
+    case "continuity": {
+      const m = /^artifact:([0-9a-f-]{36})$/.exec(
+        ref.external_support_identity ?? "",
+      );
+      if (!m?.[1])
+        throw new Rejection("package_support_ref_shape", `${where} identity`);
+      const carrier = await tx.query(
+        "SELECT canonical_payload, content_hash FROM artifacts WHERE artifact_id = $1::uuid",
+        [m[1]],
+      );
+      if (!carrier.rows[0])
+        throw new Rejection("package_support_target_not_found", where);
+      // Claims 4.3: support_hash == artifacts.content_hash of that exact carrier
+      if (carrier.rows[0].content_hash !== ref.support_hash)
+        throw new Rejection("package_support_hash_mismatch", where);
+      expected = supportHashFor(ref.support_kind, {
+        carrier: carrier.rows[0].canonical_payload,
+      });
+      break;
+    }
+    default:
+      // no governed support-hash rule exists for this kind: refuse rather than accept an unresolvable reference
+      throw new Rejection("package_support_kind_unsupported", where);
+  }
+  if (expected !== ref.support_hash)
+    throw new Rejection("package_support_hash_mismatch", where);
+}
+
+interface ArtifactRow {
+  artifact_id: string;
+  artifact_type: string;
+  schema_version: string;
+  content_hash: string;
+  storage_uri: string | null;
+  byte_size: string | number | null;
+  canonical_payload: unknown;
+  created_text: string;
+  evidence_package_id: string | null;
+  package_hash: string | null;
+}
+
+/** Validates a package AS STORED (artifact type, schema label, hash relationship, payload profile, references). */
+async function validateStored(
+  tx: Pick<Tx, "query">,
+  row: ArtifactRow,
+): Promise<{ parsed: ParsedPackage; verification: PackageVerification }> {
+  try {
+    if (row.artifact_type !== "evidence_package")
+      throw new Rejection("artifact_type_mismatch");
+    parseArtifactFields({
+      artifact_id: row.artifact_id,
+      schema_version: row.schema_version,
+      storage_uri: row.storage_uri,
+      byte_size: row.byte_size === null ? null : Number(row.byte_size),
+      created_at: row.created_text,
+    });
+    const parsed = parsePayload(row.canonical_payload);
+    if (parsed.hash !== row.content_hash)
+      throw new Rejection("stored_hash_mismatch");
+    if (row.package_hash !== null && row.package_hash !== row.content_hash)
+      throw new Rejection("stored_package_hash_mismatch");
+    if (parsed.payload.artifact_id !== row.artifact_id)
+      throw new Rejection("package_artifact_id_mismatch");
+    if (
+      row.evidence_package_id !== null &&
+      parsed.payload.id !== row.evidence_package_id
+    )
+      throw new Rejection("package_id_mismatch");
+    return { parsed, verification: await validateReferences(tx, parsed, {}) };
+  } catch (error) {
+    if (error instanceof Rejection)
+      throw new Rejection(
+        "stored_package_invalid",
+        `${error.code}: ${error.message}`,
+      );
+    throw error;
+  }
+}
+
+const artifactSelect = `SELECT a.artifact_id::text, a.artifact_type, a.schema_version, a.content_hash, a.storage_uri, a.byte_size,
+       a.canonical_payload, to_char(a.created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS created_text,
+       p.evidence_package_id::text, p.package_hash
+  FROM artifacts a LEFT JOIN evidence_packages p ON p.artifact_id = a.artifact_id`;
+
+export type StoredPackageState =
+  | { state: "absent" }
+  | { state: "invalid"; detail: string }
+  | {
+      state: "valid";
+      parsed: ParsedPackage;
+      artifact_id: string;
+      evidence_package_id: string;
+    };
+
+/**
+ * Read-only: the ONE package explicitly identified by its governed hash, validated as stored (artifact type and schema label, payload
+ * profile, recomputed manifest hash, artifact / typed row / hash / id relationships, references). No other package is scanned. A
+ * package that does not validate is `invalid`; callers must not report verified or complete from its manifest alone.
+ */
+export async function readStoredPackageByHash(
+  tx: Pick<Tx, "query">,
+  hash: string,
+): Promise<StoredPackageState> {
+  const row = (
+    await tx.query(`${artifactSelect} WHERE p.package_hash = $1`, [hash])
+  ).rows[0] as ArtifactRow | undefined;
+  if (!row) return { state: "absent" };
+  try {
+    const v = await validateStored(tx, row);
+    if (v.parsed.hash !== hash)
+      throw new Rejection("stored_hash_mismatch", "identified hash differs");
+    return {
+      state: "valid",
+      parsed: v.parsed,
+      artifact_id: row.artifact_id,
+      evidence_package_id: String(row.evidence_package_id),
+    };
+  } catch (error) {
+    if (error instanceof Rejection)
+      return { state: "invalid", detail: error.message };
+    throw error;
   }
 }
 
@@ -204,27 +447,19 @@ const NAMED = [
   "evidence_packages_package_hash_key",
   "evidence_packages_artifact_id_key",
 ];
+const isRace = (e: DbError): boolean => isUnique(e, ...NAMED);
 
-async function readByHash(
-  tx: Tx,
-  hash: string,
-  manifest: Json,
-): Promise<Row | undefined> {
-  const r = await tx.query(
-    `SELECT p.evidence_package_id::text, p.artifact_id::text, p.package_hash,
-            (a.canonical_payload #> '{manifest}' = $2::jsonb) AS same_manifest
-       FROM evidence_packages p JOIN artifacts a ON a.artifact_id = p.artifact_id WHERE p.package_hash = $1`,
-    [hash, JSON.stringify(manifest)],
-  );
-  return r.rows[0];
-}
-
-const stored = (r: Row, extra: Partial<StoredPackage> = {}): StoredPackage => ({
-  artifact_id: r.artifact_id as string,
-  evidence_package_id: r.evidence_package_id as string,
-  package_hash: r.package_hash as string,
+const stored = (
+  r: { artifact_id: string; evidence_package_id: string; package_hash: string },
+  verification: PackageVerification,
+  extra: Partial<StoredPackage> = {},
+): StoredPackage => ({
+  artifact_id: r.artifact_id,
+  evidence_package_id: r.evidence_package_id,
+  package_hash: r.package_hash,
   reused: false,
   completed_existing_artifact: false,
+  verification,
   ...extra,
 });
 
@@ -233,7 +468,7 @@ export async function persistEvidencePackage(
   pkg: AuthoredPackage,
   options: PersistPackageOptions = {},
 ): Promise<Outcome<StoredPackage>> {
-  let parsed: Parsed;
+  let parsed: ParsedPackage;
   try {
     parsed = parsePackage(pkg);
     for (const id of options.expectedUnitIds ?? [])
@@ -243,50 +478,95 @@ export async function persistEvidencePackage(
       return { kind: "rejected", code: error.code, detail: error.message };
     throw error;
   }
-  const manifestJson = JSON.stringify(parsed.manifest);
+  const payloadJson = JSON.stringify(parsed.payload);
   return runCommand(pool, async (tx) => {
-    await validateReferences(tx, parsed, options);
+    const requestVerification = await validateReferences(tx, parsed, options);
     for (let round = 0; round < 3; round += 1) {
-      const byHash = await readByHash(tx, parsed.hash, parsed.manifest);
+      // 1. an existing typed package with this governed hash: reuse after validating what is stored
+      const byHash = (
+        await tx.query(`${artifactSelect} WHERE p.package_hash = $1`, [
+          parsed.hash,
+        ])
+      ).rows[0] as ArtifactRow | undefined;
       if (byHash) {
-        if (byHash.same_manifest !== true)
+        let validated;
+        try {
+          validated = await validateStored(tx, byHash);
+        } catch (error) {
+          if (error instanceof Rejection)
+            return {
+              kind: "conflict",
+              code: error.code,
+              stored: byHash.artifact_id,
+              detail: error.message,
+            };
+          throw error;
+        }
+        if (
+          canonicalJson(validated.parsed.manifest) !==
+          canonicalJson(parsed.manifest)
+        )
           return {
             kind: "conflict",
             code: "manifest_differs_for_hash",
-            stored: stored(byHash),
+            stored: byHash.artifact_id,
             detail: "a package with this hash stores a different manifest",
           };
         return {
           kind: "converged",
-          record: stored(byHash, { reused: true }),
+          record: stored(
+            {
+              artifact_id: byHash.artifact_id,
+              evidence_package_id: String(byHash.evidence_package_id),
+              package_hash: parsed.hash,
+            },
+            validated.verification,
+            { reused: true },
+          ),
         };
       }
-      // A preexisting artifact WITHOUT its typed package row can come from another writer. It is completed only when its manifest is
-      // the request's manifest (the governed identity); anything else is a conflict, never an assumption.
-      const art = await tx.query(
-        `SELECT artifact_id::text, (canonical_payload #> '{manifest}' = $2::jsonb) AS same_manifest,
-                EXISTS (SELECT 1 FROM evidence_packages p WHERE p.artifact_id = a.artifact_id) AS typed
-           FROM artifacts a WHERE artifact_type = 'evidence_package' AND content_hash = $1`,
-        [parsed.hash, manifestJson],
-      );
-      const existing = art.rows[0];
-      if (existing) {
-        // The typed row may have been committed between the two reads above (the winner writes both in one statement): re-read by
-        // hash once more before calling an artifact "untyped". A typed row that stays invisible to the hash lookup is another
-        // writer's inconsistent state and is a conflict.
-        if (
-          existing.typed === true &&
-          existing.same_manifest === true &&
-          round < 2
+      // 2. a preexisting artifact WITHOUT its typed row (another writer): completed only after its ACTUAL stored payload, schema
+      //    label and references validate and it carries the request's manifest and package id
+      const existing = (
+        await tx.query(
+          `${artifactSelect} WHERE a.artifact_type = 'evidence_package' AND a.content_hash = $1`,
+          [parsed.hash],
         )
-          continue;
-        if (existing.same_manifest !== true || existing.typed === true)
+      ).rows[0] as ArtifactRow | undefined;
+      if (existing) {
+        // the typed row may have been committed between the two reads (the winner writes both in one statement): re-read once more
+        if (existing.evidence_package_id !== null && round < 2) continue;
+        if (existing.evidence_package_id !== null)
           return {
             kind: "conflict",
             code: "artifact_differs_for_hash",
-            stored: existing,
+            stored: existing.artifact_id,
             detail:
-              "an artifact with this package hash exists without a matching typed package row",
+              "the artifact carries a typed row for a different package hash",
+          };
+        let validated;
+        try {
+          validated = await validateStored(tx, existing);
+        } catch (error) {
+          if (error instanceof Rejection)
+            return {
+              kind: "conflict",
+              code: "stored_package_invalid",
+              stored: existing.artifact_id,
+              detail: error.message,
+            };
+          throw error;
+        }
+        if (
+          canonicalJson(validated.parsed.manifest) !==
+            canonicalJson(parsed.manifest) ||
+          validated.parsed.payload.id !== pkg.evidence_package_id
+        )
+          return {
+            kind: "conflict",
+            code: "artifact_differs_for_hash",
+            stored: existing.artifact_id,
+            detail: "stored manifest or package id differs from the request",
           };
         const occupied = await tx.query(
           "SELECT 1 FROM evidence_packages WHERE evidence_package_id = $1::uuid",
@@ -312,6 +592,7 @@ export async function persistEvidencePackage(
                 evidence_package_id: pkg.evidence_package_id,
                 package_hash: parsed.hash,
               },
+              validated.verification,
               { completed_existing_artifact: true },
             ),
           };
@@ -348,7 +629,7 @@ export async function persistEvidencePackage(
           parsed.hash,
           pkg.storage_uri,
           pkg.byte_size,
-          JSON.stringify(pkg.canonical_payload),
+          payloadJson,
           pkg.created_at,
           pkg.evidence_package_id,
         ],
@@ -356,11 +637,14 @@ export async function persistEvidencePackage(
       if (ins.ok)
         return {
           kind: "created",
-          record: stored({
-            artifact_id: pkg.artifact_id,
-            evidence_package_id: pkg.evidence_package_id,
-            package_hash: parsed.hash,
-          }),
+          record: stored(
+            {
+              artifact_id: pkg.artifact_id,
+              evidence_package_id: pkg.evidence_package_id,
+              package_hash: parsed.hash,
+            },
+            requestVerification,
+          ),
         };
       if (!isRace(ins.error)) rethrow(ins.error);
       // Savepoint rolled back: re-read. A hash race converges on the winner; a UUID race is caught by the occupied checks above.
@@ -368,7 +652,6 @@ export async function persistEvidencePackage(
     throw new Error("package persistence did not settle after re-reads");
   });
 }
-const isRace = (e: DbError): boolean => isUnique(e, ...NAMED);
 
 // ---------------------------------------------------------------------------------------------------------------- binding
 export interface BindInput {
@@ -419,24 +702,25 @@ export async function bindPackage(
     };
     const row = await current();
     if (!row) return { kind: "rejected", code: "attempt_not_found" };
-    const early = decide(row.bound);
-    if (early) return early;
-    const pkg = await tx.query(
-      `SELECT a.canonical_payload AS payload FROM evidence_packages p JOIN artifacts a ON a.artifact_id = p.artifact_id WHERE p.evidence_package_id = $1::uuid`,
-      [evidencePackageId],
-    );
-    const payload = pkg.rows[0]?.payload as Json | undefined;
-    if (payload === undefined)
-      return { kind: "rejected", code: "package_not_found" };
-    if (row.state !== "PENDING")
-      return { kind: "rejected", code: "attempt_not_pending" };
-    // The binding is accepted only for a package that still validates against the persisted rows (and the slice's units).
-    const parsed = parsePayload(payload);
-    await validateReferences(tx, parsed, {
+    // The requested package is validated BEFORE any decision, so a same-package retry and a race-winner convergence are validated
+    // exactly like a first binding (artifact type, schema label, hash relationship, payload profile, references, slice unit set).
+    const pkg = (
+      await tx.query(
+        `${artifactSelect} WHERE p.evidence_package_id = $1::uuid`,
+        [evidencePackageId],
+      )
+    ).rows[0] as ArtifactRow | undefined;
+    if (!pkg) return { kind: "rejected", code: "package_not_found" };
+    const validated = await validateStored(tx, pkg);
+    assertUnitSet(validated.parsed, {
       ...(input.expectedUnitIds
         ? { expectedUnitIds: input.expectedUnitIds }
         : {}),
     });
+    const early = decide(row.bound);
+    if (early) return early;
+    if (row.state !== "PENDING")
+      return { kind: "rejected", code: "attempt_not_pending" };
     const bind = await tx.attempt(
       "SELECT bind_evidence_package($1::uuid, $2::uuid)",
       [attemptId, evidencePackageId],

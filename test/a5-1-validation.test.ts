@@ -1,8 +1,16 @@
 import { describe, expect, it } from "vitest";
 
-import { Rejection, requireTimestamp } from "../src/runtime/command.js";
-import { parsePackage } from "../src/runtime/package.js";
-import { fixturePackageArtifact } from "./support/a5-fixture.js";
+import { canonicalJson } from "../src/identity/canonical-json.js";
+import {
+  assertJson,
+  Rejection,
+  requireTimestamp,
+} from "../src/runtime/command.js";
+import { claimSubjectRef, parsePackage } from "../src/runtime/package.js";
+import {
+  fixturePackageArtifact,
+  rebuildPackage,
+} from "./support/a5-fixture.js";
 
 describe("A5.1 request validation (no database)", () => {
   it("keeps the authored timestamp string and accepts 0-6 fractional digits and numeric offsets", () => {
@@ -51,18 +59,88 @@ describe("A5.1 request validation (no database)", () => {
         code: "package_hash_field_mismatch",
       }) as Rejection,
     );
-    expect(
-      bad((p) => {
-        const payload = p.canonical_payload as Record<string, unknown>;
-        delete payload.package_hash; // a changed manifest would otherwise fail the hash-field check first
-        const m = payload.manifest as { evidence: unknown[] };
-        m.evidence.push(m.evidence[0]);
-      }),
+    expect(() =>
+      parsePackage(
+        rebuildPackage((payload) => {
+          const m = payload.manifest as { evidence: unknown[] };
+          m.evidence.push(m.evidence[0]);
+        }),
+      ),
     ).toThrow(
       expect.objectContaining({
         code: "package_evidence_duplicate",
       }) as Rejection,
     );
     expect(bad((p) => (p.byte_size = -1))).toThrow(Rejection);
+  });
+});
+
+describe("A5.1 JSON normalization keeps every own key (controls)", () => {
+  const withProto = (): unknown =>
+    JSON.parse(
+      '{"__proto__":{"changed":true},"x":1,"nested":{"__proto__":[1,{"__proto__":2}]},"list":[{"__proto__":"a","constructor":"b"}]}',
+    );
+  it("preserves own __proto__/constructor keys at every depth, in objects and inside arrays, without touching prototypes", () => {
+    const out = assertJson(withProto(), "v") as Record<string, unknown>;
+    expect(Object.keys(out).sort()).toEqual([
+      "__proto__",
+      "list",
+      "nested",
+      "x",
+    ]);
+    expect(Object.getPrototypeOf(out)).toBe(Object.prototype);
+    expect(({} as Record<string, unknown>).changed).toBeUndefined();
+    const list = out.list as Record<string, unknown>[];
+    expect(Object.keys(list[0] ?? {}).sort()).toEqual([
+      "__proto__",
+      "constructor",
+    ]);
+    const nested = out.nested as Record<string, unknown>;
+    expect(
+      Array.isArray(
+        Object.getOwnPropertyDescriptor(nested, "__proto__")?.value,
+      ),
+    ).toBe(true);
+  });
+  it("hashes, compares and serializes ONE representation: the normalized copy equals the source key for key", () => {
+    const source = withProto();
+    const out = assertJson(source, "v");
+    expect(canonicalJson(out)).toBe(canonicalJson(source));
+    expect(JSON.stringify(out)).toBe(JSON.stringify(source));
+    expect(JSON.stringify(out)).toContain('"__proto__":{"changed":true}');
+  });
+  it("still rejects non-integers, unsafe integers, -0, undefined and class instances", () => {
+    for (const bad of [
+      1.5,
+      Number.MAX_SAFE_INTEGER + 1,
+      -0,
+      undefined,
+      new Date(),
+      new Map(),
+    ])
+      expect(() => assertJson({ a: [bad] }, "v")).toThrow(Rejection);
+  });
+});
+
+describe("A5.1 claim subject reconciliation (bounded fixture representation)", () => {
+  it("accepts exactly {entity_ref: non-empty string} and refuses every other persisted subject shape", () => {
+    expect(claimSubjectRef({ entity_ref: "entity_northbridge_fc" })).toBe(
+      "entity_northbridge_fc",
+    );
+    for (const bad of [
+      null,
+      "entity_northbridge_fc",
+      [],
+      {},
+      { entity_ref: "" },
+      { entity_ref: 5 },
+      { entity_ref: "a", extra: "b" },
+      { other: "a" },
+    ])
+      expect(() => claimSubjectRef(bad)).toThrow(
+        expect.objectContaining({
+          code: "package_claim_subject_unsupported",
+        }) as Rejection,
+      );
   });
 });

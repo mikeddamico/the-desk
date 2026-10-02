@@ -25,10 +25,11 @@ import {
   accountIds,
   claimIds,
   fixtureUnits,
+  prepareUnitsAndSupports,
   seedPrerequisites,
   sliceInput,
 } from "../support/a5-fixture.js";
-import { childBackends, observe, spawnChild } from "../support/a5-crash.js";
+import { observe, withChild } from "../support/a5-crash.js";
 import { backendPid, waitForBlocked } from "../support/pg-wait.js";
 
 const databaseUrl = process.env.TEST_DATABASE_URL;
@@ -354,6 +355,7 @@ suite("A5.1 evidence units (disposable PostgreSQL 17, runtime role)", () => {
     const env = await fresh();
     const pool = actorPool(env);
     try {
+      await prepareUnitsAndSupports(env.migrator, pool);
       const input = sliceInput();
       expect((await runEvidenceSlice(pool, input)).complete).toBe(true);
       const withSnapshot = must(input.units[0]);
@@ -628,27 +630,26 @@ suite("A5.1 claim-state events", () => {
     const pool = actorPool(env);
     try {
       const e1 = ev();
-      const child = spawnChild({
-        url: env.runtimeUrl,
-        tag: "c8",
-        fault: "after_commit_before_return",
-        scenario: "claim",
-        event: e1,
-      });
-      await child.held;
-      await observe(
-        async () =>
-          (await lookupClaimEvent(pool, e1.claim_state_event_id)) !== null,
-        "claim event committed",
+      const done = await withChild(
+        env.owner,
+        env.name,
+        {
+          url: env.runtimeUrl,
+          tag: "c8",
+          fault: "after_commit_before_return",
+          scenario: "claim",
+          event: e1,
+        },
+        async () => {
+          await observe(
+            async () =>
+              (await lookupClaimEvent(pool, e1.claim_state_event_id)) !== null,
+            "claim event committed",
+          );
+        },
       );
-      const done = await child.kill();
       expect(done.signal).toBe("SIGKILL");
       expect(done.stdout).not.toContain("COMPLETED_WITHOUT_FAULT");
-      await observe(
-        async () =>
-          (await childBackends(env.owner, env.name, "c8")).length === 0,
-        "child backends gone",
-      );
       expect((await appendClaimStateEvent(pool, e1)).kind).toBe("converged");
       expect(
         await lookupClaimEvent(pool, e1.claim_state_event_id),
@@ -663,47 +664,47 @@ suite("A5.1 claim-state events", () => {
   it("C9: child killed while holding the claim advisory lock mid-transaction: nothing committed, lock released, a second worker appends", async () => {
     const env = await fresh();
     const pool = actorPool(env);
+    let waiting: Promise<unknown> | undefined;
     try {
       const e1 = ev();
-      const child = spawnChild({
-        url: env.runtimeUrl,
-        tag: "c9",
-        fault: "mid_transaction_holding_lock",
-        scenario: "claim",
-        event: e1,
-      });
-      await child.held;
-      await observe(
-        async () =>
-          Number(
-            (
-              await ownerRows(
-                env,
-                `SELECT count(*) AS n FROM pg_locks l JOIN pg_stat_activity a ON a.pid = l.pid
-                  WHERE l.locktype = 'advisory' AND l.classid = $1 AND l.granted AND a.application_name = 'a5child_c9'`,
-                [GUARD_CLASS],
-              )
-            )[0]?.n,
-          ) > 0,
-        "advisory lock held by the child's backend",
+      const done = await withChild(
+        env.owner,
+        env.name,
+        {
+          url: env.runtimeUrl,
+          tag: "c9",
+          fault: "mid_transaction_holding_lock",
+          scenario: "claim",
+          event: e1,
+        },
+        async () => {
+          await observe(
+            async () =>
+              Number(
+                (
+                  await ownerRows(
+                    env,
+                    `SELECT count(*) AS n FROM pg_locks l JOIN pg_stat_activity a ON a.pid = l.pid
+                      WHERE l.locktype = 'advisory' AND l.classid = $1 AND l.granted AND a.application_name = 'a5child_c9'`,
+                    [GUARD_CLASS],
+                  )
+                )[0]?.n,
+              ) > 0,
+            "advisory lock held by the child's backend",
+          );
+          // a competitor is blocked by the held lock (database-observed); the kill in withChild releases it
+          waiting = appendClaimStateEvent(pool, ev());
+          await waitForBlocked(env.owner, env.name, (w) =>
+            w.some((x) => x.locktype === "advisory"),
+          );
+        },
       );
-      // a competitor is blocked by the held lock (database-observed), then released by the kill
-      const waiting = appendClaimStateEvent(pool, ev());
-      await waitForBlocked(env.owner, env.name, (w) =>
-        w.some((x) => x.locktype === "advisory"),
-      );
-      const done = await child.kill();
       expect(done.signal).toBe("SIGKILL");
-      const second = await waiting;
-      expect(second.kind).toBe("created");
-      await observe(
-        async () =>
-          (await childBackends(env.owner, env.name, "c9")).length === 0,
-        "child backend gone",
-      );
+      expect(await waiting).toMatchObject({ kind: "created" });
       expect(await lookupClaimEvent(pool, e1.claim_state_event_id)).toBeNull();
       expect(await eventRows(env)).toEqual([1]);
     } finally {
+      await waiting?.catch(() => undefined);
       await pool.end();
       await env.close();
     }

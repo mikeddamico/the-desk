@@ -8,13 +8,11 @@
 import type { Pool, PoolClient } from "pg";
 
 export type Row = Record<string, unknown>;
-export type Json =
-  | null
-  | boolean
-  | number
-  | string
-  | Json[]
-  | { [key: string]: Json };
+export type Json = null | boolean | number | string | Json[] | JsonRecord;
+
+// A recursive alias cannot be written as Record<string, Json> directly; extending Record is the equivalent, lint-clean form.
+// eslint-disable-next-line @typescript-eslint/no-empty-object-type
+export interface JsonRecord extends Record<string, Json> {}
 
 export type Outcome<R> =
   | { kind: "created"; record: R }
@@ -53,10 +51,16 @@ export interface Tx {
   ): Promise<{ ok: true; rows: Row[] } | { ok: false; error: DbError }>;
 }
 
-/** Test-only fault hook (inactive unless a harness installs it). Production code never sets it. */
-export const faultHooks: { at?: (point: string) => Promise<void> } = {};
+/**
+ * Test-only fault seam. It is inert unless the process was started with DESK_TEST_FAULTS=1 AND a harness installed a hook under the
+ * registered symbol; nothing mutable is exported from this module. Production never sets either.
+ */
+const FAULT_HOOK = Symbol.for("the-desk.a5.test-fault-hook");
 export const faultPoint = async (point: string): Promise<void> => {
-  await faultHooks.at?.(point);
+  if (process.env.DESK_TEST_FAULTS !== "1") return;
+  const hook = (globalThis as Record<symbol, unknown>)[FAULT_HOOK];
+  if (typeof hook === "function")
+    await (hook as (name: string) => Promise<void>)(point);
 };
 
 export async function runCommand<R>(
@@ -197,7 +201,18 @@ export function requireTimestamp(value: unknown, what: string): string {
   return value;
 }
 
-/** Governed JSON number boundary (as A3): only safe integers; decimals travel as strings. */
+export const isJsonObject = (v: unknown): v is Record<string, Json> =>
+  typeof v === "object" &&
+  v !== null &&
+  !Array.isArray(v) &&
+  (Object.getPrototypeOf(v) === Object.prototype ||
+    Object.getPrototypeOf(v) === null);
+
+/**
+ * Governed JSON number boundary (as A3): only safe integers; decimals travel as strings. Returns the NORMALIZED copy: this is the ONE
+ * representation that is hashed, compared and stored. Every own key is preserved - properties are defined (never assigned), so an own
+ * key named `__proto__` neither changes the copy's prototype nor disappears.
+ */
 export function assertJson(value: unknown, path: string, depth = 0): Json {
   if (depth > 64) throw new Rejection("invalid_json", `${path} nested`);
   if (value === null || typeof value === "string" || typeof value === "boolean")
@@ -211,14 +226,15 @@ export function assertJson(value: unknown, path: string, depth = 0): Json {
     return value.map((v, i) =>
       assertJson(v, `${path}[${String(i)}]`, depth + 1),
     );
-  if (
-    typeof value === "object" &&
-    (Object.getPrototypeOf(value) === Object.prototype ||
-      Object.getPrototypeOf(value) === null)
-  ) {
+  if (isJsonObject(value)) {
     const out: Record<string, Json> = {};
     for (const [k, v] of Object.entries(value))
-      out[k] = assertJson(v, `${path}.${k}`, depth + 1);
+      Object.defineProperty(out, k, {
+        value: assertJson(v, `${path}.${k}`, depth + 1),
+        enumerable: true,
+        writable: true,
+        configurable: true,
+      });
     return out;
   }
   throw new Rejection("invalid_json", `${path} is not a JSON value`);
