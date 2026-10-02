@@ -56,6 +56,8 @@ export interface FixtureScriptContext {
 
 const nfc = (text: unknown, what: string): string =>
   normalizeString(asString(text, what));
+/** Semantic labels (anchors, participants) are compared in their canonical NFC spelling. */
+const label = (value: unknown): string => normalizeString(String(value));
 
 /** Throws {@link RequestRejected} with the first named violation; returns normally for an owned request. */
 export function checkFixtureRequestOwnership(
@@ -72,7 +74,7 @@ export function checkFixtureRequestOwnership(
     "program_block_order",
   ).map((b) => asString(b, "program block"));
   const bySemantic = new Map(
-    scriptTurns.map((t) => [String(t.semantic_turn_id), t]),
+    scriptTurns.map((t) => [label(t.semantic_turn_id), t]),
   );
   const generated = asArray(record.turns, "turns").map((t) =>
     asRecord(t, "generated turn"),
@@ -81,11 +83,11 @@ export function checkFixtureRequestOwnership(
 
   // Hashing 7.1: every semantic anchor resolves through the exact bound script.
   for (const turn of generated) {
-    const anchor = String(turn.semantic_turn_id);
+    const anchor = label(turn.semantic_turn_id);
     const script = bySemantic.get(anchor);
     if (!script)
       throw new RequestRejected("anchor_not_in_bound_script", anchor);
-    if (script.participant_id !== turn.participant_id)
+    if (label(script.participant_id) !== label(turn.participant_id))
       throw new RequestRejected("participant_not_from_bound_script", anchor);
     if (
       nfc(script.spoken_text, "script text") !==
@@ -102,7 +104,7 @@ export function checkFixtureRequestOwnership(
   if (new Set(generated.map((t) => t.program_block_id)).size !== 1)
     throw new RequestRejected("cross_program_block");
   const sequences = generated.map((t) =>
-    asInteger(bySemantic.get(String(t.semantic_turn_id))?.sequence, "sequence"),
+    asInteger(bySemantic.get(label(t.semantic_turn_id))?.sequence, "sequence"),
   );
   if (sequences.some((s, i) => i > 0 && s <= (sequences[i - 1] ?? s)))
     throw new RequestRejected("turn_order_not_script_order");
@@ -117,7 +119,10 @@ export function checkFixtureRequestOwnership(
         asInteger(a.sequence, "sequence") - asInteger(b.sequence, "sequence"),
     );
   // Fixture profile (Layer B C2 recipe): the render block begins at the first approved turn of its program block.
-  if (generated[0]?.semantic_turn_id !== sameBlock[0]?.semantic_turn_id)
+  if (
+    label(generated[0]?.semantic_turn_id) !==
+    label(sameBlock[0]?.semantic_turn_id)
+  )
     throw new RequestRejected(
       "block_does_not_begin_at_first_turn_of_program_block",
     );
@@ -146,9 +151,13 @@ export function checkFixtureRequestOwnership(
     const [only] = contextTurns;
     if (!only)
       throw new RequestRejected("context_not_exactly_one_preceding_turn");
-    if (generated.some((g) => g.semantic_turn_id === only.semantic_turn_id))
+    if (
+      generated.some(
+        (g) => label(g.semantic_turn_id) === label(only.semantic_turn_id),
+      )
+    )
       throw new RequestRejected("context_from_own_block");
-    if (only.semantic_turn_id !== preceding?.semantic_turn_id)
+    if (label(only.semantic_turn_id) !== label(preceding?.semantic_turn_id))
       throw new RequestRejected(
         "context_not_final_turn_of_preceding_block",
         String(only.semantic_turn_id),
@@ -156,7 +165,7 @@ export function checkFixtureRequestOwnership(
     if (
       nfc(only.spoken_text, "context text") !==
         nfc(preceding?.spoken_text, "script text") ||
-      only.participant_id !== preceding?.participant_id
+      label(only.participant_id) !== label(preceding?.participant_id)
     )
       throw new RequestRejected("context_text_not_from_bound_script");
   } else {
@@ -166,11 +175,11 @@ export function checkFixtureRequestOwnership(
     );
   }
 
-  const anchors = new Set(generated.map((t) => String(t.semantic_turn_id)));
+  const anchors = new Set(generated.map((t) => label(t.semantic_turn_id)));
   for (const intent of asArray(record.intents, "intents").map((i) =>
     asRecord(i, "intent"),
   ))
-    if (intent.scope_type === "turn" && !anchors.has(String(intent.scope_ref)))
+    if (intent.scope_type === "turn" && !anchors.has(label(intent.scope_ref)))
       throw new RequestRejected(
         "intent_outside_block",
         String(intent.scope_ref),
@@ -200,7 +209,7 @@ export function checkFixtureRequestOwnership(
   for (const value of applications) {
     const application = asRecord(value, "pronunciation application");
     const turn = generated.find(
-      (t) => t.semantic_turn_id === application.semantic_turn_id,
+      (t) => label(t.semantic_turn_id) === label(application.semantic_turn_id),
     );
     if (!turn)
       throw new RequestRejected(

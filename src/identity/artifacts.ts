@@ -13,6 +13,7 @@ import {
   asString,
   compareStrings,
   selectKeys,
+  semanticLabel,
   type JsonObject,
 } from "./select.js";
 import { ProfileRejected, requireProfileKeys } from "./profile-errors.js";
@@ -449,7 +450,7 @@ export function turnAnchorMap(turns: unknown): Map<string, string> {
   for (const value of asArray(turns, "turns")) {
     const turn = asRecord(value, "turn");
     const id = asNonBlankString(turn.turn_id, "turn_id");
-    const anchor = asNonBlankString(turn.semantic_turn_id, "semantic_turn_id");
+    const anchor = semanticLabel(turn.semantic_turn_id, "semantic_turn_id");
     if (map.has(id)) throw new ProfileRejected("script_turn_id_not_unique", id);
     if (anchors.has(anchor))
       throw new TypeError(`Duplicate turn anchor: ${anchor}`);
@@ -508,10 +509,16 @@ export function predictionCandidateProjection(
   brief: unknown,
 ): JsonObject[] {
   const byTurn = new Map(turns.map((turn) => [turn.turn_id, turn]));
+  // Labels are compared in their canonical (NFC) spelling; storage UUIDs (turn_id) are never normalized.
+  const label = (value: unknown): string | undefined =>
+    typeof value === "string" && value.trim().length > 0
+      ? semanticLabel(value, "label")
+      : undefined;
   const briefRecord = asRecord(brief, "showrunner brief");
   const threads = new Set(
     asArray(briefRecord.topic_thread_mappings, "topic_thread_mappings").map(
-      (mapping) => asRecord(mapping, "topic thread mapping").topic_thread_id,
+      (mapping) =>
+        label(asRecord(mapping, "topic thread mapping").topic_thread_id),
     ),
   );
   const blockTypes = new Map(
@@ -535,9 +542,11 @@ export function predictionCandidateProjection(
     const turn = byTurn.get(value.turn_id);
     if (turn === undefined)
       throw new ProfileRejected("prediction_turn_unresolved");
-    if (value.participant_id !== turn.participant_id)
+    const participant = label(value.participant_id);
+    if (participant === undefined || participant !== label(turn.participant_id))
       throw new ProfileRejected("prediction_participant_conflict");
-    if (!threads.has(value.topic_thread_id))
+    const thread = label(value.topic_thread_id);
+    if (thread === undefined || !threads.has(thread))
       throw new ProfileRejected("prediction_topic_thread_unknown");
     if (blockTypes.get(turn.program_block_id) !== "predictions")
       throw new ProfileRejected("prediction_outside_prediction_block");
@@ -546,16 +555,19 @@ export function predictionCandidateProjection(
       value.prediction_text.trim().length === 0
     )
       throw new ProfileRejected("prediction_text_invalid");
-    const id = asString(
+    const id = semanticLabel(
       value.prediction_candidate_id,
       "prediction_candidate_id",
     );
     if (seen.has(id)) throw new ProfileRejected("prediction_duplicate_id");
     seen.add(id);
     return {
-      prediction_candidate_id: value.prediction_candidate_id,
-      semantic_turn_id: turn.semantic_turn_id,
-      participant_id: value.participant_id,
+      prediction_candidate_id: id,
+      semantic_turn_id: semanticLabel(
+        turn.semantic_turn_id,
+        "semantic_turn_id",
+      ),
+      participant_id: participant,
       prediction_text: value.prediction_text,
       horizon: value.horizon,
       topic_thread_id: value.topic_thread_id,
@@ -578,7 +590,7 @@ export function scriptProjection(
   );
   const position = new Map(
     turnRows.map((turn) => [
-      asString(turn.semantic_turn_id, "anchor"),
+      semanticLabel(turn.semantic_turn_id, "anchor"),
       asInteger(turn.sequence, "sequence"),
     ]),
   );
@@ -594,6 +606,10 @@ export function scriptProjection(
       ["semantic_turn_id", "program_block_id", "participant_id", "spoken_text"],
       "turn",
     );
+    selected.semantic_turn_id = semanticLabel(
+      turn.semantic_turn_id,
+      "semantic_turn_id",
+    );
     if (Object.hasOwn(turn, "planning_assignment_ref"))
       selected.planning_assignment_ref = turn.planning_assignment_ref;
     return selected;
@@ -603,7 +619,7 @@ export function scriptProjection(
     use: JsonObject,
     target: string,
   ): [number, number, number, string, string] => [
-    position.get(asString(use.semantic_turn_id, "anchor")) ?? -1,
+    position.get(semanticLabel(use.semantic_turn_id, "anchor")) ?? -1,
     asInteger(use.span_start, "span_start"),
     asInteger(use.span_end, "span_end"),
     asString(use.use_mode, "use_mode"),

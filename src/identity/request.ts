@@ -13,6 +13,7 @@ import {
   asString,
   compareStrings,
   isRecord,
+  semanticLabel,
   selectKeys,
   type JsonObject,
 } from "./select.js";
@@ -117,28 +118,46 @@ export function selectBaseRequestProjection(recordInput: unknown): JsonObject {
     asRecord(t, "generated turn"),
   );
   const voiceVersions = asRecord(record.voice_versions, "voice_versions");
+  // Participant labels are looked up in their canonical (NFC) spelling; two keys that collapse are ambiguous.
+  const voiceByLabel = new Map<string, unknown>();
+  for (const [key, entry] of Object.entries(voiceVersions)) {
+    const label = normalizeString(key);
+    if (voiceByLabel.has(label))
+      throw new ProfileRejected("duplicate_voice_participant", label);
+    voiceByLabel.set(label, entry);
+  }
   const voiceFor = (participant: string): JsonObject => {
-    if (!Object.hasOwn(voiceVersions, participant))
-      throw new ProfileRejected("voice_binding_missing", participant);
-    return asRecord(voiceVersions[participant], "voice version");
+    const label = normalizeString(participant);
+    if (!voiceByLabel.has(label))
+      throw new ProfileRejected("voice_binding_missing", label);
+    return asRecord(voiceByLabel.get(label), "voice version");
   };
 
   const voices: JsonObject = {};
   for (const turn of turns) {
-    const participant = asNonBlankString(turn.participant_id, "participant_id");
+    const participant = semanticLabel(turn.participant_id, "participant_id");
     voices[participant] ??= voiceRenderIdentity(voiceFor(participant));
   }
 
-  const order = new Map(
-    turns.map((turn, index) => [String(turn.semantic_turn_id), index]),
-  );
+  // Turn anchors are labels: equivalent spellings are one identity; two different spellings of it are rejected.
+  const order = new Map<string, number>();
+  const rawAnchors = new Map<string, string>();
+  turns.forEach((turn, index) => {
+    const raw = String(turn.semantic_turn_id);
+    const anchor = normalizeString(raw);
+    const seen = rawAnchors.get(anchor);
+    if (seen !== undefined && seen !== raw)
+      throw new ProfileRejected("duplicate_turn_anchor", anchor);
+    rawAnchors.set(anchor, raw);
+    order.set(anchor, index);
+  });
   const rawApplications = Object.hasOwn(record, "pronunciation_applications")
     ? asArray(record.pronunciation_applications, "pronunciation_applications")
     : [];
   // Structural domain (Hashing v0.1.5 7.1): outside it the function rejects instead of hashing.
   const parsed = rawApplications.map((value) => {
     const application = asRecord(value, "pronunciation application");
-    const anchor = asNonBlankString(
+    const anchor = semanticLabel(
       application.semantic_turn_id,
       "application turn",
     );
@@ -148,7 +167,7 @@ export function selectBaseRequestProjection(recordInput: unknown): JsonObject {
         "pronunciation_application_turn_unresolved",
         anchor,
       );
-    const participant = asNonBlankString(
+    const participant = semanticLabel(
       asRecord(turns[position], "turn").participant_id,
       "participant_id",
     );
@@ -235,7 +254,9 @@ export function selectBaseRequestProjection(recordInput: unknown): JsonObject {
     speaker_map: turns.map((turn) => ({
       semantic_turn_id: turn.semantic_turn_id,
       participant_id: turn.participant_id,
-      voice_version: voiceFor(String(turn.participant_id)).version,
+      voice_version: voiceFor(
+        semanticLabel(turn.participant_id, "participant_id"),
+      ).version,
     })),
     resolved_generation_settings: resolvedSettings(record),
     canonical_spoken_text: turns.map((turn) =>

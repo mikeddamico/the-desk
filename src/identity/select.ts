@@ -1,5 +1,6 @@
 // Strict, side-effect-free selection helpers shared by the identity projections.
 // A projection selects named fields from an authoritative object; it never serializes a whole row.
+import { normalizeString } from "./canonical-json.js";
 
 export type JsonObject = Record<string, unknown>;
 
@@ -84,4 +85,13 @@ export function compareStrings(left: string, right: string): number {
     if (x !== y) return x - y;
   }
   return a.length - b.length;
+}
+
+/**
+ * A validated semantic LABEL (anchor, candidate id, topic thread, participant): nonblank, and NFC-normalized so that
+ * every uniqueness, lookup and position decision sees the same identity the canonical serializer will emit. Storage
+ * UUIDs are never passed through this helper.
+ */
+export function semanticLabel(value: unknown, what: string): string {
+  return normalizeString(asNonBlankString(value, what));
 }
