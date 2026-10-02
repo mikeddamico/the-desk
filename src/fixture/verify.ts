@@ -56,6 +56,19 @@ import {
   reduceClaimState,
 } from "../knowledge/claim-state.js";
 import { verifyFrozenEntry } from "../knowledge/state-cursor.js";
+import { verifyAssembly } from "./assembly.js";
+import {
+  verifyArtifactRegistry,
+  verifyPackageSnapshot,
+  verifyUses,
+  verifyVersions,
+} from "./bindings.js";
+import { verifyLedger } from "./ledger.js";
+import {
+  transitionPairs,
+  verifyTypedObligations,
+  type ObligationRecords,
+} from "./obligations.js";
 import type { Pack } from "./pack.js";
 import type { Row, Tables } from "./rows.js";
 
@@ -110,6 +123,10 @@ export interface FixtureContext {
   audioSha: Map<string, string>; // storage_uri -> sha256 of the shipped WAV member
   memberPayload: (storageUri: string) => unknown; // shipped JSON member copy (non-archival)
   containerPayloads: Map<string, unknown>; // artifact_id -> payload from the shared containers
+  /** Shipped request-to-WAV mapping (comparison target; rows are authoritative). */
+  mapping: readonly Obj[];
+  /** Declared obligation records (pack member), with the v0.4.6 transition pairs. */
+  obligations: ObligationRecords;
 }
 
 export function buildContext(pack: Pack): FixtureContext {
@@ -152,6 +169,32 @@ export function buildContext(pack: Pack): FixtureContext {
     audioSha,
     memberPayload: (uri) => pack.json(uri),
     containerPayloads: containers,
+    mapping: (
+      pack.json("fixture_persistence_conformance.json") as { entries: Obj[] }
+    ).entries,
+    obligations: (() => {
+      const rec = pack.json("provenance/OBLIGATION_RECONCILIATION.json") as {
+        typed_successor_entries: Obj[];
+        nested_locations: Obj[];
+        v04_subsidiary_and_nested: Obj[];
+        summary: { typed_category_counts_successor: Record<string, number> };
+      };
+      const prompts = pack.json("prompt_payloads.json") as {
+        manifests: { artifact_id: string }[];
+      };
+      return {
+        typed: rec.typed_successor_entries,
+        nested: rec.nested_locations,
+        subsidiary: rec.v04_subsidiary_and_nested,
+        categoryCounts: rec.summary.typed_category_counts_successor,
+        containers: {
+          "prompt_payloads.json": prompts.manifests.map((m) => m.artifact_id),
+        },
+        transition: transitionPairs(
+          pack.json("provenance/v0.4.6/IDENTITY_TRANSITION.json"),
+        ),
+      };
+    })(),
   };
 }
 
@@ -723,4 +766,22 @@ export function verifyRows(
     distinctTurnIds.size,
     turnRows.length,
   );
+
+  // ---- A4 row-derived relationships (fixture-scoped where stated in each module); same checks for the shipped snapshot and
+  // for rows read back from the database
+  try {
+    verifyLedger(tables, ctx.mapping);
+    verifyAssembly(tables);
+    verifyPackageSnapshot(tables);
+    verifyArtifactRegistry(
+      tables,
+      historical.artifactId,
+      derived.fingerprints.ready_candidate,
+    );
+    verifyUses(tables);
+    verifyVersions(tables);
+    verifyTypedObligations(tables, ctx.obligations, historical);
+  } catch (error) {
+    throw asVerificationError(error);
+  }
 }

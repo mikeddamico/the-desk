@@ -96,3 +96,13 @@ required for every claim: nothing is inferred. Verify a stored entry later with 
 current ceiling; the result lists what was verified and what could not be (historical visibility, unavailable frozen ceiling).
 Sequence allocation, event identity and retry convergence (A5) are not implemented: a retried event is rejected by the
 database, not converged.
+
+## Post-commit fixture verification (A4)
+
+`verifyPersistedFixture(runtimePool)` (`src/fixture/persist.ts`) re-reads and verifies the loaded Fixture v0.4.6 from a fresh
+session: one pinned `desk_runtime` connection, `BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY`, 40 family reads plus the SQL
+binding checks on that one snapshot, then COMMIT (ROLLBACK and release on any failure). It takes no write-blocking lock and never
+delays a writer. Never run the transaction commands or the reads through unpinned `pool.query` calls. Immutable relations reject
+UPDATE/DELETE/TRUNCATE for the runtime role with SQLSTATE `42501` (no privilege) and, for a privileged role, with `55000` from the
+immutable-row trigger; TRUNCATE of an FK-referenced table needs its referencing tables in the same statement before the trigger is
+reached. No privilege or migration changes.

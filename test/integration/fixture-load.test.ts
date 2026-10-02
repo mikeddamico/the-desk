@@ -16,9 +16,11 @@ import {
   FixtureReadBackError,
   FixtureTargetNotEmptyError,
   persistFixture,
+  readFixtureRows,
+  shapeRows,
 } from "../../src/fixture/persist.js";
 import { openFixturePack } from "../../src/fixture/pack.js";
-import type { Row, Tables } from "../../src/fixture/rows.js";
+import type { Tables } from "../../src/fixture/rows.js";
 import { VerifiedFixture } from "../../src/fixture/snapshot.js";
 import {
   FixtureVerificationError,
@@ -281,15 +283,16 @@ suite("Fixture v0.4.6 load (A2)", () => {
 
   it("a LATE database failure rolls back every earlier insert (all 46 tables empty)", async () => {
     const env = await fresh();
-    // Survives all A1 verification, fails only when the last-inserted family reaches its CHECK constraint.
+    // Survives all row verification (A4 now also verifies turn_evidence_uses, so the defect moved to a column no verifier reads:
+    // gate_results.outcome), and fails only when a late family reaches its CHECK constraint.
     const late = consistentPack((m) => {
       editRows(m, (t) => {
-        rowOf(t, "turn_evidence_uses").use_mode = "not_a_use_mode";
+        rowOf(t, "gate_results").outcome = "maybe";
       });
     });
     const error = await rejects(persistFixture(env.migrator, late));
     expect((error as { code?: string }).code).toBe("23514");
-    expect((error as Error).message).toContain("turn_evidence_uses");
+    expect((error as Error).message).toContain("gate_results");
     expect(total(await counts(env.owner))).toBe(0);
     // The same database then accepts the real fixture: the failed attempt left nothing behind.
     await persistFixture(env.migrator);
@@ -330,23 +333,9 @@ suite("Fixture v0.4.6 load (A2)", () => {
     const env = await fresh();
     await persistFixture(env.migrator);
     const fixture = VerifiedFixture.fromPack(openFixturePack());
-    const readAll = async (): Promise<Tables> => {
-      const out: Record<string, Row[]> = {};
-      for (const family of families)
-        out[family.table] = (
-          await env.owner.query<Row>(
-            `SELECT ${family.columns.map((c) => `"${c}"`).join(", ")} FROM "${family.table}"`,
-          )
-        ).rows.map((row) =>
-          Object.fromEntries(
-            Object.entries(row).map(([k, v]) => [
-              k,
-              v instanceof Date ? v.toISOString().replace(/\.000Z$/, "Z") : v,
-            ]),
-          ),
-        );
-      return out;
-    };
+    // the shared reader (A4) shapes persisted rows exactly as the loader's own read-back does
+    const readAll = async (): Promise<Tables> =>
+      shapeRows(await readFixtureRows(env.owner));
     // untouched persisted rows pass the same verification the loader runs
     verifyRows(await readAll(), fixture.context, fixture.historical);
     // tamper a render-affecting voice field directly in the database (triggers bypassed by the superuser session only)
