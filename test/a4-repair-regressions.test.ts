@@ -281,45 +281,48 @@ describe("use modes: only the documented restrictions (Claims 11.1, 25), no inve
         mode,
       ).toBe("accepted");
   });
-  it("silent claims must not have quoted/paraphrased evidence uses (Claims 11.2): a unit supporting a silent claim cannot be paraphrased or quoted", () => {
+  it("CONTROL (structural only): an evidence unit that supports BOTH a silent claim and an independent assertable claim keeps its permitted paraphrase/quote structurally accepted", () => {
+    // Source sharing alone creates no restriction. This does NOT prove the absence of semantic leakage: claim-specific evidence
+    // linkage and leakage validation belong to the later owning checks (Claims 22 gates, semantic audit).
     const silent = claimWithClass("silent");
-    const supportUnit = (t: T): unknown =>
-      must(
-        t.claim_supports?.find(
-          (s) => s.claim_id === silent && s.evidence_unit_id,
-        ),
-      ).evidence_unit_id;
     for (const mode of ["paraphrased", "quoted"])
       expect(
         code(verifyUses, (t) => {
-          const row = must(
+          const unit = must(
             t.turn_evidence_uses?.find((u) => u.use_mode === mode),
+          ).evidence_unit_id;
+          const existing = t.claim_supports?.filter(
+            (s) => s.evidence_unit_id === unit,
           );
-          const unit = supportUnit(t);
-          const sv = must(
-            t.script_versions?.find(
-              (s) =>
-                s.script_version_id ===
-                must(t.turns?.find((x) => x.turn_id === row.turn_id))
-                  .script_version_id,
-            ),
-          );
-          const item = must(
-            (
-              must(t.artifacts?.find((a) => a.artifact_id === sv.artifact_id))
-                .canonical_payload as { turn_evidence_uses: R[] }
-            ).turn_evidence_uses.find(
-              (i) => i.turn_evidence_use_id === row.turn_evidence_use_id,
-            ),
-          );
-          const rights = must(
-            t.evidence_units?.find((u) => u.evidence_unit_id === unit),
-          ).rights_version_id;
-          row.evidence_unit_id = unit;
-          item.evidence_unit_id = unit;
-          item.rights_policy_version = rights;
+          expect(existing?.length).toBeGreaterThan(0); // already supports an independent (assertable) claim
+          t.claim_supports?.push({
+            ...must(existing?.[0]),
+            claim_support_id: "d125000a-0000-4000-8000-0000000000ee",
+            claim_id: silent,
+          });
         }),
         mode,
-      ).toBe("uses_silent_support_evidence_used");
+      ).toBe("accepted");
+  });
+  it("denied-package and denied-rights regressions remain in force for the same units", () => {
+    // frozen entry forbids -> rejected; rights forbid -> rejected (see 'frozen package permissions bind every evidence use')
+    expect(
+      code(verifyUses, (t) => {
+        const unit = must(
+          t.turn_evidence_uses?.find((u) => u.use_mode === "paraphrased"),
+        ).evidence_unit_id;
+        must(
+          manifest(t).evidence.find((e) => e.evidence_unit_id === unit),
+        ).paraphrase_permission = false;
+      }),
+    ).toBe("uses_paraphrase_not_frozen");
+    expect(
+      code(verifyUses, (t) => {
+        const unit = must(
+          t.turn_evidence_uses?.find((u) => u.use_mode === "quoted"),
+        ).evidence_unit_id;
+        policyOf(t, unit).quotation_permission = false;
+      }),
+    ).toBe("uses_quote_not_permitted");
   });
 });

@@ -449,16 +449,9 @@ export function verifyUses(tables: Tables): void {
           const entry = must(matches[0], "package evidence entry");
           if (entry.rights_version_id !== unit.rights_version_id)
             fail("uses_evidence_package_rights_version", str(item[idCol]));
-          // Claims 11 rule 2: silent claims must not have quoted/paraphrased evidence uses (direct reading: evidence that
-          // supports a frozen-silent claim is never quoted or paraphrased)
-          const supportsSilent = rowsOf(tables, "claim_supports").some(
-            (support) =>
-              support.evidence_unit_id === row.evidence_unit_id &&
-              frozen.get(str(support.claim_id))?.effective_usage_class ===
-                "silent",
-          );
-          if (supportsSilent)
-            fail("uses_silent_support_evidence_used", str(item[idCol]));
+          // NOTE: no rule is derived from evidence-unit SHARING. Claims 11 prohibits quoting/paraphrasing silent claims, but it does not
+          // clearly prohibit an independent, permitted proposition drawn from a unit that also supports a silent claim; claim-specific
+          // evidence linkage and semantic-leakage validation belong to the later owning checks (Claims 22 gates, semantic audit).
           // quotation / paraphrase must be allowed by BOTH the frozen package entry AND the governing rights ceiling
           if (row.use_mode === "quoted") {
             if (entry.quote_permission !== true)

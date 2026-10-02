@@ -131,7 +131,9 @@ the SAME code proves the shipped snapshot and rows read back), an independent po
   leaves the caller's transaction, isolation level and snapshot untouched and never begins, commits or rolls back. The earlier
   `transaction_timestamp()` comparison could not distinguish statements inside one millisecond.
 - **Evidence uses and the frozen package.** Each evidence use must resolve exactly one frozen `manifest.evidence` entry carrying the
-  unit's rights version, and quotation/paraphrase must be allowed by BOTH that frozen entry and the governing rights ceiling; evidence that
-  supports a frozen-silent claim is never quoted or paraphrased (Claims section 11 rule 2, direct reading). Package membership is unique and
+  unit's rights version, and quotation/paraphrase must be allowed by BOTH that frozen entry and the governing rights ceiling; a unit that merely
+  also supports a silent claim is NOT restricted: no active text clearly forbids an independent, permitted proposition from such a unit, so
+  claim-specific evidence linkage and semantic-leakage validation belong to the later owning checks (Claims section 22 gates, semantic audit), and
+  structural acceptance here does not prove the absence of leakage. Package membership is unique and
   exact (claims and evidence) against the durable rows. These are semantic-helper checks; an edited stored package also changes its
   hashed manifest and is caught by the artifact hash in the full pipeline (a separate layer).
