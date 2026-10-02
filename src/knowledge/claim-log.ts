@@ -10,6 +10,7 @@ import { claimContentHash } from "../identity/knowledge.js";
 import {
   ClaimStateError,
   assertAcceptedLogShape,
+  isCanonicalUuid,
   parseClaimStateEvent,
   type ClaimStateEvent,
   type UsageClass,
@@ -45,9 +46,6 @@ export interface ClaimLog {
   readonly events: readonly ClaimStateEvent[];
 }
 
-const uuidV4 =
-  /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
-
 export const claimLogStatement = `SELECT c.claim_id, c.content_hash, c.claim_kind, c.origin, c.subject_domain, c.subject, c.predicate, c.value,
        c.initial_status, c.initial_usage_class, c.asserted_at,
        e.claim_state_event_id, e.claim_id AS event_claim_id, e.actor_id, e.occurred_at, e.event_type, e.event_sequence, e.event_payload
@@ -80,7 +78,7 @@ export async function readClaimLogs(
       "empty or duplicate claim ids",
     );
   for (const id of requested)
-    if (!uuidV4.test(id))
+    if (!isCanonicalUuid(id))
       throw new ClaimStateError("claim_request_invalid", id);
   const result = await db.query(claimLogStatement, [requested]);
   const claims = new Map<string, ClaimRecord>();

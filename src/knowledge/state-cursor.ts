@@ -17,6 +17,7 @@ import {
   assertInitialState,
   bySequence,
   frozenStateHash,
+  isCanonicalUuid,
   isClaimStatus,
   isUsageClass,
   parseClaimStateEvent,
@@ -36,9 +37,6 @@ export interface StateCursorValue {
 }
 /** `null` binds the empty prefix; otherwise the exact last event of the selected prefix. */
 export type StateCursor = StateCursorValue | null;
-
-const uuidV4 =
-  /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 
 const isPlain = (v: unknown): v is Record<string, unknown> =>
   typeof v === "object" &&
@@ -76,7 +74,7 @@ export function parseStateCursor(raw: unknown): StateCursor {
   if (sequence > MAX_EVENT_SEQUENCE)
     throw new ClaimStateError("cursor_sequence_out_of_range");
   const id = raw.claim_state_event_id;
-  if (typeof id !== "string" || !uuidV4.test(id))
+  if (!isCanonicalUuid(id))
     throw new ClaimStateError("cursor_shape", "claim_state_event_id");
   return { claim_state_event_id: id, event_sequence: sequence };
 }
@@ -84,12 +82,66 @@ export function parseStateCursor(raw: unknown): StateCursor {
 export interface CursorCheck {
   readonly claimId: string;
   readonly cursor: unknown;
-  /** Every accepted event the caller knows (any claims): used to resolve the cursor's event identity. */
-  readonly accepted: readonly ClaimStateEvent[];
-  /** The rows visible to the freeze operation for this claim. */
-  readonly visible: readonly ClaimStateEvent[];
-  /** The rows the snapshot selected as the prefix. */
-  readonly prefix: readonly ClaimStateEvent[];
+  /** Every accepted event the caller knows (any claims): used to resolve the cursor's event identity. Validated at runtime. */
+  readonly accepted: readonly unknown[];
+  /** The rows visible to the freeze operation for this claim. Validated at runtime. */
+  readonly visible: readonly unknown[];
+  /** The rows the snapshot selected as the prefix. Validated at runtime. */
+  readonly prefix: readonly unknown[];
+}
+
+const rowKeys = [
+  "claim_state_event_id",
+  "claim_id",
+  "actor_id",
+  "occurred_at",
+  "event_type",
+  "event_sequence",
+  "event_payload",
+].sort();
+
+const strictSequence = (v: unknown): boolean =>
+  typeof v === "number" &&
+  Number.isSafeInteger(v) &&
+  !Object.is(v, -0) &&
+  v >= 1;
+
+/**
+ * Runtime row validation (TypeScript interfaces are not runtime guarantees). Mirrors the shipped G28 oracle for visible/prefix
+ * rows, in its order: exact seven-key row and claim locality (`<label>_row_not_claim_local`), then a strict positive integer
+ * sequence (`<label>_row_sequence_invalid`; fractional, boolean, string, LexicalNumber, zero and negative values all fail).
+ * Rows that pass are then fully parsed (`<label>_row_invalid`) so later comparisons see normalized, validated events.
+ */
+function validatedRows(
+  label: string,
+  rows: readonly unknown[],
+  claimId: string | null,
+): ClaimStateEvent[] {
+  for (const row of rows) {
+    const plain =
+      typeof row === "object" &&
+      row !== null &&
+      !Array.isArray(row) &&
+      !(row instanceof LexicalNumber);
+    const record = plain ? (row as Record<string, unknown>) : undefined;
+    if (
+      !record ||
+      Object.keys(record).sort().join() !== rowKeys.join() ||
+      (claimId !== null && record.claim_id !== claimId)
+    )
+      throw new ClaimStateError(`${label}_row_not_claim_local`);
+    if (!strictSequence(record.event_sequence))
+      throw new ClaimStateError(`${label}_row_sequence_invalid`);
+  }
+  return rows.map((row) => {
+    try {
+      return parseClaimStateEvent(row);
+    } catch (error) {
+      if (error instanceof ClaimStateError)
+        throw new ClaimStateError(`${label}_row_invalid`, error.code);
+      throw error;
+    }
+  });
 }
 
 function sameRows(
@@ -113,21 +165,25 @@ function sameRows(
  */
 export function checkCursor(input: CursorCheck): void {
   const { claimId } = input;
-  for (const [label, rows] of [
-    ["visible", input.visible],
-    ["prefix", input.prefix],
-  ] as const) {
-    for (const row of rows)
-      if (row.claim_id !== claimId)
-        throw new ClaimStateError(`${label}_row_not_claim_local`);
+  // Per label, in the oracle's order: row validation, then duplicate detection (visible first, then prefix).
+  const checked: Record<"visible" | "prefix", ClaimStateEvent[]> = {
+    visible: [],
+    prefix: [],
+  };
+  for (const label of ["visible", "prefix"] as const) {
+    const rows = validatedRows(label, input[label], claimId);
     if (
       new Set(rows.map((r) => r.claim_state_event_id)).size !== rows.length ||
       new Set(rows.map((r) => r.event_sequence)).size !== rows.length
     )
       throw new ClaimStateError(`duplicate_${label}_row`);
+    checked[label] = rows;
   }
-  const visible = [...input.visible].sort(bySequence);
-  const accepted = input.accepted
+  const visibleRows = checked.visible;
+  const prefixRows = checked.prefix;
+  const acceptedRows = validatedRows("accepted", input.accepted, null);
+  const visible = [...visibleRows].sort(bySequence);
+  const accepted = acceptedRows
     .filter((e) => e.claim_id === claimId)
     .sort(bySequence);
   const last = visible.at(-1);
@@ -147,13 +203,13 @@ export function checkCursor(input: CursorCheck): void {
   if (input.cursor === null) {
     if (visible.length > 0)
       throw new ClaimStateError("null_cursor_with_visible_events");
-    if (input.prefix.length > 0)
+    if (prefixRows.length > 0)
       throw new ClaimStateError("null_cursor_with_nonempty_prefix");
     return;
   }
   const cursor = parseStateCursor(input.cursor);
   if (cursor === null) return;
-  const event = input.accepted.find(
+  const event = acceptedRows.find(
     (e) => e.claim_state_event_id === cursor.claim_state_event_id,
   );
   if (!event) throw new ClaimStateError("cursor_event_unknown");
@@ -168,7 +224,7 @@ export function checkCursor(input: CursorCheck): void {
     throw new ClaimStateError("cursor_not_in_visible_set");
   if (event.event_sequence !== last.event_sequence)
     throw new ClaimStateError("cursor_older_than_visible_event");
-  const prefix = [...input.prefix].sort(bySequence);
+  const prefix = [...prefixRows].sort(bySequence);
   const want = visible.filter((e) => e.event_sequence <= cursor.event_sequence);
   if (!sameRows(prefix, want))
     throw new ClaimStateError(

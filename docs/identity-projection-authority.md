@@ -65,6 +65,19 @@ Fixture v0.4.6 `claim_event_conformance.json` (58 offline vectors).
   its lexeme: such a value is validated as an object (type and range), not as source. PostgreSQL `jsonb` keeps `1.0` in
   `::text` but normalizes `1e0` to `1`, so an exponent form is distinguishable only in file/byte sources. No global pg parser
   override is installed.
+- **Payload number boundary.** `event_payload` numbers follow the governed JSON policy of the A1 serializer (semantic numbers are safe
+  integers; exact decimals are strings). At the payload boundary, before the payload is copied, an integer-valued lexical marker
+  (`1e0`, `1.0`, `-1E1`) becomes the number it denotes (identical to `JSON.parse` and jsonb for the same source), so
+  raw-source and native-source events are equal and hash alike; any other number (`1.5`, an unsafe integer, `-0`, non-finite)
+  and any non-JSON value is rejected as `invalid_payload`. A marker is never turned into an ordinary object. Sequence and cursor
+  values are not normalized and stay strict. The A1 serializer is unchanged.
+- **Runtime row validation.** `checkCursor` validates `accepted`, `visible` and `prefix` rows at runtime (TypeScript types are not
+  guarantees): exact seven-key row and claim locality, then a strict positive integer sequence, with the shipped validator's
+  `visible_*`/`prefix_*` codes and order (`accepted_*` is added for caller-supplied accepted rows), then a full parse
+  (`*_row_invalid`).
+- **UUIDs.** Event, claim, actor and cursor ids must be literal canonical UUIDs (lowercase, hyphenated 8-4-4-4-12). No version or
+  variant restriction is imposed: no active requirement states one (the Trace's "canonical v4" remark describes Fixture content and the
+  predecessor validator). The fixture loader's own v4 row check is unchanged.
 - **Tamper detection is bounded.** The frozen-state hash excludes actor, time, reason and intermediate history. Cursor
   mismatches and changes to the resulting state or usage are detected; a reason-only edit, or an edit that preserves the
   reduction, is not (characterized in `test/integration/claim-freeze.test.ts`). Whether every event visible at the freeze

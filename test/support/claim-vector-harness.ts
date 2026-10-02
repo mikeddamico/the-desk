@@ -349,41 +349,48 @@ export function runVector(
         got = "ok";
       } else {
         const claimId = text(step.claim, "claim");
-        const original =
+        // Rows handed to the production checker stay RAW (plain objects, edits merged unparsed): the checker itself must
+        // validate them at runtime; this harness never normalizes an edited row first.
+        const raw = (e: ClaimStateEvent): Obj => ({ ...e });
+        const original = (
           typeof step.visible === "string"
             ? [...(snapshots.get(step.visible) ?? [])]
-            : model.events(claimId);
-        const rows = new Map(original.map((e) => [e.claim_state_event_id, e]));
-        const edit = (
-          row: ClaimStateEvent,
-          changes: unknown,
-        ): ClaimStateEvent =>
-          parseClaimStateEvent({ ...row, ...obj(changes, "edit") });
-        let visible = [...original];
+            : model.events(claimId)
+        ).map(raw);
+        const idOf = (row: Obj): unknown => row.claim_state_event_id;
+        const rows = new Map<unknown, Obj>(original.map((e) => [idOf(e), e]));
+        const edit = (row: Obj, changes: unknown): Obj => ({
+          ...row,
+          ...obj(changes, "edit"),
+        });
+        let visible: Obj[] = [...original];
         for (const [eid, changes] of Object.entries(
           obj(step.visible_edit ?? {}, "visible_edit"),
         )) {
           const target = vectorUuid(eid);
           visible = visible.map((e) =>
-            e.claim_state_event_id === target ? edit(e, changes) : e,
+            idOf(e) === target ? edit(e, changes) : e,
           );
         }
         const dropped = new Set(
           asIds(step.visible_drop).map((x) => vectorUuid(x)),
         );
-        visible = visible.filter((e) => !dropped.has(e.claim_state_event_id));
+        visible = visible.filter((e) => !dropped.has(idOf(e) as string));
         for (const eid of asIds(step.visible_dup)) {
           const target = vectorUuid(eid);
-          const found = visible.find((e) => e.claim_state_event_id === target);
+          const found = visible.find((e) => idOf(e) === target);
           if (found) visible.push(found);
         }
-        const base = new Map(visible.map((e) => [e.claim_state_event_id, e]));
-        let prefix: ClaimStateEvent[] = [];
+        const base = new Map<unknown, Obj>(visible.map((e) => [idOf(e), e]));
+        let prefix: Obj[] = [];
         if (Object.hasOwn(step, "prefix")) {
           prefix = asIds(step.prefix).map((x) => {
             const target = vectorUuid(x) as string;
+            const live = model.byId.get(target);
             const row =
-              base.get(target) ?? rows.get(target) ?? model.byId.get(target);
+              base.get(target) ??
+              rows.get(target) ??
+              (live ? raw(live) : undefined);
             if (!row) throw new SelectorError(`prefix event ${x} unresolved`);
             return row;
           });
@@ -393,12 +400,12 @@ export function runVector(
         )) {
           const target = vectorUuid(eid);
           prefix = prefix.map((e) =>
-            e.claim_state_event_id === target ? edit(e, changes) : e,
+            idOf(e) === target ? edit(e, changes) : e,
           );
         }
         for (const eid of asIds(step.prefix_dup)) {
           const target = vectorUuid(eid);
-          const found = prefix.find((e) => e.claim_state_event_id === target);
+          const found = prefix.find((e) => idOf(e) === target);
           if (found) prefix.push(found);
         }
         // only the cursor's event id is symbolic (translateRow translates its claim_state_event_id key)

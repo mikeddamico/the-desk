@@ -77,8 +77,13 @@ export interface ReducedClaimState {
   readonly effective_usage_class: UsageClass;
 }
 
-const uuidV4 =
-  /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+// Claims 4.4.2 / Evidence Package 9.3 require LITERAL UUIDs: the canonical lowercase 8-4-4-4-12 hexadecimal form. No active
+// requirement restricts the version or variant (the "canonical v4" statements in the Trace describe Fixture content and the
+// predecessor validator, not a rule for events), so none is imposed here.
+const canonicalUuid =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+export const isCanonicalUuid = (v: unknown): v is string =>
+  typeof v === "string" && canonicalUuid.test(v);
 const eventKeys = [
   "claim_state_event_id",
   "claim_id",
@@ -141,7 +146,7 @@ export function parseClaimStateEvent(raw: unknown): ClaimStateEvent {
     throw new ClaimStateError("invalid_event_shape", keys.join(","));
   for (const key of ["claim_state_event_id", "claim_id", "actor_id"] as const) {
     const id = raw[key];
-    if (typeof id !== "string" || !uuidV4.test(id))
+    if (!isCanonicalUuid(id))
       throw new ClaimStateError("invalid_event_identity", key);
   }
   const type = raw.event_type;
@@ -166,6 +171,11 @@ export function parseClaimStateEvent(raw: unknown): ClaimStateEvent {
       "invalid_payload",
       "usage_change without a valid usage_class",
     );
+  const normalized = normalizePayloadValue(
+    payload,
+    "event_payload",
+    0,
+  ) as Record<string, unknown>;
   const sequence = raw.event_sequence;
   if (
     sequence instanceof LexicalNumber ||
@@ -195,8 +205,65 @@ export function parseClaimStateEvent(raw: unknown): ClaimStateEvent {
     occurred_at: occurred,
     event_type: type as ClaimEventType,
     event_sequence: sequence,
-    event_payload: structuredClone(payload),
+    event_payload: normalized,
   });
+}
+
+/**
+ * The event_payload number boundary (governed JSON policy: semantic numbers are safe integers; exact decimals are strings, as in
+ * the A1 canonical serializer). Applied BEFORE the payload is copied, so a lexical marker can never be laundered into an
+ * ordinary-looking object:
+ * - an integer-valued marker (`1e0`, `1.0`, `-1E1`) becomes the number it denotes, exactly what `JSON.parse` and PostgreSQL
+ *   jsonb give for the same source, so lexical-source and native-source events are equal and hash alike;
+ * - any other number (`1.5`, an unsafe integer, `-0`, a non-finite value) and any non-JSON value is rejected as invalid_payload.
+ * Sequence and cursor values are NOT normalized: they stay strict (see parseClaimStateEvent and parseStateCursor).
+ */
+function normalizePayloadValue(
+  value: unknown,
+  path: string,
+  depth: number,
+): unknown {
+  if (depth > 64)
+    throw new ClaimStateError("invalid_payload", `${path} nested too deeply`);
+  if (value === null || typeof value === "string" || typeof value === "boolean")
+    return value;
+  if (value instanceof LexicalNumber) {
+    const n = Number(value.lexeme);
+    if (
+      value.kind === "non_integer_lexeme" &&
+      Number.isSafeInteger(n) &&
+      !Object.is(n, -0)
+    )
+      return n;
+    throw new ClaimStateError(
+      "invalid_payload",
+      `${path} is a number the governed JSON policy does not accept (${value.lexeme})`,
+    );
+  }
+  if (typeof value === "number") {
+    if (!Number.isSafeInteger(value) || Object.is(value, -0))
+      throw new ClaimStateError(
+        "invalid_payload",
+        `${path} is not a safe integer`,
+      );
+    return value;
+  }
+  if (Array.isArray(value))
+    return value.map((item, i) =>
+      normalizePayloadValue(item, `${path}[${String(i)}]`, depth + 1),
+    );
+  if (isPlain(value)) {
+    const out: Record<string, unknown> = {};
+    for (const [key, child] of Object.entries(value))
+      Object.defineProperty(out, key, {
+        value: normalizePayloadValue(child, `${path}.${key}`, depth + 1),
+        enumerable: true,
+        writable: true,
+        configurable: true,
+      });
+    return out;
+  }
+  throw new ClaimStateError("invalid_payload", `${path} is not a JSON value`);
 }
 
 /** Row equality for cursor/visibility comparison: every column, jsonb payload by canonical value, time by instant. */
