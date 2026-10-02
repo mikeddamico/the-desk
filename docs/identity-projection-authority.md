@@ -99,9 +99,9 @@ the SAME code proves the shipped snapshot and rows read back), an independent po
   comparison target), assembly recipe/map/frame relationships and audio metadata, package support/evidence/rights snapshot
   (a package may only RESTRICT its rights version), artifact registry and governed consumers (kind-checked; includes the
   `revalidation_result` snapshot edge), script claim/evidence use rows against the script payload (spans, frozen state hash,
-  use mode for the frozen class, quotation/paraphrase permission), version/brief/direction/intent/manifest rows against their
+  documented use-mode restrictions, quotation/paraphrase permission), version/brief/direction/intent/manifest rows against their
   payloads, and typed obligations against the declared records. **Fixture-scoped** facts (counts, `0.0000`, the rb06 chain,
-  causal timestamps, the 44-byte canonical WAV header, the use-mode table) are labeled in the modules; none is product policy.
+  causal timestamps, the 44-byte canonical WAV header) are labeled in the modules; none is product policy.
 - **Declared obligation records.** `provenance/OBLIGATION_RECONCILIATION.json` records v0.4.5-era values; v0.4.6 supersedes some
   only through `provenance/v0.4.6/IDENTITY_TRANSITION.json`. A persisted value must equal the declared one or the value the
   transition inventory maps it to. Formats are field-specific (hex64, `v1:` tagged, `fixture_stub:op:hex`, `v1:hex:take`; a TTS
@@ -117,5 +117,21 @@ the SAME code proves the shipped snapshot and rows read back), an independent po
   claim state and are reported by the claim comparison (use the A3 freeze verifier for live differences).
 - **Limits.** Gate RE-EXECUTION (GA-1) stays in the later workflow tranche; audio bytes are not in the database (only hashes and frame
   metadata are verified here); request specimens are shipped bytes, not regenerated; immutable-relation UPDATE/DELETE trigger execution is
-  demonstrated only on relations that hold a loaded row (the empty ones are checked in the catalog only); the use-mode/frozen-class
-  table is a narrow reading of Claims 22.2 (authority gap GA-5); A5 is untouched.
+  demonstrated only on relations that hold a loaded row (the empty ones are checked in the catalog only); the claim-use
+  mode rules enforce only what Claims Policy v0.1.2 states (section 11 rule 1: a silent claim is linked with `relied_on_silent` only; section 25: a
+  `hedged_only` claim cannot be `asserted`) and nothing is inferred beyond it, so this is not an exhaustive permission engine (authority gap
+  GA-5: no active text enumerates the remaining pairs, e.g. a non-spoken `relied_on_silent` link on an assertable claim is not forbidden; hedge and
+  attribution wording, rights and exposure are not row-checkable); A5 is untouched.
+
+### A4 repair notes
+
+- **Transaction-state enforcement.** `verifyPersistedFixtureOnSnapshot` proves an explicit open transaction with a `SAVEPOINT` /
+  `RELEASE SAVEPOINT` probe: PostgreSQL raises `25P01` outside a transaction block (session defaults such as
+  `default_transaction_isolation` / `default_transaction_read_only` cannot fake one) and `25P02` in an aborted block; a released savepoint
+  leaves the caller's transaction, isolation level and snapshot untouched and never begins, commits or rolls back. The earlier
+  `transaction_timestamp()` comparison could not distinguish statements inside one millisecond.
+- **Evidence uses and the frozen package.** Each evidence use must resolve exactly one frozen `manifest.evidence` entry carrying the
+  unit's rights version, and quotation/paraphrase must be allowed by BOTH that frozen entry and the governing rights ceiling; evidence that
+  supports a frozen-silent claim is never quoted or paraphrased (Claims section 11 rule 2, direct reading). Package membership is unique and
+  exact (claims and evidence) against the durable rows. These are semantic-helper checks; an edited stored package also changes its
+  hashed manifest and is caught by the artifact hash in the full pipeline (a separate layer).

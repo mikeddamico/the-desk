@@ -165,6 +165,118 @@ suite("fixture read-back proof (A4) on PostgreSQL", () => {
     }
   }, 120000);
 
+  it("REPRODUCTION/NEGATIVE CONTROL: session defaults REPEATABLE READ + READ ONLY without an explicit transaction are rejected deterministically", async () => {
+    const env = await loaded();
+    const client = await env.runtime.connect();
+    try {
+      await client.query(
+        "SET default_transaction_isolation = 'repeatable read'",
+      );
+      await client.query("SET default_transaction_read_only = on");
+      // both settings now hold for every statement, yet there is NO transaction: each statement is its own snapshot
+      const level = await client.query<R>(
+        "SELECT current_setting('transaction_isolation') AS v",
+      );
+      expect(level.rows[0]?.v).toBe("repeatable read");
+      const outcomes: string[] = [];
+      for (let i = 0; i < 12; i += 1)
+        outcomes.push(await code(verifyPersistedFixtureOnSnapshot(client)));
+      expect(outcomes).toEqual(
+        Array<string>(12).fill("verifier_not_in_transaction"),
+      );
+      observations.sessionDefaultsNegativeControl = outcomes;
+    } finally {
+      await client
+        .query("RESET default_transaction_isolation")
+        .catch(() => undefined);
+      await client
+        .query("RESET default_transaction_read_only")
+        .catch(() => undefined);
+      client.release();
+    }
+  }, 240000);
+
+  it("savepoint probe assessment: it needs a transaction block, leaves the caller's transaction and snapshot untouched, and never ends it", async () => {
+    const env = await loaded();
+    const writer = actorPool(env);
+    const client = await env.runtime.connect();
+    try {
+      // autocommit: PostgreSQL itself refuses (25P01), deterministically
+      expect(await code(client.query("SAVEPOINT desk_probe"))).toBe("25P01");
+      // an open RR RO transaction: the probe succeeds, the transaction stays open, and the snapshot is unchanged
+      await client.query("BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY");
+      const before = Number(
+        (await client.query<R>("SELECT count(*) AS n FROM accounts")).rows[0]
+          ?.n,
+      );
+      await writer.query(
+        "INSERT INTO accounts(display_name, actor_kind) VALUES ('committed after the snapshot', 'service')",
+      );
+      await client.query("SAVEPOINT desk_probe");
+      await client.query("RELEASE SAVEPOINT desk_probe");
+      expect(
+        Number(
+          (await client.query<R>("SELECT count(*) AS n FROM accounts")).rows[0]
+            ?.n,
+        ),
+      ).toBe(before); // new commit still invisible
+      expect(
+        (
+          await client.query<R>(
+            "SELECT current_setting('transaction_isolation') AS v",
+          )
+        ).rows[0]?.v,
+      ).toBe("repeatable read");
+      await client.query("SELECT 1"); // still an open, usable transaction
+      await client.query("ROLLBACK");
+      // an aborted transaction block is not a usable snapshot either (25P02)
+      await client.query("BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY");
+      await code(client.query("SELECT 1/0"));
+      expect(await code(client.query("SAVEPOINT desk_probe"))).toBe("25P02");
+      await client.query("ROLLBACK");
+    } finally {
+      await client.query("ROLLBACK").catch(() => undefined);
+      client.release();
+      await writer.end();
+    }
+  }, 240000);
+
+  it("positive control: writers that commit AFTER the caller's snapshot began cannot change what the caller-owned verifier sees", async () => {
+    const env = await loaded();
+    const writer = actorPool(env);
+    const client = await env.runtime.connect();
+    try {
+      await client.query("BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY");
+      await client.query("SELECT 1"); // the snapshot is taken here
+      for (let i = 0; i < 3; i += 1)
+        await writer.query(
+          "INSERT INTO accounts(display_name, actor_kind) VALUES ($1, 'service')",
+          [`late writer ${String(i)}`],
+        );
+      await writer.query(
+        'INSERT INTO claim_state_events(claim_id, event_type, event_payload, actor_id, occurred_at, event_sequence) VALUES (\'d1250008-0000-4000-8000-000000000001\',\'confirm\',\'{"reason_code":"r","reason":"r"}\'::jsonb,(SELECT account_id FROM accounts LIMIT 1),now(),1)',
+      );
+      // none of it is visible: the base state verifies, with exactly the original 398 rows
+      expect(await verifyPersistedFixtureOnSnapshot(client)).toEqual({
+        rows: 398,
+        families: 40,
+      });
+      expect(
+        (await client.query<R>("SHOW transaction_isolation")).rows[0]
+          ?.transaction_isolation,
+      ).toBe("repeatable read");
+      await client.query("ROLLBACK");
+      // a NEW snapshot sees the committed writes (the event changes the reduced claim state: reported, not accepted)
+      expect(await code(verifyPersistedFixture(env.runtime))).not.toBe(
+        "accepted",
+      );
+    } finally {
+      await client.query("ROLLBACK").catch(() => undefined);
+      client.release();
+      await writer.end();
+    }
+  }, 240000);
+
   it("a concurrent change cannot produce a mixed snapshot under REPEATABLE READ READ ONLY (and does under READ COMMITTED)", async () => {
     const writerPools: pg.Pool[] = [];
     const run = async (

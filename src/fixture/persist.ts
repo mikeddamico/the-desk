@@ -315,15 +315,20 @@ async function assertSnapshotClient(
       "verifier_snapshot_not_pinned",
       `${String(level)} read_only=${String(readOnly)}`,
     );
-  // two statements, one transaction: autocommit would give two transaction timestamps
-  const a = (
-    await client.query<{ t: Date }>("SELECT transaction_timestamp() AS t")
-  ).rows[0]?.t;
-  const b = (
-    await client.query<{ t: Date }>("SELECT transaction_timestamp() AS t")
-  ).rows[0]?.t;
-  if (a?.getTime() !== b?.getTime() || a === undefined)
-    throw new FixtureReadBackError("verifier_not_in_transaction");
+  // Deterministic transaction-state enforcement. SAVEPOINT is only legal inside an open transaction block: in autocommit
+  // PostgreSQL itself raises 25P01 (whatever the session defaults say), in an aborted block 25P02. A released savepoint leaves the
+  // caller's transaction, isolation level and snapshot untouched and never commits, rolls back or begins anything.
+  try {
+    await client.query("SAVEPOINT desk_snapshot_probe");
+  } catch (error) {
+    const sqlstate = (error as { code?: string }).code;
+    if (sqlstate === "25P01")
+      throw new FixtureReadBackError("verifier_not_in_transaction");
+    if (sqlstate === "25P02")
+      throw new FixtureReadBackError("verifier_transaction_aborted");
+    throw error;
+  }
+  await client.query("RELEASE SAVEPOINT desk_snapshot_probe");
 }
 
 /**

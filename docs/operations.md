@@ -106,3 +106,7 @@ delays a writer. Never run the transaction commands or the reads through unpinne
 UPDATE/DELETE/TRUNCATE for the runtime role with SQLSTATE `42501` (no privilege) and, for a privileged role, with `55000` from the
 immutable-row trigger; TRUNCATE of an FK-referenced table needs its referencing tables in the same statement before the trigger is
 reached. No privilege or migration changes.
+
+The caller-owned entry point (`verifyPersistedFixtureOnSnapshot`) requires the effective role, REPEATABLE READ (or SERIALIZABLE) READ ONLY,
+and a genuinely open transaction block (checked with a savepoint probe, `verifier_not_in_transaction` otherwise); it never begins,
+commits or rolls back the caller's transaction.

@@ -578,16 +578,16 @@ describe("turn claim/evidence uses, spans and frozen usage classes", () => {
       ),
     ).toBe("uses_claim_span");
   });
-  it("rejects a use mode that is not legal for the claim's frozen effective class (Claims 22.2 reading, fixture-scoped)", () => {
+  it("an unknown use mode is rejected; the documented per-class restrictions are tested in a4-repair-regressions (silent-only relied_on_silent, no asserted hedged_only), and no further prohibition is imposed", () => {
     expect(
       direct(
         verifyUses,
         both((r, i) => {
-          r.use_mode = "relied_on_silent";
-          i.use_mode = "relied_on_silent";
+          r.use_mode = "shouted";
+          i.use_mode = "shouted";
         }, "turn_claim_uses"),
       ),
-    ).toBe("uses_claim_mode_for_class");
+    ).toBe("uses_claim_mode_unknown");
   });
   it("rejects a claim_state_hash that is not the package's frozen-state hash", () => {
     expect(
@@ -621,6 +621,8 @@ describe("turn claim/evidence uses, spans and frozen usage classes", () => {
         ).paraphrase_permission = false;
       }),
     ).toBe("uses_paraphrase_not_permitted");
+    // the frozen package entry forbids quotation for this unit, so the frozen restriction is reported first; the rights-ceiling
+    // check on its own is exercised in a4-repair-regressions ("both authorities are required")
     expect(
       direct(
         verifyUses,
@@ -629,7 +631,7 @@ describe("turn claim/evidence uses, spans and frozen usage classes", () => {
           i.use_mode = "quoted";
         }, "turn_evidence_uses"),
       ),
-    ).toBe("uses_quote_not_permitted");
+    ).toBe("uses_quote_not_frozen");
   });
   it("rejects an evidence use whose rights version is not the unit's", () => {
     expect(

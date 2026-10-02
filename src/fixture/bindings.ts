@@ -2,7 +2,7 @@
 // Owners: Evidence Package v0.2.2 (frozen package; selected support/rights snapshots), Claims v0.1.2 (4.3 supports, 4.5 explicit
 // turn_claim_use, 22 deterministic gates), Hashing v0.1.5 section 14.1 (35-artifact registry, "every registry row needs a
 // resolvable consumer") and the Handoff minimum persistent objects. Fixture-scoped counts and the use-mode/class mapping (see
-// USE_MODES) are labeled where they appear. Gate RE-EXECUTION stays in the later workflow tranche (GA-1): these helpers verify
+// claimUseModeViolation) are labeled where they appear. Gate RE-EXECUTION stays in the later workflow tranche (GA-1): these helpers verify
 // row/payload relationships only.
 import { codePointLength } from "./code-points.js";
 import {
@@ -39,7 +39,14 @@ export function verifyPackageSnapshot(tables: Tables): void {
   const entries = list(manifest.claims, "manifest claims").map((c) =>
     obj(c, "claim entry"),
   );
-  if (entries.length !== claims.size) fail("package_claim_count");
+  // unique AND complete membership against the durable rows (counts alone would pass a duplicated entry)
+  const entryIds = entries.map((e) => str(e.claim_id));
+  if (new Set(entryIds).size !== entryIds.length)
+    fail("package_claim_duplicate");
+  for (const id of entryIds)
+    if (!claims.has(id)) fail("package_claim_unknown", id);
+  for (const id of claims.keys())
+    if (!entryIds.includes(id)) fail("package_claim_omitted", id);
   for (const entry of entries) {
     const id = str(entry.claim_id);
     const row = must(claims.get(id), `claim ${id}`);
@@ -82,7 +89,13 @@ export function verifyPackageSnapshot(tables: Tables): void {
   const evidence = list(manifest.evidence, "manifest evidence").map((e) =>
     obj(e, "evidence entry"),
   );
-  if (evidence.length !== units.size) fail("package_evidence_count");
+  const evidenceIds = evidence.map((e) => str(e.evidence_unit_id));
+  if (new Set(evidenceIds).size !== evidenceIds.length)
+    fail("package_evidence_duplicate");
+  for (const id of evidenceIds)
+    if (!units.has(id)) fail("package_evidence_unknown", id);
+  for (const id of units.keys())
+    if (!evidenceIds.includes(id)) fail("package_evidence_omitted", id);
   for (const e of evidence) {
     const id = str(e.evidence_unit_id);
     const unit = must(units.get(id), `evidence ${id}`);
@@ -302,16 +315,27 @@ export function verifyArtifactRegistry(
 
 // ------------------------------------------------------------------------------------------------------------------ uses
 /**
- * FIXTURE-SCOPED reading of Claims 4.5/7/22.2 for the explicit use modes: assertable claims may be asserted, hedged or attributed;
- * hedged_only claims only hedged or attributed; silent claims only relied_on_silent (never voiced, quoted or paraphrased).
- * Claims 22 item 2 states legality "for the claim's frozen effective usage class" without enumerating the pairs (authority gap
- * GA-5); this table is the narrowest reading and every fixture use satisfies it.
+ * The explicitly documented claim-use restrictions, and nothing more (Claims Policy v0.1.2):
+ * - section 11 rule 1: `silent` claims may be linked with `relied_on_silent` ONLY;
+ * - section 25 required rules: `hedged_only` cannot be `asserted`.
+ * Claims 22 item 2 says the four skeleton modes are legal "for the claim's frozen effective usage class" without enumerating the
+ * remaining pairs, so NO other prohibition is invented here: an assertable claim may use any of the four modes, and a
+ * non-spoken `relied_on_silent` link on an assertable or hedged_only claim is not forbidden by any active text. This is not an
+ * exhaustive production permission engine (hedge/attribution wording, rights and exposure are not row-checkable); unresolved
+ * combinations are authority gap GA-5.
  */
-export const USE_MODES: Readonly<Record<string, readonly string[]>> = {
-  assertable: ["asserted", "hedged", "attributed"],
-  hedged_only: ["hedged", "attributed"],
-  silent: ["relied_on_silent"],
-};
+const SKELETON_MODES = ["asserted", "hedged", "attributed", "relied_on_silent"];
+export function claimUseModeViolation(
+  effectiveUsageClass: string,
+  mode: string,
+): string | undefined {
+  if (!SKELETON_MODES.includes(mode)) return "uses_claim_mode_unknown";
+  if (effectiveUsageClass === "silent" && mode !== "relied_on_silent")
+    return "uses_silent_claim_mode";
+  if (effectiveUsageClass === "hedged_only" && mode === "asserted")
+    return "uses_hedged_only_asserted";
+  return undefined;
+}
 
 export function verifyUses(tables: Tables): void {
   const manifest = obj(
@@ -323,6 +347,9 @@ export function verifyUses(tables: Tables): void {
       str(obj(c, "c").claim_id),
       obj(c, "c"),
     ]),
+  );
+  const packageEvidence = list(manifest.evidence, "manifest evidence").map(
+    (e) => obj(e, "evidence entry"),
   );
   const units = indexBy(rowsOf(tables, "evidence_units"), "evidence_unit_id");
   const rights = indexBy(
@@ -395,9 +422,11 @@ export function verifyUses(tables: Tables): void {
           const entry = must(frozen.get(str(row.claim_id)), "frozen claim");
           if (item.claim_state_hash !== entry.frozen_state_hash)
             fail("uses_claim_state_hash", str(item[idCol]));
-          const allowed = USE_MODES[str(entry.effective_usage_class)];
-          if (!allowed?.includes(str(row.use_mode)))
-            fail("uses_claim_mode_for_class", str(item[idCol]));
+          const violation = claimUseModeViolation(
+            str(entry.effective_usage_class),
+            str(row.use_mode),
+          );
+          if (violation) fail(violation, str(item[idCol]));
         } else {
           const unit = must(
             units.get(str(row.evidence_unit_id)),
@@ -409,13 +438,40 @@ export function verifyUses(tables: Tables): void {
           );
           if (item.rights_policy_version !== unit.rights_version_id)
             fail("uses_evidence_rights_version", str(item[idCol]));
-          if (row.use_mode === "quoted" && policy.quotation_permission !== true)
-            fail("uses_quote_not_permitted", str(item[idCol]));
-          if (
-            row.use_mode === "paraphrased" &&
-            policy.paraphrase_permission !== true
-          )
-            fail("uses_paraphrase_not_permitted", str(item[idCol]));
+          // the use must resolve exactly ONE frozen package entry, with the unit's rights version
+          const matches = packageEvidence.filter(
+            (e) => e.evidence_unit_id === row.evidence_unit_id,
+          );
+          if (matches.length === 0)
+            fail("uses_evidence_not_in_package", str(item[idCol]));
+          if (matches.length > 1)
+            fail("uses_evidence_package_ambiguous", str(item[idCol]));
+          const entry = must(matches[0], "package evidence entry");
+          if (entry.rights_version_id !== unit.rights_version_id)
+            fail("uses_evidence_package_rights_version", str(item[idCol]));
+          // Claims 11 rule 2: silent claims must not have quoted/paraphrased evidence uses (direct reading: evidence that
+          // supports a frozen-silent claim is never quoted or paraphrased)
+          const supportsSilent = rowsOf(tables, "claim_supports").some(
+            (support) =>
+              support.evidence_unit_id === row.evidence_unit_id &&
+              frozen.get(str(support.claim_id))?.effective_usage_class ===
+                "silent",
+          );
+          if (supportsSilent)
+            fail("uses_silent_support_evidence_used", str(item[idCol]));
+          // quotation / paraphrase must be allowed by BOTH the frozen package entry AND the governing rights ceiling
+          if (row.use_mode === "quoted") {
+            if (entry.quote_permission !== true)
+              fail("uses_quote_not_frozen", str(item[idCol]));
+            if (policy.quotation_permission !== true)
+              fail("uses_quote_not_permitted", str(item[idCol]));
+          }
+          if (row.use_mode === "paraphrased") {
+            if (entry.paraphrase_permission !== true)
+              fail("uses_paraphrase_not_frozen", str(item[idCol]));
+            if (policy.paraphrase_permission !== true)
+              fail("uses_paraphrase_not_permitted", str(item[idCol]));
+          }
         }
       }
       if (kind === "claim") claimSeen += own.length;
