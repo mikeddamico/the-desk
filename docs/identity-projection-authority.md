@@ -27,3 +27,9 @@ All other projections (canonical serializer, domains, stage fingerprints, knowle
 3. **Not part of A1:** the production fixture loader (it still targets the v0.4.3 ZIP), the claim reducer, the workflow runner, persistence of any of these hashes, A5 durable event-retry convergence, READY/operator authorization and cross-manifest cached-take acceptance.
 4. **Stage fingerprints keep their closed key sets**; the addendum is bound through model provenance, not through gate fingerprints. A future addendum change needs a fresh invalidation/version review (the dependency-chain tests show which identities move).
 5. Fixture-scoped Layer B helpers (scope, context, correction, historical-null) and the ownership checks apply only to Fixture v0.4.6 content and are not product policy. The historical direction artifact is verified separately and the archived fixtures are never co-loaded.
+
+## A2 fixture load
+
+The loader reuses the A1 modules above (`scriptHash`, `showConfigVersionHash`, `verifyAddendumBindings`, `fingerprint`,
+`requestBaseHash`, `checkFixtureRequestOwnership`) both on the shipped snapshot and on rows read back from the database.
+Request specimens are verified as shipped bytes, not regenerated, and the lexical JSON `1.0` reducer case remains open.

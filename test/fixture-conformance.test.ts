@@ -6,72 +6,35 @@ import {
   loadFingerprintVectors,
   loadFixtureBytes,
   loadFixtureJson,
+  loadFoundationRows,
   verifyPolicySources,
 } from "../src/fixture/loader.js";
+import { must } from "./support/fixture-v046.js";
+import { canonicalJson } from "../src/identity/canonical-json.js";
 import {
-  baseRequestHash,
   fingerprint,
-  projectBaseRequest,
   stageDomains,
   type StageName,
 } from "../src/identity/fingerprints.js";
-import { canonicalJson } from "../src/identity/canonical-json.js";
 import {
   locateCodePointSpan,
   sliceCodePointSpan,
 } from "../src/identity/spans.js";
 
-describe("Frozen Fixture v0.4.3 deterministic conformance", () => {
-  it("reproduces all six stage fingerprints from shipped projections", () => {
-    const fixture = loadFingerprintVectors();
-    expect(Object.keys(fixture.fingerprints)).toHaveLength(6);
-    for (const [stage, vector] of Object.entries(fixture.fingerprints)) {
+// Loader conformance against the active Frozen Fixture v0.4.6 (pinned and verified by the production loader). Hash and
+// vector coverage of the identity projections lives in the a1-* suites; this file covers the loader's own contract.
+describe("Frozen Fixture v0.4.6 through the production loader", () => {
+  it("reproduces all six stage fingerprints from the shipped projections", () => {
+    const vectors = loadFingerprintVectors();
+    expect(Object.keys(vectors).sort()).toEqual(
+      Object.keys(stageDomains).sort(),
+    );
+    for (const [stage, vector] of Object.entries(vectors)) {
       expect(vector.domain).toBe(stageDomains[stage as StageName]);
       expect(fingerprint(stage as StageName, vector.input_projection)).toBe(
-        vector.expected_hash,
+        vector.fingerprint,
       );
     }
-  });
-
-  it("reproduces all P&R sensitivity/stability vectors and projection selection", () => {
-    const fixture = loadFixtureJson("base_request_hash_conformance.json") as {
-      baseline_hash: string;
-      baseline_input_record: Record<string, unknown>;
-      baseline_projection: Record<string, unknown>;
-      vectors: {
-        input_record: Record<string, unknown>;
-        expected_projection: Record<string, unknown>;
-        expected_hash: string;
-        expected_relation_to_baseline: string;
-      }[];
-    };
-    expect(projectBaseRequest(fixture.baseline_input_record)).toEqual(
-      fixture.baseline_projection,
-    );
-    expect(baseRequestHash(fixture.baseline_input_record)).toBe(
-      fixture.baseline_hash,
-    );
-    for (const vector of fixture.vectors) {
-      expect(projectBaseRequest(vector.input_record)).toEqual(
-        vector.expected_projection,
-      );
-      expect(baseRequestHash(vector.input_record)).toBe(vector.expected_hash);
-      expect(
-        vector.expected_hash === fixture.baseline_hash ? "same" : "different",
-      ).toBe(vector.expected_relation_to_baseline);
-    }
-  });
-
-  it("reproduces all nine actual render-block baseline hashes", () => {
-    const fixture = loadFixtureJson("render_request_projections.json") as {
-      projections: {
-        projection: Record<string, unknown>;
-        base_request_hash: string;
-      }[];
-    };
-    expect(fixture.projections).toHaveLength(9);
-    for (const vector of fixture.projections)
-      expect(baseRequestHash(vector.projection)).toBe(vector.base_request_hash);
   });
 
   it("validates Unicode serialization and code-point span vectors", () => {
@@ -94,48 +57,33 @@ describe("Frozen Fixture v0.4.3 deterministic conformance", () => {
     }
   });
 
-  it("binds active policy versions to exact locked source bytes", async () => {
+  it("binds the ten active policy sources to the exact locked bytes and the shipped copies", async () => {
     await expect(verifyPolicySources()).resolves.toBeUndefined();
   });
 
-  it("reproduces fixture audio and clean-master hashes", () => {
-    const audio = loadFixtureJson("audio_artifacts.json") as {
-      artifacts: { path: string; sha256: string }[];
-    };
-    for (const artifact of audio.artifacts) {
+  it("reproduces every audio artifact hash from the shipped WAV members", () => {
+    const audio =
+      loadFoundationRows().tables.artifacts?.filter((a) =>
+        String(a.artifact_type).startsWith("audio/"),
+      ) ?? [];
+    expect(audio).toHaveLength(12);
+    for (const a of audio)
       expect(
         createHash("sha256")
-          .update(loadFixtureBytes(artifact.path))
+          .update(loadFixtureBytes(String(a.storage_uri)))
           .digest("hex"),
-      ).toBe(artifact.sha256);
-    }
-    const master = loadFixtureJson("master_artifact.json") as {
-      path: string;
-      content_hash: string;
-    };
-    expect(
-      createHash("sha256").update(loadFixtureBytes(master.path)).digest("hex"),
-    ).toBe(master.content_hash);
+      ).toBe(a.content_hash);
   });
 
   it("checks READY lineage identity without executing workflow", () => {
-    const ready = loadFixtureJson("episode_ready.json") as {
-      ready_candidate_fingerprint: string;
-      ready_attempt_id: string;
-    };
-    const review = loadFixtureJson("pre_publish_review.json") as {
-      ready_candidate_fingerprint: string;
-      attempt_id: string;
-    };
+    const ready = must(loadFingerprintVectors().ready_candidate);
     const revalidation = loadFixtureJson("revalidation_result.json") as {
       ready_candidate_fingerprint: string;
     };
-    expect(review.ready_candidate_fingerprint).toBe(
-      ready.ready_candidate_fingerprint,
-    );
-    expect(revalidation.ready_candidate_fingerprint).toBe(
-      ready.ready_candidate_fingerprint,
-    );
-    expect(review.attempt_id).toBe(ready.ready_attempt_id);
+    expect(revalidation.ready_candidate_fingerprint).toBe(ready.fingerprint);
+    const expectations = loadFixtureJson("ready_expectations.json") as {
+      attempt_id: string;
+    };
+    expect(ready.input_projection.attempt_id).toBe(expectations.attempt_id);
   });
 });
