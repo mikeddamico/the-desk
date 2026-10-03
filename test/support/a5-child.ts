@@ -5,6 +5,10 @@ import pg from "pg";
 
 import { appendClaimStateEvent } from "../../src/runtime/claim-events.js";
 import { persistEvidenceUnit } from "../../src/runtime/evidence.js";
+import {
+  createProgramAttempt,
+  createProgramRun,
+} from "../../src/runtime/program.js";
 import { type AuthoredReservation } from "../../src/runtime/provider.js";
 import { durableAdapter, finishSucceeded } from "./a5-provider.js";
 import { fixtureUnits, sliceInput } from "./a5-fixture.js";
@@ -14,8 +18,16 @@ interface Spec {
   url: string;
   tag: string;
   fault: string;
-  scenario: "claim" | "slice" | "unit" | "provider";
+  scenario:
+    | "claim"
+    | "slice"
+    | "unit"
+    | "provider"
+    | "program_run"
+    | "program_attempt";
   event?: Parameters<typeof appendClaimStateEvent>[1];
+  run?: Parameters<typeof createProgramRun>[1];
+  programAttempt?: Parameters<typeof createProgramAttempt>[1];
   attemptIndex?: number;
   unitIndex?: number;
   /** provider scenario: the authored reservation and the owner URL of the durable test adapter (never the runtime role). */
@@ -54,7 +66,11 @@ if (spec.scenario === "provider" && spec.reservation && spec.ownerUrl) {
     finishSucceeded(spec.reservation.provider_call_id),
   );
   await owner.end();
-} else if (spec.scenario === "claim" && spec.event)
+} else if (spec.scenario === "program_run" && spec.run)
+  result = await createProgramRun(pool, spec.run);
+else if (spec.scenario === "program_attempt" && spec.programAttempt)
+  result = await createProgramAttempt(pool, spec.programAttempt);
+else if (spec.scenario === "claim" && spec.event)
   result = await appendClaimStateEvent(pool, spec.event);
 else if (spec.scenario === "unit")
   result = await persistEvidenceUnit(
