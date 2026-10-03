@@ -213,10 +213,20 @@ describe("projectEvent: a flat projection of validated values", () => {
       stopped_outcome: "conflict",
       stopped_code: "attempt_bound_to_other_package",
       steps: [{ subject: "CANARY" }],
+      // TRANSACTION facts offered on a workflow event (malformed input): all must be dropped
       durability: "committed",
+      connection: {
+        phase: "commit",
+        commit_outcome: "unknown",
+        sqlstate: "57P01",
+      },
+      cleanup_failures: 2,
       duration_ms: 1,
     });
     expect(e).not.toHaveProperty("steps");
+    expect(e).not.toHaveProperty("durability"); // a workflow has no single committed flag
+    expect(e).not.toHaveProperty("connection");
+    expect(e).not.toHaveProperty("cleanup_failures");
     expect(JSON.stringify(e)).not.toContain("CANARY");
     expect(e).toMatchObject({
       steps_total: 4,
@@ -875,6 +885,72 @@ describe("review regressions (scripted client, not real-PostgreSQL evidence)", (
         "stage",
       ].sort(),
     );
+  });
+
+  it("the public adapter given a MALFORMED workflow event never logs a transaction durability/connection/cleanup fact, and the level is not driven by one", () => {
+    const logged: { level: string; obj: Record<string, unknown> }[] = [];
+    const logger = {
+      info: (obj: Record<string, unknown>) =>
+        logged.push({ level: "info", obj }),
+      warn: (obj: Record<string, unknown>) =>
+        logged.push({ level: "warn", obj }),
+      error: (obj: Record<string, unknown>) =>
+        logged.push({ level: "error", obj }),
+    } as unknown as Parameters<typeof commandObserver>[0];
+    const malformed = {
+      event: "workflow.completed",
+      workflow: "provider_call.execute",
+      stage: "provider_execute",
+      correlation_id: randomUUID(),
+      status: "performed",
+      reservation: "created",
+      perform: "performed",
+      outcome_record: "created",
+      duration_ms: 3,
+      // transaction facts that do not belong to a workflow (a falsely "committed" label, a lost-COMMIT detail, a cleanup count)
+      durability: "committed",
+      connection: {
+        phase: "commit",
+        commit_outcome: "unknown",
+        sqlstate: "57P01",
+      },
+      cleanup_failures: 3,
+    } as unknown as CommandEvent;
+    commandObserver(logger)(malformed);
+    expect(logged).toHaveLength(1);
+    const obj = logged[0]?.obj ?? {};
+    for (const k of ["durability", "connection", "cleanup_failures"])
+      expect(obj).not.toHaveProperty(k);
+    expect(obj).toMatchObject({
+      workflow: "provider_call.execute",
+      status: "performed",
+      perform: "performed",
+    });
+    expect(logged[0]?.level).toBe("info"); // an input `durability: unknown` could otherwise have forced error level
+    // and the same facts DO survive on a command event (command behavior preserved)
+    commandObserver(logger)({
+      ...(malformed as unknown as Record<string, unknown>),
+      event: "command.completed",
+      command: "provider_call.reserve",
+      outcome: "created",
+      durability: "unknown",
+      connection: {
+        phase: "commit",
+        commit_outcome: "unknown",
+        sqlstate: "57P01",
+      },
+      cleanup_failures: 3,
+    } as unknown as CommandEvent);
+    expect(logged[1]?.obj).toMatchObject({
+      durability: "unknown",
+      connection: {
+        phase: "commit",
+        commit_outcome: "unknown",
+        sqlstate: "57P01",
+      },
+      cleanup_failures: 3,
+    });
+    expect(logged[1]?.level).toBe("error");
   });
 
   it("workflow entry points snapshot the declared context once: a throwing getter or malformed context is REFUSED before any database work (never thrown)", async () => {

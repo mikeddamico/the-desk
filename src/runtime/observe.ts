@@ -523,13 +523,17 @@ export function projectEvent(raw: RawEvent): CommandEvent {
     if (known) e.code = raw.code as string;
     e.code_known = known;
   } else if (raw.code_known === false) e.code_known = false;
+  // TRANSACTION facts (durability, the connection/commit-outcome detail) describe ONE command transaction and exist ONLY on
+  // `command.completed`. A workflow spans several transactions, so a `workflow.completed` input carrying them (a malformed event handed
+  // to the public logger adapter, for instance) has them dropped: the contract is "no single committed flag" for a workflow.
+  const isCommand = e.event === "command.completed";
   const dur = oneOf(DURABILITIES, raw.durability);
-  if (dur) e.durability = dur;
+  if (isCommand && dur) e.durability = dur;
   const conn = raw.connection as
     | { phase?: unknown; commit_outcome?: unknown; sqlstate?: unknown }
     | null
     | undefined;
-  if (typeof conn === "object" && conn !== null) {
+  if (isCommand && typeof conn === "object" && conn !== null) {
     const phase = oneOf(
       ["before_commit", "commit", "rollback"] as const,
       conn.phase,
@@ -548,7 +552,7 @@ export function projectEvent(raw: RawEvent): CommandEvent {
   const ec = oneOf(ERROR_CLASSES, raw.error_class);
   if (ec) e.error_class = ec;
   const cf = safeInt(raw.cleanup_failures);
-  if (cf !== undefined && cf > 0) e.cleanup_failures = cf;
+  if (isCommand && cf !== undefined && cf > 0) e.cleanup_failures = cf;
   // workflow-only
   const status = oneOf(WORKFLOW_STATUSES, raw.status);
   if (status) e.status = status;
