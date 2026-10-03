@@ -96,6 +96,21 @@ export const faultPoint = async (point: string): Promise<void> => {
     await (hook as (name: string) => Promise<void>)(point);
 };
 
+type CommandPhase = "work" | "commit" | "rollback" | "after_end";
+
+/**
+ * SQLSTATE 57P01 `admin_shutdown` ("terminating connection due to administrator command"), PostgreSQL 17 Appendix A, Class 57. This is
+ * the ONLY code treated as a lost session, because it is the only one whose delivery this repository has demonstrated: when the backend
+ * is terminated while a statement is in flight, the server's FATAL ErrorResponse rejects that ACTIVE query (pg 8.16.3
+ * `_handleErrorMessage`) and no client `error` event is emitted until the socket closes. Other Class 57 / Class 08 codes
+ * (57P02, 57P03, 57P04, 57P05, 57014, 08006, ...) are deliberately NOT classified here: that is unaddressed scope, not a statement
+ * that they are safe or that raw handling is permanently correct. Widening needs per-code authority and a real-PostgreSQL control.
+ */
+const isAdminShutdown = (error: unknown): boolean =>
+  typeof error === "object" &&
+  error !== null &&
+  (error as { code?: unknown }).code === "57P01";
+
 export async function runCommand<R>(
   pool: Pool,
   fn: (tx: Tx) => Promise<Outcome<R>>,
@@ -104,39 +119,62 @@ export async function runCommand<R>(
   let open = false as boolean; // assigned inside `execute`; keeps TS from narrowing it to `false`
   let broken: unknown;
   let savepoints = 0;
-  let phase: "work" | "commit" | "rollback" | "after_end" = "work";
+  let phase: CommandPhase = "work";
   // the error this call throws (if any); cleanup failures are attached to it, never allowed to replace it
   let thrown: unknown;
+  // The FIRST sign that this session was lost, with the phase it struck in. Set only through `recordLoss` (`??=`), so a later event or
+  // error never replaces the first cause or its phase. It is recorded at the EARLIEST observation: either the query that was in flight
+  // (a 57P01 rejection, see `q`) or the client `error` event, whichever comes first, before any callback code can swallow it.
+  let loss: { error: unknown; phase: CommandPhase } | undefined;
+  const recordLoss = (error: unknown): void => {
+    loss ??= { error, phase };
+  };
   // pg-pool removes ITS error listener while a client is checked out (pg-pool 3.14.0 `_acquireClient`) and only restores it in
   // `release`, so an error emitted by a checked-out connection (backend terminated, socket reset) would be an UNHANDLED error event
   // that can take the process down. This scoped listener is attached immediately after checkout and removed only AFTER `release`
   // (which has by then re-attached the pool's own listener), so there is never a moment without a listener. It records the FIRST
   // connection error; it never swallows it.
-  let connectionError: unknown;
   const onClientError = (error: unknown): void => {
-    connectionError ??= error;
+    recordLoss(error);
   };
+  /** Every driver call of the command goes through here: a 57P01 rejection is recorded, then the SAME error is rethrown unchanged. */
+  const q = async (
+    c: PoolClient,
+    text: string,
+    values?: unknown[],
+  ): Promise<{ rows: Row[] }> => {
+    try {
+      return await c.query(text, values);
+    } catch (error) {
+      if (isAdminShutdown(error)) recordLoss(error);
+      throw error;
+    }
+  };
+  const lostPhase = (
+    p: CommandPhase,
+  ): "before_commit" | "commit" | "rollback" =>
+    p === "commit" ? "commit" : p === "rollback" ? "rollback" : "before_commit";
   const execute = async (): Promise<Outcome<R>> => {
     try {
       client = await pool.connect();
       client.on("error", onClientError);
-      await client.query("BEGIN ISOLATION LEVEL READ COMMITTED");
-      open = true;
       const c = client;
+      await q(c, "BEGIN ISOLATION LEVEL READ COMMITTED");
+      open = true;
       const tx: Tx = {
-        query: (text, values) => c.query(text, values),
+        query: (text, values) => q(c, text, values),
         attempt: async (text, values) => {
           const name = `sp_${String((savepoints += 1))}`;
-          await c.query(`SAVEPOINT ${name}`);
+          await q(c, `SAVEPOINT ${name}`);
           try {
-            const result = await c.query(text, values);
-            await c.query(`RELEASE SAVEPOINT ${name}`);
-            return { ok: true, rows: result.rows as Row[] };
+            const result = await q(c, text, values);
+            await q(c, `RELEASE SAVEPOINT ${name}`);
+            return { ok: true, rows: result.rows };
           } catch (error) {
-            // a dead connection cannot roll back to a savepoint: surface the failure instead of masking it behind a second error
-            if (connectionError !== undefined) throw error;
-            await c.query(`ROLLBACK TO SAVEPOINT ${name}`);
-            await c.query(`RELEASE SAVEPOINT ${name}`);
+            // a lost session cannot roll back to a savepoint: surface the first failure instead of masking it behind a second one
+            if (loss !== undefined) throw error;
+            await q(c, `ROLLBACK TO SAVEPOINT ${name}`);
+            await q(c, `RELEASE SAVEPOINT ${name}`);
             const e = error as DbError;
             return {
               ok: false,
@@ -168,39 +206,34 @@ export async function runCommand<R>(
           throw error;
         }
       }
-      // A connection failure observed before COMMIT is never reported as a (rejected/created/...) outcome, even if `fn` happened to
-      // catch the symptom and return normally.
-      if (connectionError !== undefined)
-        throw new CommandConnectionError(connectionError, "before_commit");
+      // A lost session observed before COMMIT is never reported as a (rejected/created/...) outcome, even if `fn` caught the symptom
+      // and returned normally; COMMIT is never sent on it.
+      if (loss !== undefined)
+        throw new CommandConnectionError(loss.error, lostPhase(loss.phase));
       if (commits(outcome)) {
         phase = "commit";
-        await client.query("COMMIT");
+        await q(c, "COMMIT");
         open = false;
         phase = "after_end";
         await faultPoint("after_commit_before_return");
       } else {
         phase = "rollback"; // COMMIT is never sent on this path
-        await client.query("ROLLBACK");
+        await q(c, "ROLLBACK");
         open = false;
         phase = "after_end";
       }
-      // After a successful COMMIT the outcome is durable: a later connection failure only costs the connection, never the result.
+      // An ACKNOWLEDGED COMMIT (or ROLLBACK) is durable: a loss recorded around it, even during the commit phase before this
+      // continuation ran, only costs the connection, never the result.
       return outcome;
     } catch (error) {
       broken = error;
-      // Report a connection failure as such (first error retained as `cause`); a COMMIT whose acknowledgment was lost is `unknown`.
-      if (connectionError !== undefined && phase !== "after_end")
+      // Report a lost session as such (the FIRST cause is retained as `cause`, classified by the phase it struck in); a COMMIT whose
+      // acknowledgment was lost is `unknown`. Once COMMIT/ROLLBACK was acknowledged (`after_end`) nothing is converted.
+      if (loss !== undefined && phase !== "after_end")
         thrown =
           error instanceof CommandConnectionError
             ? error
-            : new CommandConnectionError(
-                connectionError,
-                phase === "commit"
-                  ? "commit"
-                  : phase === "rollback"
-                    ? "rollback"
-                    : "before_commit",
-              );
+            : new CommandConnectionError(loss.error, lostPhase(loss.phase));
       else thrown = error;
       throw thrown;
     }
@@ -212,10 +245,13 @@ export async function runCommand<R>(
   } catch {
     failed = true; // `thrown` holds the error to rethrow
   }
-  // Cleanup runs on every path, OUTSIDE any finally (a throw in finally would replace the first error).
+  // Cleanup runs on every path, OUTSIDE any finally (a throw in finally would replace the first error). Cleanup failures are always
+  // SECONDARY: they use the plain driver call (never `q`). The scoped listener is still attached here, so a client event may still
+  // record a loss during cleanup (and that only makes the release destroy the client), but by now the error or result of this call is
+  // already established: nothing recorded during cleanup can replace it or reclassify it.
   if (client) {
     const cleanupErrors: unknown[] = [];
-    if (open && connectionError === undefined) {
+    if (open && loss === undefined) {
       try {
         await client.query("ROLLBACK");
       } catch (rollbackError) {
@@ -223,12 +259,10 @@ export async function runCommand<R>(
         cleanupErrors.push(rollbackError);
       }
     }
-    // A connection whose state is unknown (or that reported an error) is destroyed, never returned to the pool.
+    // A connection whose state is unknown (or that was lost) is destroyed, never returned to the pool.
     try {
       client.release(
-        broken === undefined && connectionError === undefined
-          ? undefined
-          : true,
+        broken === undefined && loss === undefined ? undefined : true,
       );
     } catch (releaseError) {
       cleanupErrors.push(releaseError);
