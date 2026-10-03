@@ -316,6 +316,11 @@ suite("G2 runCommand: a checked-out backend terminated by PostgreSQL", () => {
       await terminateCommandBackend(tag);
     });
     expect(out.code, exitRecord(out)).toBe(0);
+    // the child saw the first pooled client's `end` event (the loss was delivered locally) while still held after COMMIT, BEFORE
+    // the command returned and before the recovery command checked a connection out
+    expect(out.stdout, exitRecord(out)).toMatch(
+      /HELD after_commit_before_return\nTRANSPORT_ENDED after_commit_before_return\nOUTCOME created\n/,
+    );
     expect(out.stdout).toContain("OUTCOME created"); // the committed outcome is not turned into a failure
     expect(out.stdout).toContain("RECOVERED created");
     expect(await markers(tag)).toEqual(["first", "after_recovery"]); // exactly one "first": never replayed

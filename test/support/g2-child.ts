@@ -51,12 +51,39 @@ async function holdUntilBackendGone(point: string): Promise<void> {
 if (spec.scenario === "post_commit") {
   process.env.DESK_TEST_FAULTS = "1";
   let held = false; // only the FIRST command commit holds; the recovery command must pass through
+  // The backend being gone (seen from ANOTHER session) does not show that THIS process's client has processed the loss. Capture the
+  // FIRST pooled client's public `end` event: pg 8.16.3 client.js handles an unexpected connection loss (including delivering the
+  // error to the listeners attached to the checked-out client, here runCommand's scoped listener) BEFORE it emits `end` on the next
+  // tick, so a seen `end` means the loss was delivered locally. No `error` listener is added here (an `end` listener cannot absorb
+  // an error), so the unhandled-error regression this child exists for is preserved.
+  let firstClientEnded: Promise<void> | undefined;
+  pool.on("connect", (client) => {
+    firstClientEnded ??= new Promise<void>((resolve) => {
+      client.once("end", () => {
+        resolve();
+      });
+    });
+  });
   (globalThis as Record<symbol, unknown>)[
     Symbol.for("the-desk.a5.test-fault-hook")
   ] = async (point: string): Promise<void> => {
     if (point === "after_commit_before_return" && !held) {
       held = true;
       await holdUntilBackendGone(point);
+      if (firstClientEnded === undefined)
+        throw new Error("first pooled client was never captured");
+      let timer: NodeJS.Timeout | undefined;
+      const timeout = new Promise<never>((_, reject) => {
+        timer = setTimeout(() => {
+          reject(new Error("first client end event never observed"));
+        }, 30000);
+      });
+      try {
+        await Promise.race([firstClientEnded, timeout]);
+      } finally {
+        clearTimeout(timer);
+      }
+      process.stdout.write(`TRANSPORT_ENDED ${point}\n`);
     }
   };
 }

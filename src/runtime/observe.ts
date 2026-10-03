@@ -19,6 +19,8 @@ export const COMMANDS = [
   "package.bind",
   "provider_call.reserve",
   "provider_outcome.record",
+  "program_run.create",
+  "program_attempt.create",
 ] as const;
 export type CommandName = (typeof COMMANDS)[number];
 export const WORKFLOWS = [
@@ -143,6 +145,17 @@ export const KNOWN_OUTCOME_CODES: ReadonlySet<string> = new Set([
   "ceiling_for_unrequested_claim",
   "ceiling_missing",
   "check_rejected",
+  "config_not_found",
+  "config_show_mismatch",
+  "program_attempt_identity_conflict",
+  "program_run_identity_conflict",
+  "publication_not_permitted",
+  "purpose_invalid",
+  "repair_not_supported",
+  "run_config_binding_mismatch",
+  "run_not_found",
+  "show_not_found",
+  "unsupported_field",
   "claim_asserted_at_invalid",
   "claim_content_hash_mismatch",
   "claim_not_found",
@@ -346,6 +359,7 @@ export function contextProblem(context: unknown): string | undefined {
 }
 
 export const SUBJECT_KEYS = [
+  "program_run_id",
   "evidence_unit_id",
   "rights_version_id",
   "claim_id",
@@ -363,6 +377,7 @@ export const SUBJECT_KEYS = [
   "provider_outcome_type",
 ] as const;
 export type SubjectKey =
+  | "program_run_id"
   | "evidence_unit_id"
   | "rights_version_id"
   | "claim_id"
@@ -396,6 +411,7 @@ export interface CommandEvent {
   run_id?: string;
   run_id_status?: RunIdStatus;
   attempt_id?: string;
+  program_run_id?: string;
   evidence_unit_id?: string;
   rights_version_id?: string;
   claim_id?: string;
@@ -446,6 +462,7 @@ export interface CommandEvent {
 export type RawEvent = Record<string, unknown>;
 
 const SUBJECT_UUIDS: SubjectKey[] = [
+  "program_run_id",
   "evidence_unit_id",
   "rights_version_id",
   "claim_id",
