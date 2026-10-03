@@ -38,6 +38,11 @@ migration, privilege, dependency, Lock or fixture change. Provider reservation/o
   now, so later lawful support rows neither invalidate nor are demanded of a frozen package, and no support-sufficiency policy is inferred. The A3 verifier cannot reproduce the frozen-time usage ceiling; that limit is returned in
   `verification.limits`. The same validation runs on reuse by hash, on completion of an untyped artifact another writer stored, on every
   binding path (first, same-package retry, race winner) and when a stored package is read for snapshot verification or slice status.
+- Occupied authored ids and READ COMMITTED: `persistEvidencePackage` judges an authored artifact/package id "occupied by a different
+  record" only after ONE full re-read of the semantic (hash) lookups. An identical governed winner committed across a read boundary
+  (before the occupied-artifact read, before the occupied-package read, or completing the same orphan artifact) therefore converges;
+  an unrelated occupant (no package with this hash) is still a conflict. The re-read is taken at most once (bounded). Proved
+  deterministically on PostgreSQL 17 (`a5-1-package-interleaving.test.ts`).
 - One normalized JSON representation (every own key preserved, including `__proto__`) is hashed, compared and stored.
 - Cross-config package sharing is a persistence characterization only; it establishes no editorial eligibility.
 

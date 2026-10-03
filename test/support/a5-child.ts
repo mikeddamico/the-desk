@@ -5,17 +5,26 @@ import pg from "pg";
 
 import { appendClaimStateEvent } from "../../src/runtime/claim-events.js";
 import { persistEvidenceUnit } from "../../src/runtime/evidence.js";
+import {
+  executeProviderCall,
+  type AuthoredReservation,
+} from "../../src/runtime/provider.js";
 import { runEvidenceSlice } from "../../src/runtime/slice.js";
+import { durableAdapter, finishSucceeded } from "./a5-provider.js";
 import { fixtureUnits, sliceInput } from "./a5-fixture.js";
 
 interface Spec {
   url: string;
   tag: string;
   fault: string;
-  scenario: "claim" | "slice" | "unit";
+  scenario: "claim" | "slice" | "unit" | "provider";
   event?: Parameters<typeof appendClaimStateEvent>[1];
   attemptIndex?: number;
   unitIndex?: number;
+  /** provider scenario: the authored reservation and the owner URL of the durable test adapter (never the runtime role). */
+  reservation?: AuthoredReservation;
+  ownerUrl?: string;
+  lookup?: boolean;
 }
 const spec = JSON.parse(process.argv[2] ?? "{}") as Spec;
 process.env.DESK_TEST_FAULTS = "1";
@@ -34,7 +43,21 @@ const pool = new pg.Pool({
   application_name: `a5child_${spec.tag}`,
 });
 let result: unknown;
-if (spec.scenario === "claim" && spec.event)
+if (spec.scenario === "provider" && spec.reservation && spec.ownerUrl) {
+  // The adapter's own connection shares the tag, so the harness waits for it to disappear as well.
+  const owner = new pg.Pool({
+    connectionString: spec.ownerUrl,
+    max: 2,
+    application_name: `a5child_${spec.tag}`,
+  });
+  result = await executeProviderCall(
+    pool,
+    spec.reservation,
+    durableAdapter(owner, { lookup: spec.lookup ?? true }),
+    finishSucceeded(spec.reservation.provider_call_id),
+  );
+  await owner.end();
+} else if (spec.scenario === "claim" && spec.event)
   result = await appendClaimStateEvent(pool, spec.event);
 else if (spec.scenario === "unit")
   result = await persistEvidenceUnit(
