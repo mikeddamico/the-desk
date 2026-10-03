@@ -7,10 +7,7 @@ import {
   parsePackage,
   persistEvidencePackage,
 } from "../../src/runtime/package.js";
-import {
-  evidenceSliceStatus,
-  runEvidenceSlice,
-} from "../../src/runtime/slice.js";
+import { evidenceSliceStatus } from "../../src/runtime/slice.js";
 import type { Json } from "../../src/runtime/command.js";
 import { TestCluster, type DbEnv } from "../support/db-env.js";
 import {
@@ -25,6 +22,7 @@ import {
 } from "../support/a5-fixture.js";
 import { observe, withChild } from "../support/a5-crash.js";
 import { backendPid, waitForBlocked } from "../support/pg-wait.js";
+import { runSliceObserved } from "../support/a6-observed.js";
 
 const databaseUrl = process.env.TEST_DATABASE_URL;
 const suite = databaseUrl ? describe : describe.skip;
@@ -627,7 +625,7 @@ suite(
         const before = await evidenceSliceStatus(pool, sliceInput());
         expect(before.complete).toBe(false);
         expect(before.binding).toBe("unbound");
-        const r = await runEvidenceSlice(pool, sliceInput());
+        const r = await runSliceObserved(pool, sliceInput());
         expect(r.complete).toBe(true);
         // units and supports pre-exist (the package needs the claims\' support rows): S1 converges; the package and the binding are created
         expect(
@@ -639,7 +637,7 @@ suite(
             .every((s) => s.outcome === "converged"),
         ).toBe(true);
         expect(r.snapshotVerification).toBe("verified");
-        const again = await runEvidenceSlice(pool, sliceInput());
+        const again = await runSliceObserved(pool, sliceInput());
         expect(again.complete).toBe(true);
         expect(again.steps.every((s) => s.outcome === "converged")).toBe(true);
         expect((await evidenceSliceStatus(pool, sliceInput())).complete).toBe(
@@ -656,7 +654,7 @@ suite(
       const reference = await fresh();
       const refPool = actorPool(reference);
       await persistUnits(reference, refPool);
-      await runEvidenceSlice(refPool, sliceInput());
+      await runSliceObserved(refPool, sliceInput());
       const expected = await endState(reference);
       await refPool.end();
       await reference.close();
@@ -698,7 +696,7 @@ suite(
             expect(
               (await evidenceSliceStatus(pool, sliceInput())).complete,
             ).toBe(false);
-          const resumed = await runEvidenceSlice(pool, sliceInput());
+          const resumed = await runSliceObserved(pool, sliceInput());
           expect(resumed.complete).toBe(true);
           if (fault === "after_s1")
             expect(
@@ -812,14 +810,14 @@ suite(
       const pool = actorPool(env);
       try {
         await persistUnits(env, pool);
-        expect((await runEvidenceSlice(pool, sliceInput())).complete).toBe(
+        expect((await runSliceObserved(pool, sliceInput())).complete).toBe(
           true,
         );
         const snapshot = await endState(env);
         // changed unit datum
         const changed = sliceInput();
         must(changed.units[3]).unit.created_at = "2026-09-27T12:59:00.000001Z";
-        const r1 = await runEvidenceSlice(pool, changed);
+        const r1 = await runSliceObserved(pool, changed);
         expect(r1.complete).toBe(false);
         expect(r1.stoppedAt).toMatchObject({
           step: "S1_evidence_unit",
@@ -830,7 +828,7 @@ suite(
         // a different (valid) package over the same units: S2 stores it, S3 refuses to rebind - the first binding is untouched
         const alt = sliceInput();
         alt.pkg = alternatePackage();
-        const r2 = await runEvidenceSlice(pool, alt);
+        const r2 = await runSliceObserved(pool, alt);
         expect(r2.stoppedAt).toMatchObject({
           step: "S3_binding",
           outcome: "conflict",
@@ -845,7 +843,7 @@ suite(
         try {
           const unrelated = sliceInput();
           unrelated.units = unrelated.units.slice(1);
-          const r3 = await runEvidenceSlice(p2, unrelated);
+          const r3 = await runSliceObserved(p2, unrelated);
           expect(r3.stoppedAt).toMatchObject({
             outcome: "rejected",
             code: "slice_units_package_mismatch",
@@ -861,7 +859,7 @@ suite(
           const entryMismatch = sliceInput();
           must(entryMismatch.units[0]).unit.evidence_type = "analysis";
           // (unit body/hash remain valid; the package entry says another type)
-          const r4 = await runEvidenceSlice(p2, entryMismatch);
+          const r4 = await runSliceObserved(p2, entryMismatch);
           expect(r4.stoppedAt).toMatchObject({
             outcome: "rejected",
             code: "slice_unit_package_entry_mismatch",

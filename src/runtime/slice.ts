@@ -22,6 +22,15 @@ import {
   type PersistEvidenceUnitInput,
 } from "./evidence.js";
 import {
+  peek,
+  readContext,
+  readAttemptRun,
+  safeEmit,
+  stageContext,
+  type AttemptRun,
+  type ObserverContext,
+} from "./observe.js";
+import {
   bindPackage,
   parsePackage,
   persistEvidencePackage,
@@ -112,10 +121,94 @@ function preflight(input: SliceInput): {
   return { unitIds, packageHash: parsed.hash };
 }
 
+/**
+ * Observed workflow entry point. `context` is REQUIRED and validated at runtime (a declared correlation id and observer; the observer
+ * may still be a no-op, so this proves a declared context, not that logs are produced). The run id is DERIVED from the attempt row.
+ * Every step's command emits its own event (with its own durability); this function adds ONE `workflow.completed` event carrying fixed
+ * COUNTS and the stopping step: no unbounded list, no subjects, no codes outside the known set.
+ */
 export async function runEvidenceSlice(
   pool: Pool,
   input: SliceInput,
+  context: ObserverContext,
 ): Promise<SliceResult> {
+  const rc = readContext(context);
+  if (!rc.ok) {
+    const stopped: StepResult = {
+      step: "S1_evidence_unit",
+      subject: "context",
+      outcome: "rejected",
+      code: "observer_context_invalid",
+    };
+    return { complete: false, steps: [stopped], stoppedAt: stopped };
+  }
+  const base = rc.context; // a plain snapshot: no property of the caller's object is read again
+  const startedAt = performance.now();
+  const attemptRaw = peek(() => input.attemptId);
+  const attemptId = typeof attemptRaw === "string" ? attemptRaw : undefined;
+  const run = await readAttemptRun(pool, attemptId);
+  const emit = (facts: Record<string, unknown>): void => {
+    safeEmit(() => {
+      // fixed workflow-level stage: it does not claim the slice stopped at S1 (the stopping step is its own field)
+      const c = stageContext(base, "evidence_slice", attemptId, run);
+      return {
+        observer: base.observer,
+        event: {
+          event: "workflow.completed",
+          workflow: "evidence_slice.run",
+          stage: c.stage,
+          correlation_id: c.correlationId,
+          run_id: c.runId,
+          run_id_status: c.runIdStatus,
+          attempt_id: c.attemptId,
+          duration_ms: performance.now() - startedAt,
+          ...facts,
+        },
+      };
+    });
+  };
+  let result: SliceResult;
+  try {
+    result = await sliceCore(pool, input, base, attemptId, run);
+  } catch (error) {
+    emit({
+      outcome: "error",
+      error_class: error instanceof Rejection ? "Rejection" : "unclassified",
+    });
+    throw error;
+  }
+  const count = (k: string): number =>
+    result.steps.filter((x) => x.outcome === k).length;
+  emit({
+    status: result.complete ? "complete" : "stopped",
+    complete: result.complete,
+    steps_total: result.steps.length,
+    steps_created: count("created"),
+    steps_converged: count("converged"),
+    steps_held_by_other: count("held_by_other"),
+    steps_conflict: count("conflict"),
+    steps_rejected: count("rejected"),
+    ...(result.stoppedAt
+      ? {
+          stopped_step: result.stoppedAt.step,
+          stopped_outcome: result.stoppedAt.outcome,
+          stopped_code: result.stoppedAt.code,
+        }
+      : {}),
+  });
+  return result;
+}
+
+async function sliceCore(
+  pool: Pool,
+  input: SliceInput,
+  base: ObserverContext,
+  attemptId: string | undefined,
+  run: AttemptRun | undefined,
+): Promise<SliceResult> {
+  const ctx = (
+    stage: "S1_evidence_unit" | "S2_evidence_package" | "S3_binding",
+  ) => stageContext(base, stage, attemptId, run);
   const steps: StepResult[] = [];
   let unitIds: string[];
   let packageHash: string;
@@ -139,10 +232,16 @@ export async function runEvidenceSlice(
     stoppedAt: s,
   });
   for (const u of input.units) {
-    const o = await persistEvidenceUnit(pool, {
-      ...u,
-      ...(u.snapshot ? { verifySnapshotAgainstPackageHash: packageHash } : {}),
-    });
+    const o = await persistEvidenceUnit(
+      pool,
+      {
+        ...u,
+        ...(u.snapshot
+          ? { verifySnapshotAgainstPackageHash: packageHash }
+          : {}),
+      },
+      ctx("S1_evidence_unit"),
+    );
     const s = record("S1_evidence_unit", u.unit.evidence_unit_id, o);
     steps.push(s);
     if (o.kind !== "created" && o.kind !== "converged") return stop(s);
@@ -150,6 +249,7 @@ export async function runEvidenceSlice(
   await faultPoint("after_s1");
   const pk = await persistEvidencePackage(pool, input.pkg, {
     expectedUnitIds: unitIds,
+    context: ctx("S2_evidence_package"),
   });
   const s2 = record("S2_evidence_package", input.pkg.artifact_id, pk);
   steps.push(s2);
@@ -185,6 +285,7 @@ export async function runEvidenceSlice(
     attemptId: input.attemptId,
     evidencePackageId: pk.record.evidence_package_id,
     expectedUnitIds: unitIds,
+    context: ctx("S3_binding"),
   });
   const s3 = record("S3_binding", input.attemptId, bound);
   steps.push(s3);

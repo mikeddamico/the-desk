@@ -5,13 +5,10 @@ import pg from "pg";
 
 import { appendClaimStateEvent } from "../../src/runtime/claim-events.js";
 import { persistEvidenceUnit } from "../../src/runtime/evidence.js";
-import {
-  executeProviderCall,
-  type AuthoredReservation,
-} from "../../src/runtime/provider.js";
-import { runEvidenceSlice } from "../../src/runtime/slice.js";
+import { type AuthoredReservation } from "../../src/runtime/provider.js";
 import { durableAdapter, finishSucceeded } from "./a5-provider.js";
 import { fixtureUnits, sliceInput } from "./a5-fixture.js";
+import { executeObserved, runSliceObserved } from "./a6-observed.js";
 
 interface Spec {
   url: string;
@@ -50,7 +47,7 @@ if (spec.scenario === "provider" && spec.reservation && spec.ownerUrl) {
     max: 2,
     application_name: `a5child_${spec.tag}`,
   });
-  result = await executeProviderCall(
+  result = await executeObserved(
     pool,
     spec.reservation,
     durableAdapter(owner, { lookup: spec.lookup ?? true }),
@@ -64,6 +61,6 @@ else if (spec.scenario === "unit")
     pool,
     fixtureUnits()[spec.unitIndex ?? 0] as never,
   );
-else result = await runEvidenceSlice(pool, sliceInput(spec.attemptIndex ?? 0));
+else result = await runSliceObserved(pool, sliceInput(spec.attemptIndex ?? 0));
 process.stdout.write(`COMPLETED_WITHOUT_FAULT ${JSON.stringify(result)}\n`);
 await pool.end();
