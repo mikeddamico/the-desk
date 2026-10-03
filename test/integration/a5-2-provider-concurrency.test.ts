@@ -8,9 +8,7 @@ import pg from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import {
-  executeProviderCall,
   lookupProviderCall,
-  reconcileProviderCall,
   recordProviderOutcome,
   type AuthoredReservation,
   type ExecuteResult,
@@ -29,6 +27,7 @@ import {
 } from "../support/a5-provider.js";
 import { observe, withChild } from "../support/a5-crash.js";
 import { waitForBlocked, within } from "../support/pg-wait.js";
+import { executeObserved, reconcileObserved } from "../support/a6-observed.js";
 
 const databaseUrl = process.env.TEST_DATABASE_URL;
 const suite = databaseUrl ? describe : describe.skip;
@@ -105,18 +104,13 @@ const track = <T>(p: Promise<T>): Promise<T> => {
   return p;
 };
 const drainable = (): Promise<unknown>[] => inflight.splice(0);
-const reconcile: typeof reconcileProviderCall = (pool, args) =>
-  track(reconcileProviderCall(pool, args));
+const reconcile: typeof reconcileObserved = (pool, args) =>
+  track(reconcileObserved(pool, args));
 const record: typeof recordProviderOutcome = (pool, o) =>
   track(recordProviderOutcome(pool, o));
 const run = (pool: pg.Pool, r: AuthoredReservation): Promise<ExecuteResult> =>
   track(
-    executeProviderCall(
-      pool,
-      r,
-      adapter(),
-      finishSucceeded(r.provider_call_id),
-    ),
+    executeObserved(pool, r, adapter(), finishSucceeded(r.provider_call_id)),
   );
 const count = (r: AuthoredReservation): Promise<number> =>
   invocationCount(pe.env.owner, r.logical_request_key);

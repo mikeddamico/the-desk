@@ -14,6 +14,7 @@ import { canonicalJson, normalizeString } from "../identity/canonical-json.js";
 import { evidenceBodyHash } from "../identity/domains.js";
 import {
   assertJson,
+  emitPreflight,
   isJsonObject,
   isUnique,
   Rejection,
@@ -28,6 +29,7 @@ import {
   type Row,
   type Tx,
 } from "./command.js";
+import { peek, type CommandContext, type CommandTrace } from "./observe.js";
 import { readStoredPackageByHash } from "./package.js";
 
 export interface AuthoredRights {
@@ -257,127 +259,143 @@ export async function unitDifference(
 export async function persistEvidenceUnit(
   pool: Pool,
   raw: PersistEvidenceUnitInput,
+  context?: CommandContext,
 ): Promise<Outcome<StoredEvidenceUnit>> {
+  const trace: CommandTrace | undefined = context && {
+    context,
+    command: "evidence_unit.persist",
+    subject: {
+      evidence_unit_id: peek(() => raw.unit.evidence_unit_id),
+      rights_version_id: peek(() => raw.unit.rights_version_id),
+    },
+  };
   let input: PersistEvidenceUnitInput;
   try {
     input = validate(raw);
   } catch (error) {
-    if (error instanceof Rejection)
+    if (error instanceof Rejection) {
+      emitPreflight(trace, error.code);
       return { kind: "rejected", code: error.code, detail: error.message };
+    }
     throw error;
   }
   const { unit, rights } = input;
-  return runCommand(pool, async (tx) => {
-    let existing = await unitDifference(tx, unit);
-    let created = false;
-    if (!existing.found) {
-      // Rights first (same authored-UUID rule); every insert in a savepoint. A conflict/rejection ROLLS BACK this transaction, so
-      // an incidental rights row is never committed by a command that did not succeed.
-      const rr = await rightsDifference(tx, rights);
-      if (rr.found && rr.differs.length > 0)
-        return {
-          kind: "conflict",
-          code: "rights",
-          stored: null,
-          detail: rr.differs.join(","),
-        };
-      if (!rr.found) {
+  return runCommand(
+    pool,
+    async (tx) => {
+      let existing = await unitDifference(tx, unit);
+      let created = false;
+      if (!existing.found) {
+        // Rights first (same authored-UUID rule); every insert in a savepoint. A conflict/rejection ROLLS BACK this transaction, so
+        // an incidental rights row is never committed by a command that did not succeed.
+        const rr = await rightsDifference(tx, rights);
+        if (rr.found && rr.differs.length > 0)
+          return {
+            kind: "conflict",
+            code: "rights",
+            stored: null,
+            detail: rr.differs.join(","),
+          };
+        if (!rr.found) {
+          const ins = await tx.attempt(
+            `INSERT INTO rights_versions (rights_version_id, source_identity, policy, created_at) VALUES ($1::uuid, $2, $3::jsonb, $4::timestamptz)`,
+            [
+              rights.rights_version_id,
+              rights.source_identity,
+              JSON.stringify(rights.policy),
+              rights.created_at,
+            ],
+          );
+          if (!ins.ok) {
+            if (!isUnique(ins.error, "rights_versions_pkey"))
+              rethrow(ins.error);
+            const again = await rightsDifference(tx, rights);
+            if (again.differs.length > 0)
+              return {
+                kind: "conflict",
+                code: "rights",
+                stored: null,
+                detail: again.differs.join(","),
+              };
+          }
+        }
         const ins = await tx.attempt(
-          `INSERT INTO rights_versions (rights_version_id, source_identity, policy, created_at) VALUES ($1::uuid, $2, $3::jsonb, $4::timestamptz)`,
+          `INSERT INTO evidence_units (evidence_unit_id, content_hash, evidence_type, usage_class, canonical_content, rights_version_id, supersedes_evidence_unit_id, created_at)
+         VALUES ($1::uuid, $2, $3, $4, to_jsonb($5::text), $6::uuid, $7::uuid, $8::timestamptz)`,
           [
-            rights.rights_version_id,
-            rights.source_identity,
-            JSON.stringify(rights.policy),
-            rights.created_at,
+            unit.evidence_unit_id,
+            unit.content_hash,
+            unit.evidence_type,
+            unit.usage_class,
+            unit.canonical_content,
+            unit.rights_version_id,
+            unit.supersedes_evidence_unit_id,
+            unit.created_at,
           ],
         );
-        if (!ins.ok) {
-          if (!isUnique(ins.error, "rights_versions_pkey")) rethrow(ins.error);
-          const again = await rightsDifference(tx, rights);
-          if (again.differs.length > 0)
-            return {
-              kind: "conflict",
-              code: "rights",
-              stored: null,
-              detail: again.differs.join(","),
-            };
-        }
+        if (ins.ok) created = true;
+        else if (isUnique(ins.error, "evidence_units_pkey")) {
+          // Another worker won between the lookup and the insert; the savepoint is rolled back, so the winner is now visible.
+          existing = await unitDifference(tx, unit);
+          if (!existing.found)
+            throw new Error("winner row not visible after unique violation");
+        } else if (ins.error.code === "23503")
+          return {
+            kind: "rejected",
+            code: "supersedes_unit_not_found",
+            sqlstate: "23503",
+          };
+        else rethrow(ins.error);
       }
-      const ins = await tx.attempt(
-        `INSERT INTO evidence_units (evidence_unit_id, content_hash, evidence_type, usage_class, canonical_content, rights_version_id, supersedes_evidence_unit_id, created_at)
-         VALUES ($1::uuid, $2, $3, $4, to_jsonb($5::text), $6::uuid, $7::uuid, $8::timestamptz)`,
-        [
-          unit.evidence_unit_id,
-          unit.content_hash,
-          unit.evidence_type,
-          unit.usage_class,
-          unit.canonical_content,
-          unit.rights_version_id,
-          unit.supersedes_evidence_unit_id,
-          unit.created_at,
-        ],
-      );
-      if (ins.ok) created = true;
-      else if (isUnique(ins.error, "evidence_units_pkey")) {
-        // Another worker won between the lookup and the insert; the savepoint is rolled back, so the winner is now visible.
-        existing = await unitDifference(tx, unit);
-        if (!existing.found)
-          throw new Error("winner row not visible after unique violation");
-      } else if (ins.error.code === "23503")
-        return {
-          kind: "rejected",
-          code: "supersedes_unit_not_found",
-          sqlstate: "23503",
-        };
-      else rethrow(ins.error);
-    }
-    if (!created && existing.found && existing.code)
-      return {
-        kind: "conflict",
-        code: existing.code,
-        stored: storedUnit(existing.row),
-        detail: `evidence unit ${unit.evidence_unit_id} differs in ${existing.code}`,
-      };
-    if (!created) {
-      const rr = await rightsDifference(tx, rights);
-      if (!rr.found || rr.differs.length > 0)
+      if (!created && existing.found && existing.code)
         return {
           kind: "conflict",
-          code: "rights",
-          stored: null,
-          detail: rr.differs.join(",") || "rights row missing",
+          code: existing.code,
+          stored: storedUnit(existing.row),
+          detail: `evidence unit ${unit.evidence_unit_id} differs in ${existing.code}`,
         };
-    }
-    const snapshot = await snapshotStatus(tx, input);
-    if (snapshot instanceof Object && "conflict" in snapshot)
-      return {
-        kind: "conflict",
-        code: "provenance_snapshot",
-        stored: null,
-        detail: snapshot.conflict,
+      if (!created) {
+        const rr = await rightsDifference(tx, rights);
+        if (!rr.found || rr.differs.length > 0)
+          return {
+            kind: "conflict",
+            code: "rights",
+            stored: null,
+            detail: rr.differs.join(",") || "rights row missing",
+          };
+      }
+      const snapshot = await snapshotStatus(tx, input);
+      if (snapshot instanceof Object && "conflict" in snapshot)
+        return {
+          kind: "conflict",
+          code: "provenance_snapshot",
+          stored: null,
+          detail: snapshot.conflict,
+        };
+      const u = await tx.query(
+        `${unitSelect()} WHERE evidence_unit_id = $1::uuid`,
+        [unit.evidence_unit_id],
+      );
+      const rg = await tx.query(
+        `${rightsSelect()} WHERE rights_version_id = $1::uuid`,
+        [unit.rights_version_id],
+      );
+      const urow = u.rows[0];
+      const rrow = rg.rows[0];
+      if (!urow || !rrow) throw new Error("stored rows missing after command");
+      const record: StoredEvidenceUnit = {
+        unit: storedUnit(urow),
+        rights: storedRights(rrow),
+        snapshot,
+        comparison:
+          snapshot.status === "verified"
+            ? "row_and_snapshot_verified"
+            : "row_only",
       };
-    const u = await tx.query(
-      `${unitSelect()} WHERE evidence_unit_id = $1::uuid`,
-      [unit.evidence_unit_id],
-    );
-    const rg = await tx.query(
-      `${rightsSelect()} WHERE rights_version_id = $1::uuid`,
-      [unit.rights_version_id],
-    );
-    const urow = u.rows[0];
-    const rrow = rg.rows[0];
-    if (!urow || !rrow) throw new Error("stored rows missing after command");
-    const record: StoredEvidenceUnit = {
-      unit: storedUnit(urow),
-      rights: storedRights(rrow),
-      snapshot,
-      comparison:
-        snapshot.status === "verified"
-          ? "row_and_snapshot_verified"
-          : "row_only",
-    };
-    return { kind: created ? "created" : "converged", record };
-  });
+      return { kind: created ? "created" : "converged", record };
+    },
+    trace,
+  );
 }
 
 async function snapshotStatus(

@@ -5,7 +5,17 @@
 // `attempt` performs before returning, so the caller may re-read the winner's committed row. Unrelated database errors are never
 // swallowed: `attempt` hands back the error and the caller either matches a NAMED constraint or rethrows it.
 // Runtime privileges are unchanged (the pool's role is whatever the caller supplies; the tests use desk_runtime).
+import pg from "pg";
 import type { Pool, PoolClient } from "pg";
+
+import { ClaimStateError } from "../knowledge/claim-state.js";
+import {
+  safeEmit,
+  SUBJECT_KEYS,
+  type CommandTrace,
+  type Durability,
+  type RawEvent,
+} from "./observe.js";
 
 export type Row = Record<string, unknown>;
 export type Json = null | boolean | number | string | Json[] | JsonRecord;
@@ -111,15 +121,62 @@ const isAdminShutdown = (error: unknown): boolean =>
   error !== null &&
   (error as { code?: unknown }).code === "57P01";
 
+const errorClassOf = (error: unknown): string =>
+  error instanceof CommandConnectionError
+    ? "CommandConnectionError"
+    : error instanceof Rejection
+      ? "Rejection"
+      : error instanceof ClaimStateError
+        ? "ClaimStateError"
+        : "unclassified";
+
+/** The fields every command event has: identifiers and the command's own request fields (UNVALIDATED here; `projectEvent` validates). */
+function baseRaw(trace: CommandTrace, durationMs: number): RawEvent {
+  const c = trace.context;
+  const raw: RawEvent = {
+    event: "command.completed",
+    command: trace.command,
+    stage: c.stage,
+    correlation_id: c.correlationId,
+    run_id: c.runId,
+    run_id_status: c.runIdStatus,
+    attempt_id: c.attemptId ?? trace.subject.attempt_id,
+    duration_ms: durationMs,
+  };
+  for (const k of SUBJECT_KEYS)
+    if (raw[k] === undefined) raw[k] = trace.subject[k];
+  return raw;
+}
+
+/** A command refused its request BEFORE any transaction (request validation): one event, nothing was written. */
+export function emitPreflight(
+  trace: CommandTrace | undefined,
+  code: string,
+): void {
+  if (!trace) return;
+  safeEmit(() => ({
+    observer: trace.context.observer,
+    event: {
+      ...baseRaw(trace, 0),
+      outcome: "rejected",
+      code,
+      durability: "not_committed",
+    },
+  }));
+}
+
 export async function runCommand<R>(
   pool: Pool,
   fn: (tx: Tx) => Promise<Outcome<R>>,
+  trace?: CommandTrace,
 ): Promise<Outcome<R>> {
+  const startedAt = performance.now();
+  let committedAck = false as boolean; // set only after COMMIT is ACKNOWLEDGED (assigned inside `execute`)
   let client: PoolClient | undefined;
   let open = false as boolean; // assigned inside `execute`; keeps TS from narrowing it to `false`
   let broken: unknown;
   let savepoints = 0;
-  let phase: CommandPhase = "work";
+  let phase = "work" as CommandPhase; // assigned inside `execute`
   // the error this call throws (if any); cleanup failures are attached to it, never allowed to replace it
   let thrown: unknown;
   // The FIRST sign that this session was lost, with the phase it struck in. Set only through `recordLoss` (`??=`), so a later event or
@@ -213,6 +270,7 @@ export async function runCommand<R>(
       if (commits(outcome)) {
         phase = "commit";
         await q(c, "COMMIT");
+        committedAck = true;
         open = false;
         phase = "after_end";
         await faultPoint("after_commit_before_return");
@@ -238,6 +296,57 @@ export async function runCommand<R>(
       throw thrown;
     }
   };
+  // One event per invocation, emitted ONLY after the result/error and the cleanup are established (so after the COMMIT/ROLLBACK
+  // acknowledgment and after release/destroy); it can never change the result, the thrown error or the cleanup errors.
+  const emitFinal = (
+    outcome: Outcome<R> | undefined,
+    error: unknown,
+    cleanupCount: number,
+  ): void => {
+    if (!trace) return;
+    // EVERYTHING below (observer resolution, trace/context reads, the durability facts, error inspection) runs inside `safeEmit`, so a
+    // throwing getter or a malformed trace can never replace the primary result, error or cleanup errors.
+    safeEmit(() => {
+      // Truthful durability: only an acknowledged COMMIT is `committed`. A COMMIT that the SERVER definitely REJECTED did not commit.
+      // That fact is derived conservatively and for LOGGING ONLY (it does not change any command behavior): ONLY a real
+      // `pg.DatabaseError` (a parsed ErrorResponse) whose severity is exactly "ERROR" (not FATAL/PANIC), with a SQLSTATE-shaped code
+      // outside the connection class `08` and the operator-shutdown family `57P0x`. A Node system error (ECONNRESET/EPIPE: a `code`
+      // string that is not a SQLSTATE), a FATAL/PANIC termination, a missing severity, or anything else in the commit phase stays
+      // `unknown`. Limit: pg 8.16.3 parses only the LOCALIZED severity field `S` (the non-localized `V` is not exposed), so on a server
+      // with non-English `lc_messages` a rejection is conservatively reported as `unknown`, never as `not_committed`.
+      const serverRejected =
+        error instanceof pg.DatabaseError &&
+        error.severity === "ERROR" &&
+        typeof error.code === "string" &&
+        /^[0-9A-Z]{5}$/.test(error.code) &&
+        !error.code.startsWith("08") &&
+        !error.code.startsWith("57P0");
+      const durability: Durability = committedAck
+        ? "committed"
+        : error instanceof CommandConnectionError
+          ? error.commitOutcome === "unknown"
+            ? "unknown"
+            : "not_committed"
+          : phase === "commit" && error !== undefined && !serverRejected
+            ? "unknown"
+            : "not_committed";
+      const raw: RawEvent = {
+        ...baseRaw(trace, performance.now() - startedAt),
+        outcome: outcome ? outcome.kind : "error",
+        durability,
+        cleanup_failures: cleanupCount,
+      };
+      if (outcome && "code" in outcome) raw.code = outcome.code;
+      if (error !== undefined) raw.error_class = errorClassOf(error);
+      if (error instanceof CommandConnectionError)
+        raw.connection = {
+          phase: error.phase,
+          commit_outcome: error.commitOutcome,
+          sqlstate: (error.cause as { code?: unknown } | undefined)?.code,
+        };
+      return { observer: trace.context.observer, event: raw };
+    });
+  };
   let result: Outcome<R> | undefined;
   let failed = false;
   try {
@@ -249,6 +358,7 @@ export async function runCommand<R>(
   // SECONDARY: they use the plain driver call (never `q`). The scoped listener is still attached here, so a client event may still
   // record a loss during cleanup (and that only makes the release destroy the client), but by now the error or result of this call is
   // already established: nothing recorded during cleanup can replace it or reclassify it.
+  let cleanupCount = 0;
   if (client) {
     const cleanupErrors: unknown[] = [];
     if (open && loss === undefined) {
@@ -272,10 +382,14 @@ export async function runCommand<R>(
     // pool that is not pg-pool) ours stays as the last-resort listener, so the client is never left with none.
     if (client.listeners("error").some((l) => l !== onClientError))
       client.removeListener("error", onClientError);
+    cleanupCount = cleanupErrors.length;
     if (cleanupErrors.length > 0) {
       // The FIRST failure stays the error callers see; follow-on cleanup failures are recorded beside it, never swallowed,
       // promoted or allowed to throw from here.
-      if (!failed) throw cleanupErrors[0];
+      if (!failed) {
+        emitFinal(result, cleanupErrors[0], cleanupCount);
+        throw cleanupErrors[0];
+      }
       if (typeof thrown === "object" && thrown !== null)
         cleanupFailures.set(thrown, cleanupErrors);
       else
@@ -285,6 +399,7 @@ export async function runCommand<R>(
         );
     }
   }
+  emitFinal(result, result === undefined ? thrown : undefined, cleanupCount);
   if (result === undefined) throw thrown; // `failed`: the first error, with any cleanup failures attached
   return result;
 }

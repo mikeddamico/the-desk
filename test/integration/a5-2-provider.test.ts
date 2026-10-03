@@ -5,9 +5,7 @@ import { randomUUID } from "node:crypto";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import {
-  executeProviderCall,
   lookupProviderCall,
-  reconcileProviderCall,
   recordProviderOutcome,
   reserveProviderCall,
   type AuthoredReservation,
@@ -26,6 +24,7 @@ import {
 } from "../support/a5-provider.js";
 import { accountIds } from "../support/a5-fixture.js";
 import { within } from "../support/pg-wait.js";
+import { executeObserved, reconcileObserved } from "../support/a6-observed.js";
 
 const databaseUrl = process.env.TEST_DATABASE_URL;
 const suite = databaseUrl ? describe : describe.skip;
@@ -589,7 +588,7 @@ suite(
 );
 
 suite(
-  "A5.2 executeProviderCall safety (only the creating commit may perform)",
+  "A5.2 executeObserved safety (only the creating commit may perform)",
   () => {
     const adapter = (over = {}) =>
       durableAdapter(pe.env.owner, { lookup: true, ...over });
@@ -597,7 +596,7 @@ suite(
     it("created: reserves, performs exactly once, records the outcome; an identical re-run returns the durable outcome without a call", async () => {
       const pool = pe.runtime();
       const r = reservation(pe.attempt);
-      const first = await executeProviderCall(
+      const first = await executeObserved(
         pool,
         r,
         adapter(),
@@ -607,7 +606,7 @@ suite(
       expect(await invocationCount(pe.env.owner, r.logical_request_key)).toBe(
         1,
       );
-      const again = await executeProviderCall(
+      const again = await executeObserved(
         pool,
         r,
         adapter(),
@@ -624,7 +623,7 @@ suite(
     it("perform that throws is AMBIGUOUS: nothing recorded, no retryable failure invented, a re-run does not call again", async () => {
       const pool = pe.runtime();
       const r = reservation(pe.attempt);
-      const a = await executeProviderCall(
+      const a = await executeObserved(
         pool,
         r,
         adapter({ throwAfterEffect: true }),
@@ -638,7 +637,7 @@ suite(
       expect(
         (await lookupProviderCall(pool, r.provider_call_id))?.outcome,
       ).toBeNull();
-      const rerun = await executeProviderCall(
+      const rerun = await executeObserved(
         pool,
         r,
         adapter(),
@@ -648,7 +647,7 @@ suite(
         status: "unfinished",
         reason: "converged_without_outcome",
       });
-      const rival = await executeProviderCall(
+      const rival = await executeObserved(
         pool,
         { ...r, provider_call_id: randomUUID() },
         adapter(),
@@ -682,7 +681,7 @@ suite(
       const r = reservation(pe.attempt);
       expect((await reserveProviderCall(pool, r)).kind).toBe("created"); // owner reserved, then 'died' before performing
       for (let i = 0; i < 3; i += 1) {
-        const rec = await executeProviderCall(
+        const rec = await executeObserved(
           pool,
           r,
           adapter(),
@@ -690,14 +689,14 @@ suite(
         );
         expect(rec.status).toBe("unfinished");
       }
-      const looked = await reconcileProviderCall(pool, {
+      const looked = await reconcileObserved(pool, {
         providerCallId: r.provider_call_id,
         adapter: adapter(),
       });
       expect(looked.status).toBe("not_performed");
       expect(
         (
-          await executeProviderCall(
+          await executeObserved(
             pool,
             r,
             adapter(),
@@ -713,13 +712,13 @@ suite(
     it("changed fields conflict and rejected requests never call the adapter", async () => {
       const pool = pe.runtime();
       const r = reservation(pe.attempt);
-      await executeProviderCall(
+      await executeObserved(
         pool,
         r,
         adapter(),
         finishSucceeded(r.provider_call_id),
       );
-      const c = await executeProviderCall(
+      const c = await executeObserved(
         pool,
         { ...r, model_identifier: "x" },
         adapter(),
@@ -729,7 +728,7 @@ suite(
       const bad = reservation(pe.attempt, { request_fingerprint: "bad" });
       expect(
         (
-          await executeProviderCall(
+          await executeObserved(
             pool,
             bad,
             adapter(),
@@ -748,7 +747,7 @@ suite(
     it("a finish that disagrees with the reservation is not recorded against another call", async () => {
       const pool = pe.runtime();
       const r = reservation(pe.attempt);
-      const res = await executeProviderCall(
+      const res = await executeObserved(
         pool,
         r,
         adapter(),
@@ -768,7 +767,7 @@ suite(
 suite("A5.2 reconciliation (evidence binding; never performs)", () => {
   const performedButUnrecorded = async (): Promise<AuthoredReservation> => {
     const r = reservation(pe.attempt);
-    await executeProviderCall(
+    await executeObserved(
       pe.runtime(),
       r,
       durableAdapter(pe.env.owner, { lookup: true, throwAfterEffect: true }),
@@ -782,7 +781,7 @@ suite("A5.2 reconciliation (evidence binding; never performs)", () => {
     const pool = pe.runtime();
     const r = await performedButUnrecorded();
     const adapter = durableAdapter(pe.env.owner, { lookup: true });
-    const plain = await reconcileProviderCall(pool, {
+    const plain = await reconcileObserved(pool, {
       providerCallId: r.provider_call_id,
       adapter,
     });
@@ -790,7 +789,7 @@ suite("A5.2 reconciliation (evidence binding; never performs)", () => {
     expect(
       (await lookupProviderCall(pool, r.provider_call_id))?.outcome,
     ).toBeNull(); // reconcile alone records nothing
-    const rec = await reconcileProviderCall(pool, {
+    const rec = await reconcileObserved(pool, {
       providerCallId: r.provider_call_id,
       adapter,
       finish: (res) => finishSucceeded(r.provider_call_id)(res),
@@ -799,7 +798,7 @@ suite("A5.2 reconciliation (evidence binding; never performs)", () => {
       status: "performed",
       recorded: { kind: "created" },
     });
-    const again = await reconcileProviderCall(pool, {
+    const again = await reconcileObserved(pool, {
       providerCallId: r.provider_call_id,
       adapter,
       finish: (res) => finishSucceeded(r.provider_call_id)(res),
@@ -812,20 +811,20 @@ suite("A5.2 reconciliation (evidence binding; never performs)", () => {
     const pool = pe.runtime();
     const r = await performedButUnrecorded();
     expect(
-      await reconcileProviderCall(pool, {
+      await reconcileObserved(pool, {
         providerCallId: r.provider_call_id,
         adapter: durableAdapter(pe.env.owner, { lookup: false }),
       }),
     ).toEqual({ status: "unknown", reason: "adapter_has_no_lookup" });
     expect(
-      await reconcileProviderCall(pool, {
+      await reconcileObserved(pool, {
         providerCallId: r.provider_call_id,
         adapter: { lookup: () => Promise.reject(new Error("down")) },
       }),
     ).toEqual({ status: "unknown", reason: "lookup_failed" });
     for (const corrupt of ["fingerprint", "call_id"] as const)
       expect(
-        await reconcileProviderCall(pool, {
+        await reconcileObserved(pool, {
           providerCallId: r.provider_call_id,
           adapter: durableAdapter(pe.env.owner, {
             lookup: true,
@@ -838,7 +837,7 @@ suite("A5.2 reconciliation (evidence binding; never performs)", () => {
         reason: "evidence_not_bound_to_reservation",
       });
     expect(
-      await reconcileProviderCall(pool, {
+      await reconcileObserved(pool, {
         providerCallId: randomUUID(),
         adapter: { lookup: () => Promise.resolve(undefined) },
       }),
@@ -849,7 +848,7 @@ suite("A5.2 reconciliation (evidence binding; never performs)", () => {
     // the evidence of one call is not accepted for another call that merely shares nothing with it
     const other = reservation(pe.attempt);
     await reserveProviderCall(pool, other);
-    const stray = await reconcileProviderCall(pool, {
+    const stray = await reconcileObserved(pool, {
       providerCallId: other.provider_call_id,
       adapter: {
         lookup: () =>
@@ -870,7 +869,7 @@ suite("A5.2 reconciliation (evidence binding; never performs)", () => {
   it("a finish whose outcome names another call is rejected, never recorded", async () => {
     const pool = pe.runtime();
     const r = await performedButUnrecorded();
-    const res = await reconcileProviderCall(pool, {
+    const res = await reconcileObserved(pool, {
       providerCallId: r.provider_call_id,
       adapter: durableAdapter(pe.env.owner, { lookup: true }),
       finish: finishSucceeded(randomUUID()),

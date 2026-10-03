@@ -21,6 +21,7 @@ import type { Pool } from "pg";
 
 import {
   assertJson,
+  emitPreflight,
   faultPoint,
   isUnique,
   Rejection,
@@ -35,6 +36,18 @@ import {
   type Row,
   type Tx,
 } from "./command.js";
+import {
+  peek,
+  readContext,
+  readAttemptRun,
+  safeEmit,
+  stageContext,
+  type AttemptRun,
+  type CommandContext,
+  type CommandTrace,
+  type ObserverContext,
+  type RawEvent,
+} from "./observe.js";
 
 const uuidOrNull = (v: unknown, what: string): string | null =>
   v === null ? null : requireUuid(v, what);
@@ -363,62 +376,82 @@ const RESERVATION_UNIQUES = [
 export async function reserveProviderCall(
   pool: Pool,
   authored: AuthoredReservation,
+  context?: CommandContext,
 ): Promise<Outcome<ReservationRecord>> {
+  const trace: CommandTrace | undefined = context && {
+    context,
+    command: "provider_call.reserve",
+    subject: {
+      provider_call_id: peek(() => authored.provider_call_id),
+      attempt_id: peek(() => authored.attempt_id),
+      provider: peek(() => authored.provider),
+      operation: peek(() => authored.operation),
+      operational_try_number: peek(() => authored.operational_try_number),
+      intentional_take_index: peek(() => authored.intentional_take_index),
+      logical_request_key: peek(() => authored.logical_request_key),
+    },
+  };
   let r: AuthoredReservation;
   try {
     r = validateReservation(authored);
   } catch (error) {
-    if (error instanceof Rejection)
+    if (error instanceof Rejection) {
+      emitPreflight(trace, error.code);
       return { kind: "rejected", code: error.code, detail: error.message };
+    }
     throw error;
   }
-  return runCommand(pool, async (tx) => {
-    const existing = await classifyExisting(tx, r);
-    if (existing) return existing;
-    const insert = await tx.attempt(
-      `INSERT INTO provider_calls AS c (provider_call_id, attempt_id, provider, operation, model_identifier, request_fingerprint,
+  return runCommand(
+    pool,
+    async (tx) => {
+      const existing = await classifyExisting(tx, r);
+      if (existing) return existing;
+      const insert = await tx.attempt(
+        `INSERT INTO provider_calls AS c (provider_call_id, attempt_id, provider, operation, model_identifier, request_fingerprint,
          logical_request_key, operational_try_number, intentional_take_index, retry_of_provider_call_id, reroll_of_provider_call_id,
          reroll_trigger_id, started_at)
        VALUES ($1::uuid, $2::uuid, $3, $4, $5, $6, $7, $8::int, $9::int, $10::uuid, $11::uuid, $12::uuid, $13::timestamptz)
        RETURNING ${RESERVATION_COLUMNS}`,
-      [
-        r.provider_call_id,
-        r.attempt_id,
-        r.provider,
-        r.operation,
-        r.model_identifier,
-        r.request_fingerprint,
-        r.logical_request_key,
-        r.operational_try_number,
-        r.intentional_take_index,
-        r.retry_of_provider_call_id,
-        r.reroll_of_provider_call_id,
-        r.reroll_trigger_id,
-        r.started_at,
-      ],
-    );
-    if (insert.ok) {
-      const row = insert.rows[0];
-      if (!row) throw new Error("insert returned no row");
-      await faultPoint("reservation_inserted_uncommitted");
-      return {
-        kind: "created",
-        record: { reservation: toReservation(row), outcome: null },
-      };
-    }
-    // The savepoint is already rolled back, so a fresh statement sees the winner's COMMITTED row.
-    if (isUnique(insert.error, ...RESERVATION_UNIQUES)) {
-      const winner = await classifyExisting(tx, r);
-      if (winner) return winner;
-      // A retry-of unique violation with no row at our (key, try): another call already retries this prior call.
-      return {
-        kind: "rejected",
-        code: "retry_already_reserved",
-        sqlstate: "23505",
-      };
-    }
-    return guessRejection(insert.error) ?? rethrow(insert.error);
-  });
+        [
+          r.provider_call_id,
+          r.attempt_id,
+          r.provider,
+          r.operation,
+          r.model_identifier,
+          r.request_fingerprint,
+          r.logical_request_key,
+          r.operational_try_number,
+          r.intentional_take_index,
+          r.retry_of_provider_call_id,
+          r.reroll_of_provider_call_id,
+          r.reroll_trigger_id,
+          r.started_at,
+        ],
+      );
+      if (insert.ok) {
+        const row = insert.rows[0];
+        if (!row) throw new Error("insert returned no row");
+        await faultPoint("reservation_inserted_uncommitted");
+        return {
+          kind: "created",
+          record: { reservation: toReservation(row), outcome: null },
+        };
+      }
+      // The savepoint is already rolled back, so a fresh statement sees the winner's COMMITTED row.
+      if (isUnique(insert.error, ...RESERVATION_UNIQUES)) {
+        const winner = await classifyExisting(tx, r);
+        if (winner) return winner;
+        // A retry-of unique violation with no row at our (key, try): another call already retries this prior call.
+        return {
+          kind: "rejected",
+          code: "retry_already_reserved",
+          sqlstate: "23505",
+        };
+      }
+      return guessRejection(insert.error) ?? rethrow(insert.error);
+    },
+    trace,
+  );
 }
 
 // ---- recordProviderOutcome -----------------------------------------------------------------------------------------------
@@ -469,51 +502,67 @@ async function classifyOutcome(
 export async function recordProviderOutcome(
   pool: Pool,
   authored: AuthoredOutcome,
+  context?: CommandContext,
 ): Promise<Outcome<StoredOutcome>> {
+  const trace: CommandTrace | undefined = context && {
+    context,
+    command: "provider_outcome.record",
+    subject: {
+      provider_call_id: peek(() => authored.provider_call_id),
+      // the authored outcome type is a KNOWN code fact (never inferred as a retry policy)
+      provider_outcome_type: peek(() => authored.event_type),
+    },
+  };
   let o: AuthoredOutcome;
   try {
     o = validateOutcome(authored);
   } catch (error) {
-    if (error instanceof Rejection)
+    if (error instanceof Rejection) {
+      emitPreflight(trace, error.code);
       return { kind: "rejected", code: error.code, detail: error.message };
+    }
     throw error;
   }
-  return runCommand(pool, async (tx) => {
-    const reserved = await tx.query(
-      "SELECT 1 FROM provider_calls WHERE provider_call_id = $1::uuid",
-      [o.provider_call_id],
-    );
-    if (reserved.rows.length === 0)
-      return { kind: "rejected", code: "reservation_not_found" };
-    const prior = await classifyOutcome(tx, o);
-    if (prior) return prior;
-    const insert = await tx.attempt(
-      `INSERT INTO provider_call_events AS e (provider_call_id, event_type, ended_at, usage, actual_cost, currency, response_artifact_id,
+  return runCommand(
+    pool,
+    async (tx) => {
+      const reserved = await tx.query(
+        "SELECT 1 FROM provider_calls WHERE provider_call_id = $1::uuid",
+        [o.provider_call_id],
+      );
+      if (reserved.rows.length === 0)
+        return { kind: "rejected", code: "reservation_not_found" };
+      const prior = await classifyOutcome(tx, o);
+      if (prior) return prior;
+      const insert = await tx.attempt(
+        `INSERT INTO provider_call_events AS e (provider_call_id, event_type, ended_at, usage, actual_cost, currency, response_artifact_id,
          response_reference)
        VALUES ($1::uuid, $2, $3::timestamptz, $4::jsonb, $5::numeric, $6, $7::uuid, $8)
        RETURNING ${OUTCOME_COLUMNS}`,
-      [
-        o.provider_call_id,
-        o.event_type,
-        o.ended_at,
-        JSON.stringify(o.usage),
-        o.actual_cost,
-        o.currency,
-        o.response_artifact_id,
-        o.response_reference,
-      ],
-    );
-    if (insert.ok) {
-      const row = insert.rows[0];
-      if (!row) throw new Error("insert returned no row");
-      return { kind: "created", record: toOutcome(row) };
-    }
-    if (isUnique(insert.error, "provider_call_events_provider_call_id_key")) {
-      const winner = await classifyOutcome(tx, o);
-      if (winner) return winner;
-    }
-    return guessRejection(insert.error) ?? rethrow(insert.error);
-  });
+        [
+          o.provider_call_id,
+          o.event_type,
+          o.ended_at,
+          JSON.stringify(o.usage),
+          o.actual_cost,
+          o.currency,
+          o.response_artifact_id,
+          o.response_reference,
+        ],
+      );
+      if (insert.ok) {
+        const row = insert.rows[0];
+        if (!row) throw new Error("insert returned no row");
+        return { kind: "created", record: toOutcome(row) };
+      }
+      if (isUnique(insert.error, "provider_call_events_provider_call_id_key")) {
+        const winner = await classifyOutcome(tx, o);
+        if (winner) return winner;
+      }
+      return guessRejection(insert.error) ?? rethrow(insert.error);
+    },
+    trace,
+  );
 }
 
 /** Read-only lookup of a reservation and its durable outcome (the ambiguity protocol: after a lost acknowledgement, look it up). */
@@ -594,15 +643,18 @@ export type ReconcileResult<R> =
  * Looks for evidence that the side effect already happened. It NEVER calls `perform`. With `finish` and bound `performed` evidence it
  * explicitly records that existing outcome (idempotent); otherwise the reservation stays unfinished.
  */
-export async function reconcileProviderCall<R>(
+interface ReconcileArgs<R> {
+  providerCallId: string;
+  adapter: LookupAdapter<R>;
+  finish?: (result: R) => AuthoredOutcome;
+}
+
+async function reconcileWith<R>(
   pool: Pool,
-  args: {
-    providerCallId: string;
-    adapter: LookupAdapter<R>;
-    finish?: (result: R) => AuthoredOutcome;
-  },
+  args: ReconcileArgs<R>,
+  found: ReservationRecord | null,
+  recordContext: CommandContext | undefined,
 ): Promise<ReconcileResult<R>> {
-  const found = await lookupProviderCall(pool, args.providerCallId);
   if (!found) return { status: "unknown", reason: "reservation_not_found" };
   if (found.outcome) return { status: "recorded", outcome: found.outcome };
   if (!args.adapter.lookup)
@@ -637,8 +689,86 @@ export async function reconcileProviderCall<R>(
   return {
     status: "performed",
     evidence,
-    recorded: await recordProviderOutcome(pool, authored),
+    recorded: await recordProviderOutcome(pool, authored, recordContext),
   };
+}
+
+/**
+ * Observed workflow entry point (reconciliation). `context` is REQUIRED and validated at runtime: it declares a correlation id and an
+ * observer (which may still be a no-op; this proves a declared context, not that logs are produced). One `workflow.completed` event
+ * is emitted after the result is established; the recorded outcome (if any) emits its own command event with its own durability.
+ */
+export async function reconcileProviderCall<R>(
+  pool: Pool,
+  args: ReconcileArgs<R>,
+  context: ObserverContext,
+): Promise<ReconcileResult<R>> {
+  const rc = readContext(context);
+  if (!rc.ok) return { status: "unknown", reason: "observer_context_invalid" };
+  const base = rc.context; // a plain snapshot: no property of the caller's object is read again
+  const startedAt = performance.now();
+  let attemptId: string | undefined;
+  let run: AttemptRun | undefined;
+  let result: ReconcileResult<R>;
+  try {
+    const found = await lookupProviderCall(pool, args.providerCallId);
+    if (found) {
+      attemptId = found.reservation.attempt_id;
+      run = await readAttemptRun(pool, attemptId);
+    }
+    result = await reconcileWith(
+      pool,
+      args,
+      found,
+      stageContext(base, "record", attemptId, run),
+    );
+  } catch (error) {
+    emitWorkflow(base, "provider_call.reconcile", attemptId, run, startedAt, {
+      outcome: "error",
+      error_class: error instanceof Rejection ? "Rejection" : "unclassified",
+      provider_call_id: peek(() => args.providerCallId),
+    });
+    throw error;
+  }
+  emitWorkflow(base, "provider_call.reconcile", attemptId, run, startedAt, {
+    status: result.status,
+    provider_call_id: peek(() => args.providerCallId),
+    ...(result.status === "unknown" ? { reconcile_reason: result.reason } : {}),
+  });
+  return result;
+}
+
+/** One `workflow.completed` event (a workflow spans several transactions: no single committed flag is ever assigned). */
+function emitWorkflow(
+  base: ObserverContext,
+  workflow: "provider_call.execute" | "provider_call.reconcile",
+  attemptId: string | undefined,
+  run: AttemptRun | undefined,
+  startedAt: number,
+  facts: RawEvent,
+): void {
+  safeEmit(() => {
+    // The workflow event carries a fixed WORKFLOW-level stage; the child command events keep their own, actual stages.
+    const stage =
+      workflow === "provider_call.execute"
+        ? "provider_execute"
+        : "provider_reconcile";
+    const c = stageContext(base, stage, attemptId, run);
+    return {
+      observer: base.observer,
+      event: {
+        event: "workflow.completed",
+        workflow,
+        stage,
+        correlation_id: c.correlationId,
+        run_id: c.runId,
+        run_id_status: c.runIdStatus,
+        attempt_id: c.attemptId,
+        duration_ms: performance.now() - startedAt,
+        ...facts,
+      },
+    };
+  });
 }
 
 export type ExecuteResult =
@@ -673,13 +803,23 @@ export type ExecuteResult =
  * reserve -> (ONLY if this call's own commit returned `created`) perform -> record. Never takes over, never retries, never invents an
  * outcome. See the safety contract at the top of this file.
  */
-export async function executeProviderCall<R>(
+interface ExecuteFacts {
+  reservation?: string;
+  perform: "performed" | "not_attempted" | "ambiguous";
+  outcome_record: string;
+}
+
+async function executeCore<R>(
   pool: Pool,
   reservation: AuthoredReservation,
   adapter: SideEffectAdapter<R>,
   finish: (result: R) => AuthoredOutcome,
+  facts: ExecuteFacts,
+  reserveContext: CommandContext,
+  recordContext: CommandContext,
 ): Promise<ExecuteResult> {
-  const reserved = await reserveProviderCall(pool, reservation);
+  const reserved = await reserveProviderCall(pool, reservation, reserveContext);
+  facts.reservation = reserved.kind;
   switch (reserved.kind) {
     case "conflict":
       return { status: "conflict", result: reserved };
@@ -718,17 +858,21 @@ export async function executeProviderCall<R>(
   try {
     result = await adapter.perform(requestOf(mine));
   } catch (error) {
+    facts.perform = "ambiguous";
     return {
       status: "ambiguous",
       reservation: mine,
       error: error instanceof Error ? error.message : String(error),
     };
   }
+  facts.perform = "performed";
   await faultPoint("after_side_effect");
   let authored: AuthoredOutcome;
   try {
     authored = finish(result);
   } catch (error) {
+    // `perform` itself was acknowledged (facts.perform stays "performed"); only the outcome could not be produced, so the WORKFLOW
+    // status is ambiguous while the perform fact is not rewritten.
     return {
       status: "ambiguous",
       reservation: mine,
@@ -741,7 +885,70 @@ export async function executeProviderCall<R>(
       reservation: mine,
       outcome: { kind: "rejected", code: "outcome_binding_mismatch" },
     };
-  const outcome = await recordProviderOutcome(pool, authored);
+  // The record command is attempted from here: if it throws, the fact stays "unknown" (attempted, result not known), not "not_attempted".
+  facts.outcome_record = "unknown";
+  const outcome = await recordProviderOutcome(pool, authored, recordContext);
+  facts.outcome_record = outcome.kind;
   await faultPoint("after_outcome_commit");
   return { status: "performed", reservation: mine, outcome };
+}
+
+/**
+ * Observed workflow entry point (reserve -> perform -> record). `context` is REQUIRED and validated at runtime (a declared correlation
+ * id and observer; the observer may still be a no-op). The reservation and the recorded outcome each emit their own command event with
+ * their own durability; the single `workflow.completed` event reports the workflow facts separately, so an AMBIGUOUS perform after a
+ * committed reservation, or an unfinished durable call, is visible as exactly that.
+ */
+export async function executeProviderCall<R>(
+  pool: Pool,
+  reservation: AuthoredReservation,
+  adapter: SideEffectAdapter<R>,
+  finish: (result: R) => AuthoredOutcome,
+  context: ObserverContext,
+): Promise<ExecuteResult> {
+  const rc = readContext(context);
+  if (!rc.ok)
+    return {
+      status: "rejected",
+      result: { kind: "rejected", code: "observer_context_invalid" },
+    };
+  const base = rc.context; // a plain snapshot: no property of the caller's object is read again
+  const startedAt = performance.now();
+  const attemptId = peek(() => reservation.attempt_id);
+  const run = await readAttemptRun(pool, attemptId);
+  const id = typeof attemptId === "string" ? attemptId : undefined;
+  const facts: ExecuteFacts = {
+    perform: "not_attempted",
+    outcome_record: "not_attempted",
+  };
+  let result: ExecuteResult;
+  try {
+    result = await executeCore(
+      pool,
+      reservation,
+      adapter,
+      finish,
+      facts,
+      stageContext(base, "reserve", id, run),
+      stageContext(base, "record", id, run),
+    );
+  } catch (error) {
+    emitWorkflow(base, "provider_call.execute", id, run, startedAt, {
+      outcome: "error",
+      error_class: error instanceof Rejection ? "Rejection" : "unclassified",
+      provider_call_id: peek(() => reservation.provider_call_id),
+      reservation: facts.reservation,
+      perform: facts.perform,
+      outcome_record: facts.outcome_record,
+    });
+    throw error;
+  }
+  emitWorkflow(base, "provider_call.execute", id, run, startedAt, {
+    status: result.status,
+    provider_call_id: peek(() => reservation.provider_call_id),
+    reservation: facts.reservation,
+    perform: facts.perform,
+    outcome_record: facts.outcome_record,
+  });
+  return result;
 }

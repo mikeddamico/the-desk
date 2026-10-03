@@ -12,6 +12,7 @@ import {
 } from "../knowledge/claim-state.js";
 import {
   assertJson,
+  emitPreflight,
   faultPoint,
   isUnique,
   Rejection,
@@ -25,6 +26,8 @@ import {
   type Row,
   type Tx,
 } from "./command.js";
+
+import { peek, type CommandContext, type CommandTrace } from "./observe.js";
 
 const CLAIM_LOCK_CLASS = 182736452; // Migration 002 guard_claim_event_order (same re-entrant per-claim advisory lock)
 
@@ -156,30 +159,47 @@ async function compareStored(
 export async function appendClaimStateEvent(
   pool: Pool,
   authored: AuthoredClaimEvent,
+  context?: CommandContext,
 ): Promise<Outcome<StoredClaimEvent>> {
+  const trace: CommandTrace | undefined = context && {
+    context,
+    command: "claim_event.append",
+    subject: {
+      claim_state_event_id: peek(() => authored.claim_state_event_id),
+      claim_id: peek(() => authored.claim_id),
+    },
+  };
   let event: AuthoredClaimEvent;
   try {
     event = validate(authored).event;
   } catch (error) {
     const code = (error as { claimCode?: string }).claimCode;
-    if (code)
+    if (code) {
+      emitPreflight(trace, code);
       return { kind: "rejected", code, detail: (error as Error).message };
-    if (error instanceof Rejection)
+    }
+    if (error instanceof Rejection) {
+      emitPreflight(trace, error.code);
       return { kind: "rejected", code: error.code, detail: error.message };
+    }
     throw error;
   }
-  return runCommand(pool, async (tx) => {
-    // The guard's own lock first (re-entrant: the guard takes it again), so the identity lookup, the head read and the insert are
-    // one serialized step per claim.
-    await tx.query("SELECT pg_advisory_xact_lock($1, hashtext($2::text))", [
-      CLAIM_LOCK_CLASS,
-      event.claim_id,
-    ]);
-    await faultPoint("mid_transaction_holding_lock");
-    const prior = await compareStored(tx, event);
-    if (prior) return prior;
-    return insertNew(tx, event);
-  });
+  return runCommand(
+    pool,
+    async (tx) => {
+      // The guard's own lock first (re-entrant: the guard takes it again), so the identity lookup, the head read and the insert are
+      // one serialized step per claim.
+      await tx.query("SELECT pg_advisory_xact_lock($1, hashtext($2::text))", [
+        CLAIM_LOCK_CLASS,
+        event.claim_id,
+      ]);
+      await faultPoint("mid_transaction_holding_lock");
+      const prior = await compareStored(tx, event);
+      if (prior) return prior;
+      return insertNew(tx, event);
+    },
+    trace,
+  );
 }
 
 async function insertNew(

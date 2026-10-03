@@ -13,10 +13,7 @@ import {
   persistEvidencePackage,
   type AuthoredPackage,
 } from "../../src/runtime/package.js";
-import {
-  evidenceSliceStatus,
-  runEvidenceSlice,
-} from "../../src/runtime/slice.js";
+import { evidenceSliceStatus } from "../../src/runtime/slice.js";
 import { TestCluster, type DbEnv } from "../support/db-env.js";
 import {
   accountIds,
@@ -29,6 +26,7 @@ import {
   seedPrerequisites,
   sliceInput,
 } from "../support/a5-fixture.js";
+import { runSliceObserved } from "../support/a6-observed.js";
 
 const databaseUrl = process.env.TEST_DATABASE_URL;
 const suite = databaseUrl ? describe : describe.skip;
@@ -224,7 +222,7 @@ suite("A5.1 repair: binding validates on every path", () => {
     const pool = actorPool(env);
     try {
       await persistUnits(env, pool);
-      const done = await runEvidenceSlice(pool, sliceInput());
+      const done = await runSliceObserved(pool, sliceInput());
       expect(done.complete).toBe(true);
       const id = must(done.evidencePackageId);
       const attempt = must(attemptIds()[0]);
@@ -428,7 +426,7 @@ suite(
             ...snap,
             [field]: field === "locator" ? { kind: "other" } : "different",
           };
-          const r = await runEvidenceSlice(pool, input);
+          const r = await runSliceObserved(pool, input);
           expect(r.complete).toBe(false);
           expect(r.stoppedAt?.outcome).not.toBe("created");
         }
@@ -445,10 +443,10 @@ suite(
       const pool = actorPool(env);
       try {
         await persistUnits(env, pool);
-        const r = await runEvidenceSlice(pool, sliceInput());
+        const r = await runSliceObserved(pool, sliceInput());
         expect(r.complete).toBe(true);
         expect(r).toMatchObject({ snapshotVerification: "verified" });
-        const again = await runEvidenceSlice(pool, sliceInput());
+        const again = await runSliceObserved(pool, sliceInput());
         expect(again).toMatchObject({
           complete: true,
           snapshotVerification: "verified",
@@ -464,7 +462,7 @@ suite(
           ...must(must(changed.units[0]).snapshot),
           acquisition_ref: "changed",
         };
-        const stopped = await runEvidenceSlice(pool, changed);
+        const stopped = await runSliceObserved(pool, changed);
         expect(stopped.complete).toBe(false);
       } finally {
         await pool.end();
@@ -668,7 +666,7 @@ suite(
         const pool = actorPool(env);
         try {
           await persistUnits(env, pool);
-          expect((await runEvidenceSlice(pool, sliceInput(1))).complete).toBe(
+          expect((await runSliceObserved(pool, sliceInput(1))).complete).toBe(
             true,
           );
           const hash = String(
@@ -779,7 +777,7 @@ suite(
         expect(
           Object.values(status.snapshots).every((x) => x === "verified"),
         ).toBe(true);
-        expect((await runEvidenceSlice(pool, sliceInput(0))).complete).toBe(
+        expect((await runSliceObserved(pool, sliceInput(0))).complete).toBe(
           true,
         );
       } finally {

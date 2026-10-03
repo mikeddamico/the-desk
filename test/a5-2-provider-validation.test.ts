@@ -4,13 +4,13 @@ import { randomUUID } from "node:crypto";
 import { describe, expect, it } from "vitest";
 
 import {
-  executeProviderCall,
   recordProviderOutcome,
   reserveProviderCall,
   type AuthoredOutcome,
   type AuthoredReservation,
 } from "../src/runtime/provider.js";
 import { hex, outcome, reservation } from "./support/a5-provider.js";
+import { executeObserved } from "./support/a6-observed.js";
 
 const never = {
   connect: () => {
@@ -42,9 +42,9 @@ describe("A5.2 reservation request validation", () => {
     ).toMatchObject({ kind: "rejected", code });
   });
 
-  it("executeProviderCall rejects without calling the adapter", async () => {
+  it("executeObserved rejects without calling the adapter", async () => {
     let performed = 0;
-    const r = await executeProviderCall(
+    const r = await executeObserved(
       never,
       { ...base(), provider: "" },
       {

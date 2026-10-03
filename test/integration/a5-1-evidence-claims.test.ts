@@ -18,7 +18,6 @@ import {
   persistEvidenceUnit,
   type PersistEvidenceUnitInput,
 } from "../../src/runtime/evidence.js";
-import { runEvidenceSlice } from "../../src/runtime/slice.js";
 import { evidenceBodyHash } from "../../src/identity/domains.js";
 import { TestCluster, type DbEnv } from "../support/db-env.js";
 import {
@@ -31,6 +30,7 @@ import {
 } from "../support/a5-fixture.js";
 import { observe, withChild } from "../support/a5-crash.js";
 import { backendPid, waitForBlocked } from "../support/pg-wait.js";
+import { runSliceObserved } from "../support/a6-observed.js";
 
 const databaseUrl = process.env.TEST_DATABASE_URL;
 const suite = databaseUrl ? describe : describe.skip;
@@ -357,7 +357,7 @@ suite("A5.1 evidence units (disposable PostgreSQL 17, runtime role)", () => {
     try {
       await prepareUnitsAndSupports(env.migrator, pool);
       const input = sliceInput();
-      expect((await runEvidenceSlice(pool, input)).complete).toBe(true);
+      expect((await runSliceObserved(pool, input)).complete).toBe(true);
       const withSnapshot = must(input.units[0]);
       const hash = String(
         (await ownerRows(env, "SELECT package_hash FROM evidence_packages"))[0]

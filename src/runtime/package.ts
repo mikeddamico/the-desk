@@ -16,6 +16,7 @@ import { readClaimLogs } from "../knowledge/claim-log.js";
 import { ClaimStateError } from "../knowledge/claim-state.js";
 import { verifyFrozenEntry } from "../knowledge/state-cursor.js";
 import {
+  emitPreflight,
   isJsonObject,
   isUnique,
   Rejection,
@@ -28,6 +29,7 @@ import {
   type Row,
   type Tx,
 } from "./command.js";
+import { peek, type CommandContext, type CommandTrace } from "./observe.js";
 import {
   parseArtifactFields,
   parsePayload,
@@ -65,6 +67,8 @@ export interface StoredPackage {
 export interface PersistPackageOptions {
   /** The evidence unit ids the package must contain EXACTLY (the slice's units). */
   expectedUnitIds?: readonly string[];
+  /** Observability: when given, exactly one event is emitted per invocation (see observe.ts). */
+  context?: CommandContext;
 }
 
 /** Pure request validation (no database): artifact row fields, id agreement, then the governed payload profile. */
@@ -468,207 +472,228 @@ export async function persistEvidencePackage(
   pkg: AuthoredPackage,
   options: PersistPackageOptions = {},
 ): Promise<Outcome<StoredPackage>> {
+  const baseSubject = {
+    artifact_id: peek(() => pkg.artifact_id),
+    evidence_package_id: peek(() => pkg.evidence_package_id),
+  };
+  const preTrace: CommandTrace | undefined = options.context && {
+    context: options.context,
+    command: "evidence_package.persist",
+    subject: baseSubject,
+  };
   let parsed: ParsedPackage;
   try {
     parsed = parsePackage(pkg);
     for (const id of options.expectedUnitIds ?? [])
       requireUuid(id, "expected unit");
   } catch (error) {
-    if (error instanceof Rejection)
+    if (error instanceof Rejection) {
+      emitPreflight(preTrace, error.code);
       return { kind: "rejected", code: error.code, detail: error.message };
+    }
     throw error;
   }
+  const trace: CommandTrace | undefined = options.context && {
+    context: options.context,
+    command: "evidence_package.persist",
+    subject: { ...baseSubject, package_hash: parsed.hash },
+  };
   const payloadJson = JSON.stringify(parsed.payload);
-  return runCommand(pool, async (tx) => {
-    const requestVerification = await validateReferences(tx, parsed, options);
-    // READ COMMITTED: every statement has a fresh snapshot, so an id that looked free (or occupied) at one read can change before the
-    // next. An "occupied by a different record" verdict is therefore only final after ONE full re-read of the semantic (hash) lookups:
-    // an identical governed winner committed across the boundary then converges, while an unrelated occupant (no package with this
-    // hash) is still a conflict. The re-read is taken at most once, so the loop stays bounded.
-    let occupiedRechecked = false;
-    const recheckOccupied = (): boolean => {
-      if (occupiedRechecked) return false;
-      occupiedRechecked = true;
-      return true;
-    };
-    for (let round = 0; round < 4; round += 1) {
-      // 1. an existing typed package with this governed hash: reuse after validating what is stored
-      const byHash = (
-        await tx.query(`${artifactSelect} WHERE p.package_hash = $1`, [
-          parsed.hash,
-        ])
-      ).rows[0] as ArtifactRow | undefined;
-      if (byHash) {
-        let validated;
-        try {
-          validated = await validateStored(tx, byHash);
-        } catch (error) {
-          if (error instanceof Rejection)
+  return runCommand(
+    pool,
+    async (tx) => {
+      const requestVerification = await validateReferences(tx, parsed, options);
+      // READ COMMITTED: every statement has a fresh snapshot, so an id that looked free (or occupied) at one read can change before the
+      // next. An "occupied by a different record" verdict is therefore only final after ONE full re-read of the semantic (hash) lookups:
+      // an identical governed winner committed across the boundary then converges, while an unrelated occupant (no package with this
+      // hash) is still a conflict. The re-read is taken at most once, so the loop stays bounded.
+      let occupiedRechecked = false;
+      const recheckOccupied = (): boolean => {
+        if (occupiedRechecked) return false;
+        occupiedRechecked = true;
+        return true;
+      };
+      for (let round = 0; round < 4; round += 1) {
+        // 1. an existing typed package with this governed hash: reuse after validating what is stored
+        const byHash = (
+          await tx.query(`${artifactSelect} WHERE p.package_hash = $1`, [
+            parsed.hash,
+          ])
+        ).rows[0] as ArtifactRow | undefined;
+        if (byHash) {
+          let validated;
+          try {
+            validated = await validateStored(tx, byHash);
+          } catch (error) {
+            if (error instanceof Rejection)
+              return {
+                kind: "conflict",
+                code: error.code,
+                stored: byHash.artifact_id,
+                detail: error.message,
+              };
+            throw error;
+          }
+          if (
+            canonicalJson(validated.parsed.manifest) !==
+            canonicalJson(parsed.manifest)
+          )
             return {
               kind: "conflict",
-              code: error.code,
+              code: "manifest_differs_for_hash",
               stored: byHash.artifact_id,
-              detail: error.message,
+              detail: "a package with this hash stores a different manifest",
             };
-          throw error;
+          return {
+            kind: "converged",
+            record: stored(
+              {
+                artifact_id: byHash.artifact_id,
+                evidence_package_id: String(byHash.evidence_package_id),
+                package_hash: parsed.hash,
+              },
+              validated.verification,
+              { reused: true },
+            ),
+          };
         }
-        if (
-          canonicalJson(validated.parsed.manifest) !==
-          canonicalJson(parsed.manifest)
-        )
-          return {
-            kind: "conflict",
-            code: "manifest_differs_for_hash",
-            stored: byHash.artifact_id,
-            detail: "a package with this hash stores a different manifest",
-          };
-        return {
-          kind: "converged",
-          record: stored(
-            {
-              artifact_id: byHash.artifact_id,
-              evidence_package_id: String(byHash.evidence_package_id),
-              package_hash: parsed.hash,
-            },
-            validated.verification,
-            { reused: true },
-          ),
-        };
-      }
-      // 2. a preexisting artifact WITHOUT its typed row (another writer): completed only after its ACTUAL stored payload, schema
-      //    label and references validate and it carries the request's manifest and package id
-      const existing = (
-        await tx.query(
-          `${artifactSelect} WHERE a.artifact_type = 'evidence_package' AND a.content_hash = $1`,
-          [parsed.hash],
-        )
-      ).rows[0] as ArtifactRow | undefined;
-      if (existing) {
-        // the typed row may have been committed between the two reads (the winner writes both in one statement): re-read once more
-        if (existing.evidence_package_id !== null && round < 3) continue;
-        if (existing.evidence_package_id !== null)
-          return {
-            kind: "conflict",
-            code: "artifact_differs_for_hash",
-            stored: existing.artifact_id,
-            detail:
-              "the artifact carries a typed row for a different package hash",
-          };
-        let validated;
-        try {
-          validated = await validateStored(tx, existing);
-        } catch (error) {
-          if (error instanceof Rejection)
+        // 2. a preexisting artifact WITHOUT its typed row (another writer): completed only after its ACTUAL stored payload, schema
+        //    label and references validate and it carries the request's manifest and package id
+        const existing = (
+          await tx.query(
+            `${artifactSelect} WHERE a.artifact_type = 'evidence_package' AND a.content_hash = $1`,
+            [parsed.hash],
+          )
+        ).rows[0] as ArtifactRow | undefined;
+        if (existing) {
+          // the typed row may have been committed between the two reads (the winner writes both in one statement): re-read once more
+          if (existing.evidence_package_id !== null && round < 3) continue;
+          if (existing.evidence_package_id !== null)
             return {
               kind: "conflict",
-              code: "stored_package_invalid",
+              code: "artifact_differs_for_hash",
               stored: existing.artifact_id,
-              detail: error.message,
+              detail:
+                "the artifact carries a typed row for a different package hash",
             };
-          throw error;
+          let validated;
+          try {
+            validated = await validateStored(tx, existing);
+          } catch (error) {
+            if (error instanceof Rejection)
+              return {
+                kind: "conflict",
+                code: "stored_package_invalid",
+                stored: existing.artifact_id,
+                detail: error.message,
+              };
+            throw error;
+          }
+          if (
+            canonicalJson(validated.parsed.manifest) !==
+              canonicalJson(parsed.manifest) ||
+            validated.parsed.payload.id !== pkg.evidence_package_id
+          )
+            return {
+              kind: "conflict",
+              code: "artifact_differs_for_hash",
+              stored: existing.artifact_id,
+              detail: "stored manifest or package id differs from the request",
+            };
+          const occupied = await tx.query(
+            "SELECT 1 FROM evidence_packages WHERE evidence_package_id = $1::uuid",
+            [pkg.evidence_package_id],
+          );
+          if (occupied.rows.length > 0) {
+            // possibly the identical winner completing this very artifact between the two reads: re-read before judging
+            if (recheckOccupied()) continue;
+            return {
+              kind: "conflict",
+              code: "evidence_package_id_occupied",
+              stored: null,
+              detail: "the authored package id belongs to a different record",
+            };
+          }
+          const done = await tx.attempt(
+            `INSERT INTO evidence_packages (evidence_package_id, artifact_id, package_hash) VALUES ($1::uuid, $2::uuid, $3)`,
+            [pkg.evidence_package_id, existing.artifact_id, parsed.hash],
+          );
+          if (done.ok)
+            return {
+              kind: "created",
+              record: stored(
+                {
+                  artifact_id: existing.artifact_id,
+                  evidence_package_id: pkg.evidence_package_id,
+                  package_hash: parsed.hash,
+                },
+                validated.verification,
+                { completed_existing_artifact: true },
+              ),
+            };
+          if (!isRace(done.error)) rethrow(done.error);
+          continue;
         }
-        if (
-          canonicalJson(validated.parsed.manifest) !==
-            canonicalJson(parsed.manifest) ||
-          validated.parsed.payload.id !== pkg.evidence_package_id
-        )
-          return {
-            kind: "conflict",
-            code: "artifact_differs_for_hash",
-            stored: existing.artifact_id,
-            detail: "stored manifest or package id differs from the request",
-          };
-        const occupied = await tx.query(
+        const occupiedArtifact = await tx.query(
+          "SELECT 1 FROM artifacts WHERE artifact_id = $1::uuid",
+          [pkg.artifact_id],
+        );
+        const occupiedPackage = await tx.query(
           "SELECT 1 FROM evidence_packages WHERE evidence_package_id = $1::uuid",
           [pkg.evidence_package_id],
         );
-        if (occupied.rows.length > 0) {
-          // possibly the identical winner completing this very artifact between the two reads: re-read before judging
-          if (recheckOccupied()) continue;
+        if (
+          (occupiedArtifact.rows.length > 0 ||
+            occupiedPackage.rows.length > 0) &&
+          recheckOccupied()
+        )
+          continue;
+        if (occupiedArtifact.rows.length > 0 || occupiedPackage.rows.length > 0)
           return {
             kind: "conflict",
-            code: "evidence_package_id_occupied",
+            code:
+              occupiedArtifact.rows.length > 0
+                ? "artifact_id_occupied"
+                : "evidence_package_id_occupied",
             stored: null,
-            detail: "the authored package id belongs to a different record",
+            detail: "an authored id belongs to a different record",
           };
-        }
-        const done = await tx.attempt(
-          `INSERT INTO evidence_packages (evidence_package_id, artifact_id, package_hash) VALUES ($1::uuid, $2::uuid, $3)`,
-          [pkg.evidence_package_id, existing.artifact_id, parsed.hash],
+        // ONE statement writes artifact and typed row, so a unique violation on either leaves neither (no orphan artifact).
+        const ins = await tx.attempt(
+          `WITH a AS (
+           INSERT INTO artifacts (artifact_id, artifact_type, schema_version, content_hash, storage_uri, byte_size, canonical_payload, created_at)
+           VALUES ($1::uuid, 'evidence_package', $2, $3, $4, $5::bigint, $6::jsonb, $7::timestamptz) RETURNING artifact_id)
+         INSERT INTO evidence_packages (evidence_package_id, artifact_id, package_hash) SELECT $8::uuid, artifact_id, $3 FROM a`,
+          [
+            pkg.artifact_id,
+            pkg.schema_version,
+            parsed.hash,
+            pkg.storage_uri,
+            pkg.byte_size,
+            payloadJson,
+            pkg.created_at,
+            pkg.evidence_package_id,
+          ],
         );
-        if (done.ok)
+        if (ins.ok)
           return {
             kind: "created",
             record: stored(
               {
-                artifact_id: existing.artifact_id,
+                artifact_id: pkg.artifact_id,
                 evidence_package_id: pkg.evidence_package_id,
                 package_hash: parsed.hash,
               },
-              validated.verification,
-              { completed_existing_artifact: true },
+              requestVerification,
             ),
           };
-        if (!isRace(done.error)) rethrow(done.error);
-        continue;
+        if (!isRace(ins.error)) rethrow(ins.error);
+        // Savepoint rolled back: re-read. A hash race converges on the winner; a UUID race is caught by the occupied checks above.
       }
-      const occupiedArtifact = await tx.query(
-        "SELECT 1 FROM artifacts WHERE artifact_id = $1::uuid",
-        [pkg.artifact_id],
-      );
-      const occupiedPackage = await tx.query(
-        "SELECT 1 FROM evidence_packages WHERE evidence_package_id = $1::uuid",
-        [pkg.evidence_package_id],
-      );
-      if (
-        (occupiedArtifact.rows.length > 0 || occupiedPackage.rows.length > 0) &&
-        recheckOccupied()
-      )
-        continue;
-      if (occupiedArtifact.rows.length > 0 || occupiedPackage.rows.length > 0)
-        return {
-          kind: "conflict",
-          code:
-            occupiedArtifact.rows.length > 0
-              ? "artifact_id_occupied"
-              : "evidence_package_id_occupied",
-          stored: null,
-          detail: "an authored id belongs to a different record",
-        };
-      // ONE statement writes artifact and typed row, so a unique violation on either leaves neither (no orphan artifact).
-      const ins = await tx.attempt(
-        `WITH a AS (
-           INSERT INTO artifacts (artifact_id, artifact_type, schema_version, content_hash, storage_uri, byte_size, canonical_payload, created_at)
-           VALUES ($1::uuid, 'evidence_package', $2, $3, $4, $5::bigint, $6::jsonb, $7::timestamptz) RETURNING artifact_id)
-         INSERT INTO evidence_packages (evidence_package_id, artifact_id, package_hash) SELECT $8::uuid, artifact_id, $3 FROM a`,
-        [
-          pkg.artifact_id,
-          pkg.schema_version,
-          parsed.hash,
-          pkg.storage_uri,
-          pkg.byte_size,
-          payloadJson,
-          pkg.created_at,
-          pkg.evidence_package_id,
-        ],
-      );
-      if (ins.ok)
-        return {
-          kind: "created",
-          record: stored(
-            {
-              artifact_id: pkg.artifact_id,
-              evidence_package_id: pkg.evidence_package_id,
-              package_hash: parsed.hash,
-            },
-            requestVerification,
-          ),
-        };
-      if (!isRace(ins.error)) rethrow(ins.error);
-      // Savepoint rolled back: re-read. A hash race converges on the winner; a UUID race is caught by the occupied checks above.
-    }
-    throw new Error("package persistence did not settle after re-reads");
-  });
+      throw new Error("package persistence did not settle after re-reads");
+    },
+    trace,
+  );
 }
 
 // ---------------------------------------------------------------------------------------------------------------- binding
@@ -677,6 +702,8 @@ export interface BindInput {
   evidencePackageId: string;
   /** The slice's units: when given, the package's evidence set must equal it before the binding is accepted. */
   expectedUnitIds?: readonly string[];
+  /** Observability: when given, exactly one event is emitted per invocation (see observe.ts). */
+  context?: CommandContext;
 }
 export interface BoundPackage {
   attemptId: string;
@@ -687,70 +714,87 @@ export async function bindPackage(
   pool: Pool,
   input: BindInput,
 ): Promise<Outcome<BoundPackage>> {
+  const trace: CommandTrace | undefined = input.context && {
+    context: input.context,
+    command: "package.bind",
+    subject: {
+      attempt_id: peek(() => input.attemptId),
+      evidence_package_id: peek(() => input.evidencePackageId),
+    },
+  };
   try {
     requireUuid(input.attemptId, "attemptId");
     requireUuid(input.evidencePackageId, "evidencePackageId");
     for (const id of input.expectedUnitIds ?? [])
       requireUuid(id, "expected unit");
   } catch (error) {
-    if (error instanceof Rejection)
+    if (error instanceof Rejection) {
+      emitPreflight(trace, error.code);
       return { kind: "rejected", code: error.code, detail: error.message };
+    }
     throw error;
   }
   const { attemptId, evidencePackageId } = input;
-  return runCommand(pool, async (tx) => {
-    const current = async (): Promise<Row | undefined> =>
-      (
+  return runCommand(
+    pool,
+    async (tx) => {
+      const current = async (): Promise<Row | undefined> =>
+        (
+          await tx.query(
+            "SELECT evidence_package_id::text AS bound, state::text AS state FROM program_run_attempts WHERE attempt_id = $1::uuid",
+            [attemptId],
+          )
+        ).rows[0];
+      const decide = (bound: unknown): Outcome<BoundPackage> | undefined => {
+        if (bound === evidencePackageId)
+          return {
+            kind: "converged",
+            record: { attemptId, evidencePackageId },
+          };
+        if (typeof bound === "string")
+          return {
+            kind: "conflict",
+            code: "attempt_bound_to_other_package",
+            stored: { attemptId, evidencePackageId: bound },
+            detail: "an attempt's package binding is immutable once assigned",
+          };
+        return undefined;
+      };
+      const row = await current();
+      if (!row) return { kind: "rejected", code: "attempt_not_found" };
+      // The requested package is validated BEFORE any decision, so a same-package retry and a race-winner convergence are validated
+      // exactly like a first binding (artifact type, schema label, hash relationship, payload profile, references, slice unit set).
+      const pkg = (
         await tx.query(
-          "SELECT evidence_package_id::text AS bound, state::text AS state FROM program_run_attempts WHERE attempt_id = $1::uuid",
-          [attemptId],
+          `${artifactSelect} WHERE p.evidence_package_id = $1::uuid`,
+          [evidencePackageId],
         )
-      ).rows[0];
-    const decide = (bound: unknown): Outcome<BoundPackage> | undefined => {
-      if (bound === evidencePackageId)
-        return { kind: "converged", record: { attemptId, evidencePackageId } };
-      if (typeof bound === "string")
-        return {
-          kind: "conflict",
-          code: "attempt_bound_to_other_package",
-          stored: { attemptId, evidencePackageId: bound },
-          detail: "an attempt's package binding is immutable once assigned",
-        };
-      return undefined;
-    };
-    const row = await current();
-    if (!row) return { kind: "rejected", code: "attempt_not_found" };
-    // The requested package is validated BEFORE any decision, so a same-package retry and a race-winner convergence are validated
-    // exactly like a first binding (artifact type, schema label, hash relationship, payload profile, references, slice unit set).
-    const pkg = (
-      await tx.query(
-        `${artifactSelect} WHERE p.evidence_package_id = $1::uuid`,
-        [evidencePackageId],
-      )
-    ).rows[0] as ArtifactRow | undefined;
-    if (!pkg) return { kind: "rejected", code: "package_not_found" };
-    const validated = await validateStored(tx, pkg);
-    assertUnitSet(validated.parsed, {
-      ...(input.expectedUnitIds
-        ? { expectedUnitIds: input.expectedUnitIds }
-        : {}),
-    });
-    const early = decide(row.bound);
-    if (early) return early;
-    if (row.state !== "PENDING")
-      return { kind: "rejected", code: "attempt_not_pending" };
-    const bind = await tx.attempt(
-      "SELECT bind_evidence_package($1::uuid, $2::uuid)",
-      [attemptId, evidencePackageId],
-    );
-    if (bind.ok)
-      return { kind: "created", record: { attemptId, evidencePackageId } };
-    // A concurrent binder committed first ("missing attempt or package already bound"); the savepoint is rolled back, so re-read.
-    if (bind.error.code !== "P0001") rethrow(bind.error);
-    const after = await current();
-    if (!after) return { kind: "rejected", code: "attempt_not_found" };
-    const settled = decide(after.bound);
-    if (settled) return settled;
-    return rethrow(bind.error);
-  });
+      ).rows[0] as ArtifactRow | undefined;
+      if (!pkg) return { kind: "rejected", code: "package_not_found" };
+      const validated = await validateStored(tx, pkg);
+      assertUnitSet(validated.parsed, {
+        ...(input.expectedUnitIds
+          ? { expectedUnitIds: input.expectedUnitIds }
+          : {}),
+      });
+      const early = decide(row.bound);
+      if (early) return early;
+      if (row.state !== "PENDING")
+        return { kind: "rejected", code: "attempt_not_pending" };
+      const bind = await tx.attempt(
+        "SELECT bind_evidence_package($1::uuid, $2::uuid)",
+        [attemptId, evidencePackageId],
+      );
+      if (bind.ok)
+        return { kind: "created", record: { attemptId, evidencePackageId } };
+      // A concurrent binder committed first ("missing attempt or package already bound"); the savepoint is rolled back, so re-read.
+      if (bind.error.code !== "P0001") rethrow(bind.error);
+      const after = await current();
+      if (!after) return { kind: "rejected", code: "attempt_not_found" };
+      const settled = decide(after.bound);
+      if (settled) return settled;
+      return rethrow(bind.error);
+    },
+    trace,
+  );
 }
