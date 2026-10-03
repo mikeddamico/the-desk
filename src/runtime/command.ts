@@ -38,6 +38,37 @@ export class Rejection extends Error {
   }
 }
 
+/**
+ * The checked-out connection failed (the client emitted `error`: backend terminated, socket reset, ...) while this command held it.
+ * `cause` is the FIRST error the connection reported. `commitOutcome` states only what this process knows:
+ *  - `not_attempted`: this command never sent COMMIT (`phase` `before_commit`, or `rollback` when the failure struck the ROLLBACK
+ *    of a command that returned a non-committing outcome). Nothing was committed by this command; a lost ROLLBACK acknowledgment
+ *    is not a COMMIT attempt;
+ *  - `unknown`: COMMIT was sent and its acknowledgment was lost; the transaction may or may not have committed. Callers must
+ *    reconcile by identity (look up / resend the identical authored request) and must NOT assume either result.
+ * The command is never replayed here and the failed connection is destroyed, not returned to the pool.
+ */
+export class CommandConnectionError extends Error {
+  readonly phase: "before_commit" | "commit" | "rollback";
+  readonly commitOutcome: "not_attempted" | "unknown";
+  constructor(cause: unknown, phase: "before_commit" | "commit" | "rollback") {
+    const detail = cause instanceof Error ? cause.message : String(cause);
+    super(`command connection failed during ${phase}: ${detail}`, { cause });
+    this.name = "CommandConnectionError";
+    this.phase = phase;
+    this.commitOutcome = phase === "commit" ? "unknown" : "not_attempted";
+  }
+}
+
+// Follow-on cleanup failures, keyed by the error they accompany. A WeakMap (not a property) so a frozen / non-extensible / exotic
+// error object can never make the attachment itself throw and mask the first diagnostic.
+const cleanupFailures = new WeakMap<object, unknown[]>();
+/** Cleanup failures (ROLLBACK / release) that followed the first error `error`, if any. */
+export const commandCleanupErrors = (error: unknown): readonly unknown[] =>
+  typeof error === "object" && error !== null
+    ? (cleanupFailures.get(error) ?? [])
+    : [];
+
 export interface DbError {
   code?: string | undefined;
   constraint?: string | undefined;
@@ -70,82 +101,158 @@ export async function runCommand<R>(
   fn: (tx: Tx) => Promise<Outcome<R>>,
 ): Promise<Outcome<R>> {
   let client: PoolClient | undefined;
-  let open = false;
+  let open = false as boolean; // assigned inside `execute`; keeps TS from narrowing it to `false`
   let broken: unknown;
   let savepoints = 0;
-  try {
-    client = await pool.connect();
-    await client.query("BEGIN ISOLATION LEVEL READ COMMITTED");
-    open = true;
-    const c = client;
-    const tx: Tx = {
-      query: (text, values) => c.query(text, values),
-      attempt: async (text, values) => {
-        const name = `sp_${String((savepoints += 1))}`;
-        await c.query(`SAVEPOINT ${name}`);
-        try {
-          const result = await c.query(text, values);
-          await c.query(`RELEASE SAVEPOINT ${name}`);
-          return { ok: true, rows: result.rows as Row[] };
-        } catch (error) {
-          await c.query(`ROLLBACK TO SAVEPOINT ${name}`);
-          await c.query(`RELEASE SAVEPOINT ${name}`);
-          const e = error as DbError;
-          return {
-            ok: false,
-            error: {
-              code: e.code,
-              constraint: e.constraint,
-              message: e.message,
-            },
-          };
-        }
-      },
-    };
-    const isolation = await tx.query(
-      "SELECT current_setting('transaction_isolation') AS level",
-    );
-    if (isolation.rows[0]?.level !== "read committed")
-      return { kind: "rejected", code: "isolation_unsupported" };
-    let outcome: Outcome<R>;
+  let phase: "work" | "commit" | "rollback" | "after_end" = "work";
+  // the error this call throws (if any); cleanup failures are attached to it, never allowed to replace it
+  let thrown: unknown;
+  // pg-pool removes ITS error listener while a client is checked out (pg-pool 3.14.0 `_acquireClient`) and only restores it in
+  // `release`, so an error emitted by a checked-out connection (backend terminated, socket reset) would be an UNHANDLED error event
+  // that can take the process down. This scoped listener is attached immediately after checkout and removed only AFTER `release`
+  // (which has by then re-attached the pool's own listener), so there is never a moment without a listener. It records the FIRST
+  // connection error; it never swallows it.
+  let connectionError: unknown;
+  const onClientError = (error: unknown): void => {
+    connectionError ??= error;
+  };
+  const execute = async (): Promise<Outcome<R>> => {
     try {
-      outcome = await fn(tx);
-    } catch (error) {
-      if (error instanceof Rejection) {
-        outcome = {
-          kind: "rejected",
-          code: error.code,
-          detail: error.message,
-        };
-      } else {
-        throw error;
-      }
-    }
-    if (commits(outcome)) {
-      await client.query("COMMIT");
-      open = false;
-      await faultPoint("after_commit_before_return");
-    } else {
-      await client.query("ROLLBACK");
-      open = false;
-    }
-    return outcome;
-  } catch (error) {
-    broken = error;
-    throw error;
-  } finally {
-    if (client) {
-      if (open) {
-        try {
-          await client.query("ROLLBACK");
-        } catch (rollbackError) {
-          broken = rollbackError;
+      client = await pool.connect();
+      client.on("error", onClientError);
+      await client.query("BEGIN ISOLATION LEVEL READ COMMITTED");
+      open = true;
+      const c = client;
+      const tx: Tx = {
+        query: (text, values) => c.query(text, values),
+        attempt: async (text, values) => {
+          const name = `sp_${String((savepoints += 1))}`;
+          await c.query(`SAVEPOINT ${name}`);
+          try {
+            const result = await c.query(text, values);
+            await c.query(`RELEASE SAVEPOINT ${name}`);
+            return { ok: true, rows: result.rows as Row[] };
+          } catch (error) {
+            // a dead connection cannot roll back to a savepoint: surface the failure instead of masking it behind a second error
+            if (connectionError !== undefined) throw error;
+            await c.query(`ROLLBACK TO SAVEPOINT ${name}`);
+            await c.query(`RELEASE SAVEPOINT ${name}`);
+            const e = error as DbError;
+            return {
+              ok: false,
+              error: {
+                code: e.code,
+                constraint: e.constraint,
+                message: e.message,
+              },
+            };
+          }
+        },
+      };
+      const isolation = await tx.query(
+        "SELECT current_setting('transaction_isolation') AS level",
+      );
+      if (isolation.rows[0]?.level !== "read committed")
+        return { kind: "rejected", code: "isolation_unsupported" };
+      let outcome: Outcome<R>;
+      try {
+        outcome = await fn(tx);
+      } catch (error) {
+        if (error instanceof Rejection) {
+          outcome = {
+            kind: "rejected",
+            code: error.code,
+            detail: error.message,
+          };
+        } else {
+          throw error;
         }
       }
-      // A connection whose state is unknown is destroyed, never returned to the pool.
-      client.release(broken === undefined ? undefined : true);
+      // A connection failure observed before COMMIT is never reported as a (rejected/created/...) outcome, even if `fn` happened to
+      // catch the symptom and return normally.
+      if (connectionError !== undefined)
+        throw new CommandConnectionError(connectionError, "before_commit");
+      if (commits(outcome)) {
+        phase = "commit";
+        await client.query("COMMIT");
+        open = false;
+        phase = "after_end";
+        await faultPoint("after_commit_before_return");
+      } else {
+        phase = "rollback"; // COMMIT is never sent on this path
+        await client.query("ROLLBACK");
+        open = false;
+        phase = "after_end";
+      }
+      // After a successful COMMIT the outcome is durable: a later connection failure only costs the connection, never the result.
+      return outcome;
+    } catch (error) {
+      broken = error;
+      // Report a connection failure as such (first error retained as `cause`); a COMMIT whose acknowledgment was lost is `unknown`.
+      if (connectionError !== undefined && phase !== "after_end")
+        thrown =
+          error instanceof CommandConnectionError
+            ? error
+            : new CommandConnectionError(
+                connectionError,
+                phase === "commit"
+                  ? "commit"
+                  : phase === "rollback"
+                    ? "rollback"
+                    : "before_commit",
+              );
+      else thrown = error;
+      throw thrown;
+    }
+  };
+  let result: Outcome<R> | undefined;
+  let failed = false;
+  try {
+    result = await execute();
+  } catch {
+    failed = true; // `thrown` holds the error to rethrow
+  }
+  // Cleanup runs on every path, OUTSIDE any finally (a throw in finally would replace the first error).
+  if (client) {
+    const cleanupErrors: unknown[] = [];
+    if (open && connectionError === undefined) {
+      try {
+        await client.query("ROLLBACK");
+      } catch (rollbackError) {
+        broken = rollbackError;
+        cleanupErrors.push(rollbackError);
+      }
+    }
+    // A connection whose state is unknown (or that reported an error) is destroyed, never returned to the pool.
+    try {
+      client.release(
+        broken === undefined && connectionError === undefined
+          ? undefined
+          : true,
+      );
+    } catch (releaseError) {
+      cleanupErrors.push(releaseError);
+    }
+    // Remove ours only AFTER release, and only if another listener is present: pg-pool's `_release` re-attaches its own listener as
+    // its FIRST step (pg-pool 3.14.0), so for supported inputs it always is. If release threw before that (a double release, or a
+    // pool that is not pg-pool) ours stays as the last-resort listener, so the client is never left with none.
+    if (client.listeners("error").some((l) => l !== onClientError))
+      client.removeListener("error", onClientError);
+    if (cleanupErrors.length > 0) {
+      // The FIRST failure stays the error callers see; follow-on cleanup failures are recorded beside it, never swallowed,
+      // promoted or allowed to throw from here.
+      if (!failed) throw cleanupErrors[0];
+      if (typeof thrown === "object" && thrown !== null)
+        cleanupFailures.set(thrown, cleanupErrors);
+      else
+        thrown = new AggregateError(
+          [thrown, ...cleanupErrors],
+          "command failed with a non-object error and its cleanup also failed",
+        );
     }
   }
+  if (result === undefined) throw thrown; // `failed`: the first error, with any cleanup failures attached
+  return result;
 }
 
 /** Unique violation on one of the NAMED constraints (anything else is not "a race I understand"). */
