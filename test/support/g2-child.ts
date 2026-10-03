@@ -12,7 +12,12 @@ interface Spec {
   url: string;
   ownerUrl: string;
   tag: string;
-  scenario: "next_statement" | "no_more_statements" | "post_commit";
+  scenario:
+    | "next_statement"
+    | "no_more_statements"
+    | "post_commit"
+    | "in_flight_statement"
+    | "in_flight_statement_caught";
 }
 const spec = JSON.parse(process.argv[2] ?? "{}") as Spec;
 const app = `g2cmd_${spec.tag}`;
@@ -64,8 +69,28 @@ try {
   const outcome = await runCommand(pool, async (tx) => {
     await tx.query("SELECT pg_advisory_xact_lock(918273, 1)");
     await tx.query(marker("first"));
-    if (spec.scenario !== "post_commit")
+    if (
+      spec.scenario === "next_statement" ||
+      spec.scenario === "no_more_statements"
+    )
       await holdUntilBackendGone("in_command");
+    if (
+      spec.scenario === "in_flight_statement" ||
+      spec.scenario === "in_flight_statement_caught"
+    ) {
+      // A statement that is ACTIVE on the server when the parent terminates the backend: the server's FATAL (57P01) is delivered as the
+      // rejection of THIS statement. The sleep is bounded (30 s) so a failed gate cannot hold a long operation.
+      process.stdout.write("HELD in_flight\n");
+      if (spec.scenario === "in_flight_statement_caught") {
+        try {
+          await tx.query("SELECT pg_sleep(30)");
+        } catch {
+          // the callback swallows the rejection and returns normally: runCommand must still refuse to report success
+        }
+      } else {
+        await tx.query("SELECT pg_sleep(30)");
+      }
+    }
     if (spec.scenario === "next_statement") await tx.query(marker("second"));
     return { kind: "created", record: 1 } as const;
   });
@@ -75,9 +100,9 @@ try {
     name?: string;
     phase?: string;
     commitOutcome?: string;
-    cause?: { message?: string };
+    cause?: { message?: string; code?: string };
   };
-  result = `REJECTED ${String(e.name)} phase=${String(e.phase)} commitOutcome=${String(e.commitOutcome)} cause=${String(e.cause?.message)}`;
+  result = `REJECTED ${String(e.name)} phase=${String(e.phase)} commitOutcome=${String(e.commitOutcome)} cause=${String(e.cause?.message)} causeCode=${String(e.cause?.code)}`;
 }
 process.stdout.write(`${result}\n`);
 
