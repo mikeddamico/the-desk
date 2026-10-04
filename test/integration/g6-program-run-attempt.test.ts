@@ -225,6 +225,25 @@ const ownerRows = async (
   sql: string,
   values?: unknown[],
 ): Promise<Obj[]> => (await env.owner.query<Obj>(sql, values)).rows;
+/**
+ * Bounded wait (the existing `observe`) until pg_stat_activity shows NO g6_victim / g6_holder session of this database. The zero is
+ * strictly required at the deadline; nothing is terminated or hidden to satisfy it.
+ */
+const sessionsGone = (env: DbEnv, timeoutMs: number): Promise<void> =>
+  observe(
+    async () =>
+      Number(
+        (
+          await ownerRows(
+            env,
+            `SELECT count(*)::int AS n FROM pg_stat_activity WHERE datname = $1 AND application_name IN ('g6_victim','g6_holder')`,
+            [env.name],
+          )
+        )[0]?.n,
+      ) === 0,
+    "no g6_victim/g6_holder session remains",
+    timeoutMs,
+  );
 const count = async (env: DbEnv, table: string): Promise<number> =>
   Number((await ownerRows(env, `SELECT count(*) AS n FROM ${table}`))[0]?.n);
 const idle = (pool: pg.Pool): boolean =>
@@ -1089,13 +1108,32 @@ suite("G6 createProgramAttempt (real PostgreSQL, desk_runtime)", () => {
       // the holder was rolled back first, so the blocked victim finished (it created the row the holder never committed)
       expect(await victim).toMatchObject({ kind: "created" });
       expect(await count(env, "program_runs")).toBe(1);
-      const left = await ownerRows(
-        env,
-        `SELECT count(*)::int AS n FROM pg_stat_activity WHERE datname = $1 AND application_name IN ('g6_victim','g6_holder')`,
-        [env.name],
-      );
-      expect(left[0]?.n).toBe(0);
+      // every g6_victim / g6_holder session of THIS database is gone from pg_stat_activity: a bounded wait on that database fact (the
+      // existing `observe`, no fixed sleep); at the deadline the zero is still strictly required
+      await sessionsGone(env, 15000);
     } finally {
+      await env.close();
+    }
+  });
+
+  it("control (synthetic): a genuinely RETAINED session still fails the same bounded zero check; ending it lets the check pass", async () => {
+    const env = await fresh();
+    const retained = new pg.Client({
+      connectionString: env.runtimeUrl,
+      options: "-c role=desk_runtime",
+      application_name: "g6_victim",
+    });
+    let ended = false;
+    try {
+      await retained.connect();
+      await expect(sessionsGone(env, 1500)).rejects.toThrow(
+        "no g6_victim/g6_holder session remains",
+      );
+      await retained.end();
+      ended = true;
+      await sessionsGone(env, 15000); // it was the retained session: with it gone the same check passes
+    } finally {
+      if (!ended) await retained.end();
       await env.close();
     }
   });
