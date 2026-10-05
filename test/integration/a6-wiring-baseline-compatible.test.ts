@@ -29,6 +29,7 @@ import {
   sliceInput,
 } from "../support/a5-fixture.js";
 import {
+  nonNetworkControls,
   durableAdapter,
   finishSucceeded,
   outcome,
@@ -238,6 +239,7 @@ suite("G3-prep wiring (baseline-compatible)", () => {
                 adapter,
                 finishSucceeded(r2.provider_call_id),
                 wctx(),
+                nonNetworkControls(),
               )
             ).status,
         },

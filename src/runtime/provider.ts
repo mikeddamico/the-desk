@@ -38,6 +38,7 @@ import {
 } from "./command.js";
 import {
   peek,
+  KNOWN_OUTCOME_CODES,
   readContext,
   readAttemptRun,
   safeEmit,
@@ -45,6 +46,8 @@ import {
   type AttemptRun,
   type CommandContext,
   type CommandTrace,
+  type CommandEvent,
+  type Durability,
   type ObserverContext,
   type RawEvent,
 } from "./observe.js";
@@ -367,7 +370,8 @@ const RESERVATION_UNIQUES = [
 
 /**
  * Reserves (logical_request_key, operational_try_number) for one authored provider_call_id. Results:
- *  - `created`: THIS call committed the reservation and is the ONLY caller that may perform the provider side effect.
+ *  - `created`: THIS call committed the reservation. This historical ledger API alone never authorizes execution;
+ *    executeProviderCall additionally requires its own guarded, acknowledged creating commit and explicit non-network controls.
  *  - `converged`: the same authored reservation already exists (identical in every immutable field); the stored outcome, if any, is
  *    returned. NOT permission to perform.
  *  - `held_by_other`: a different authored id owns the slot. Do not perform.
@@ -377,6 +381,16 @@ export async function reserveProviderCall(
   pool: Pool,
   authored: AuthoredReservation,
   context?: CommandContext,
+): Promise<Outcome<ReservationRecord>> {
+  return reserveCore(pool, authored, context);
+}
+
+/** Execution-only admission hook. Historical ledger reservations do not grant execution. */
+async function reserveCore(
+  pool: Pool,
+  authored: AuthoredReservation,
+  context?: CommandContext,
+  beforeInsert?: () => string | undefined,
 ): Promise<Outcome<ReservationRecord>> {
   const trace: CommandTrace | undefined = context && {
     context,
@@ -406,6 +420,8 @@ export async function reserveProviderCall(
     async (tx) => {
       const existing = await classifyExisting(tx, r);
       if (existing) return existing;
+      const refused = beforeInsert?.();
+      if (refused) return { kind: "rejected", code: refused };
       const insert = await tx.attempt(
         `INSERT INTO provider_calls AS c (provider_call_id, attempt_id, provider, operation, model_identifier, request_fingerprint,
          logical_request_key, operational_try_number, intentional_take_index, retry_of_provider_call_id, reroll_of_provider_call_id,
@@ -432,6 +448,8 @@ export async function reserveProviderCall(
         const row = insert.rows[0];
         if (!row) throw new Error("insert returned no row");
         await faultPoint("reservation_inserted_uncommitted");
+        const canceled = beforeInsert?.();
+        if (canceled) return { kind: "rejected", code: canceled };
         return {
           kind: "created",
           record: { reservation: toReservation(row), outcome: null },
@@ -615,7 +633,7 @@ export interface SideEffectAdapter<R> extends LookupAdapter<R> {
    * The ONE place a provider side effect happens. A returned value is GOVERNED evidence of what happened (including a governed
    * failure the adapter positively knows); a thrown error or timeout is AMBIGUOUS and never becomes a retryable failure here.
    */
-  perform(request: ProviderRequest): Promise<R>;
+  perform(request: ProviderRequest, signal?: AbortSignal): Promise<R>;
 }
 
 const requestOf = (r: StoredReservation): ProviderRequest => ({
@@ -787,17 +805,234 @@ export type ExecuteResult =
   /** The reservation exists without an outcome and this caller did not create it: NOT performed, availability limitation applies. */
   | {
       status: "unfinished";
-      reason: "converged_without_outcome" | "held_by_other";
+      reason:
+        | "converged_without_outcome"
+        | "held_by_other"
+        | "provider_not_invoked_canceled";
       reservation: StoredReservation;
     }
   /** `perform` (or `finish`) threw: the provider may have acted. Nothing was recorded; use reconcile, never retry blindly. */
   | {
       status: "ambiguous";
       reservation: StoredReservation;
-      error: string;
+      code:
+        | "provider_perform_ambiguous"
+        | "provider_finish_ambiguous"
+        | "provider_observation_timeout"
+        | "provider_observation_canceled";
     }
   | { status: "conflict"; result: Outcome<ReservationRecord> }
   | { status: "rejected"; result: Outcome<ReservationRecord> };
+
+/** Trusted application/test construction, not an authentication token or network sandbox. */
+export interface NonNetworkExecutionControls {
+  mode: "non_network";
+  DESK_ENV: "development" | "test";
+  PROVIDERS_ENABLED: false;
+  GENERATION_KILL_SWITCH: false;
+  PROVIDER_CALL_TIMEOUT_MS: number;
+  signal?: AbortSignal;
+}
+
+const abortedGetter: unknown = Reflect.get(
+  Object.getOwnPropertyDescriptor(AbortSignal.prototype, "aborted") ?? {},
+  "get",
+);
+function aborted(signal?: unknown): boolean {
+  if (signal === undefined) return false;
+  if (typeof abortedGetter !== "function")
+    throw new Rejection("internal_missing");
+  return Reflect.apply(abortedGetter, signal, []) === true;
+}
+
+interface Controls {
+  value?: NonNetworkExecutionControls;
+  refusal?: string;
+}
+function readControls(input: unknown): Controls {
+  if (input === undefined) return { refusal: "provider_admission_unavailable" };
+  try {
+    if (input === null || typeof input !== "object")
+      throw new Rejection("provider_controls_invalid");
+    const properties = Object.getOwnPropertyDescriptors(input);
+    const names = [
+      "mode",
+      "DESK_ENV",
+      "PROVIDERS_ENABLED",
+      "GENERATION_KILL_SWITCH",
+      "PROVIDER_CALL_TIMEOUT_MS",
+      "signal",
+    ];
+    if (
+      Reflect.ownKeys(properties).some(
+        (key) => typeof key !== "string" || !names.includes(key),
+      )
+    )
+      throw new Rejection("provider_controls_invalid");
+    const value: Record<string, unknown> = {};
+    for (const name of names) {
+      const property = properties[name];
+      if (property === undefined && name === "signal") continue;
+      if (!property || !("value" in property))
+        throw new Rejection("provider_controls_invalid");
+      value[name] = property.value;
+    }
+    if (value.mode !== "non_network")
+      return { refusal: "provider_admission_unavailable" };
+    if (
+      typeof value.DESK_ENV !== "string" ||
+      !["development", "test", "staging", "production"].includes(
+        value.DESK_ENV,
+      ) ||
+      typeof value.PROVIDERS_ENABLED !== "boolean" ||
+      typeof value.GENERATION_KILL_SWITCH !== "boolean" ||
+      typeof value.PROVIDER_CALL_TIMEOUT_MS !== "number" ||
+      !Number.isInteger(value.PROVIDER_CALL_TIMEOUT_MS) ||
+      value.PROVIDER_CALL_TIMEOUT_MS < 1 ||
+      value.PROVIDER_CALL_TIMEOUT_MS > 2147483647
+    )
+      throw new Rejection("provider_controls_invalid");
+    if (value.signal !== undefined) aborted(value.signal);
+    if (value.DESK_ENV !== "development" && value.DESK_ENV !== "test")
+      return { refusal: "provider_execution_disabled" };
+    if (value.PROVIDERS_ENABLED || value.GENERATION_KILL_SWITCH)
+      return { refusal: "provider_execution_disabled" };
+    return {
+      value: Object.freeze(value) as unknown as NonNetworkExecutionControls,
+    };
+  } catch {
+    return { refusal: "provider_controls_invalid" };
+  }
+}
+
+/** No raw cause, message, error attachment or AggregateError children cross the execution boundary. */
+export class ProviderExecutionError extends Error {
+  readonly code: string;
+  readonly correlation_id: string;
+  readonly stage: "reserve" | "record";
+  readonly commit_state: Durability;
+  readonly error_class: string;
+  readonly reservation_commit_state: Durability;
+  constructor(
+    correlationId: string,
+    stage: "reserve" | "record",
+    event?: CommandEvent,
+    fallback: Durability = "unknown",
+    primaryCode?: string,
+    reservationState: Durability = "unknown",
+  ) {
+    const code =
+      event?.durability === "unknown"
+        ? "provider_execution_commit_unknown"
+        : (primaryCode ?? "provider_execution_failed");
+    super(code);
+    this.name = "ProviderExecutionError";
+    this.code = code;
+    this.correlation_id = correlationId;
+    this.stage = stage;
+    this.commit_state = event?.durability ?? fallback;
+    this.error_class = event?.error_class ?? "unclassified";
+    this.reservation_commit_state = reservationState;
+  }
+}
+
+type Observation<R> =
+  | { kind: "returned"; value: R }
+  | {
+      kind: "ambiguous";
+      code:
+        | "provider_perform_ambiguous"
+        | "provider_observation_timeout"
+        | "provider_observation_canceled";
+    };
+function observePerform<R>(
+  adapter: SideEffectAdapter<R>,
+  request: ProviderRequest,
+  controls: NonNetworkExecutionControls,
+): Promise<Observation<R>> {
+  return new Promise((resolve) => {
+    const startedAt = performance.now();
+    const local = new AbortController();
+    let settled = false;
+    const finish = (result: Observation<R>) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      if (controls.signal)
+        EventTarget.prototype.removeEventListener.call(
+          controls.signal,
+          "abort",
+          cancel,
+        );
+      resolve(result);
+    };
+    const cancel = () => {
+      finish({ kind: "ambiguous", code: "provider_observation_canceled" });
+      local.abort();
+    };
+    const timer = setTimeout(() => {
+      finish({ kind: "ambiguous", code: "provider_observation_timeout" });
+      local.abort();
+    }, controls.PROVIDER_CALL_TIMEOUT_MS);
+    if (controls.signal)
+      EventTarget.prototype.addEventListener.call(
+        controls.signal,
+        "abort",
+        cancel,
+        { once: true },
+      );
+    if (aborted(controls.signal)) {
+      cancel();
+      return;
+    }
+    // A referenced finite timer keeps the waiting caller alive. Late return/rejection is consumed without SQL or finish().
+    const complete = (result: Observation<R>) => {
+      if (settled) return;
+      if (performance.now() - startedAt >= controls.PROVIDER_CALL_TIMEOUT_MS) {
+        finish({ kind: "ambiguous", code: "provider_observation_timeout" });
+        local.abort();
+      } else if (aborted(controls.signal)) cancel();
+      else finish(result);
+    };
+    try {
+      Promise.resolve(adapter.perform(request, local.signal)).then(
+        (value) => {
+          complete({ kind: "returned", value });
+        },
+        () => {
+          complete({ kind: "ambiguous", code: "provider_perform_ambiguous" });
+        },
+      );
+    } catch {
+      complete({ kind: "ambiguous", code: "provider_perform_ambiguous" });
+    }
+  });
+}
+
+function safeOutcome<T>(outcome: Outcome<T>): Outcome<T> {
+  if (outcome.kind !== "rejected") return outcome;
+  return {
+    kind: "rejected",
+    code: outcome.code,
+    ...(outcome.sqlstate ? { sqlstate: outcome.sqlstate } : {}),
+  };
+}
+
+function ownedRejection(error: unknown): string | undefined {
+  try {
+    if (error instanceof Rejection) {
+      const code: unknown = Object.getOwnPropertyDescriptor(
+        error,
+        "code",
+      )?.value;
+      if (typeof code === "string" && KNOWN_OUTCOME_CODES.has(code))
+        return code;
+    }
+  } catch {
+    // An exotic thrown object must not escape through instanceof/prototype/getter inspection.
+  }
+  return undefined;
+}
 
 /**
  * reserve -> (ONLY if this call's own commit returned `created`) perform -> record. Never takes over, never retries, never invents an
@@ -807,6 +1042,7 @@ interface ExecuteFacts {
   reservation?: string;
   perform: "performed" | "not_attempted" | "ambiguous";
   outcome_record: string;
+  errorStage: "reserve" | "record";
 }
 
 async function executeCore<R>(
@@ -817,14 +1053,20 @@ async function executeCore<R>(
   facts: ExecuteFacts,
   reserveContext: CommandContext,
   recordContext: CommandContext,
+  controls: Controls,
 ): Promise<ExecuteResult> {
-  const reserved = await reserveProviderCall(pool, reservation, reserveContext);
+  const guard = () =>
+    controls.refusal ??
+    (aborted(controls.value?.signal)
+      ? "provider_execution_canceled"
+      : undefined);
+  const reserved = await reserveCore(pool, reservation, reserveContext, guard);
   facts.reservation = reserved.kind;
   switch (reserved.kind) {
     case "conflict":
       return { status: "conflict", result: reserved };
     case "rejected":
-      return { status: "rejected", result: reserved };
+      return { status: "rejected", result: safeOutcome(reserved) };
     case "held_by_other":
       return reserved.record.outcome
         ? {
@@ -854,43 +1096,91 @@ async function executeCore<R>(
   }
   const mine = reserved.record.reservation;
   await faultPoint("after_reservation_commit");
-  let result: R;
-  try {
-    result = await adapter.perform(requestOf(mine));
-  } catch (error) {
+  if (aborted(controls.value?.signal))
+    return {
+      status: "unfinished",
+      reason: "provider_not_invoked_canceled",
+      reservation: mine,
+    };
+  // Only a committing created result, after the guarded insert, can reach here.
+  const controlled = controls.value;
+  if (!controlled) throw new Rejection("provider_admission_unavailable");
+  const observation = await observePerform(
+    adapter,
+    requestOf(mine),
+    controlled,
+  );
+  if (observation.kind === "ambiguous") {
     facts.perform = "ambiguous";
     return {
       status: "ambiguous",
       reservation: mine,
-      error: error instanceof Error ? error.message : String(error),
+      code: observation.code,
     };
   }
   facts.perform = "performed";
   await faultPoint("after_side_effect");
+  if (aborted(controlled.signal))
+    return {
+      status: "ambiguous",
+      reservation: mine,
+      code: "provider_observation_canceled",
+    };
   let authored: AuthoredOutcome;
   try {
-    authored = finish(result);
-  } catch (error) {
+    const properties = Object.getOwnPropertyDescriptors(
+      finish(observation.value),
+    );
+    const data: Record<string, unknown> = {};
+    for (const name of [
+      "provider_call_id",
+      "event_type",
+      "ended_at",
+      "usage",
+      "actual_cost",
+      "currency",
+      "response_artifact_id",
+      "response_reference",
+    ]) {
+      const property = properties[name];
+      if (!property || !("value" in property))
+        throw new Rejection("provider_finish_ambiguous");
+      data[name] = property.value;
+    }
+    authored = validateOutcome(data as unknown as AuthoredOutcome);
+    authored.usage = JSON.parse(JSON.stringify(authored.usage)) as Json;
+    if (authored.provider_call_id !== mine.provider_call_id)
+      return {
+        status: "performed",
+        reservation: mine,
+        outcome: { kind: "rejected", code: "outcome_binding_mismatch" },
+      };
+  } catch {
     // `perform` itself was acknowledged (facts.perform stays "performed"); only the outcome could not be produced, so the WORKFLOW
     // status is ambiguous while the perform fact is not rewritten.
     return {
       status: "ambiguous",
       reservation: mine,
-      error: `finish failed: ${error instanceof Error ? error.message : String(error)}`,
+      code: "provider_finish_ambiguous",
     };
   }
-  if (authored.provider_call_id !== mine.provider_call_id)
-    return {
-      status: "performed",
-      reservation: mine,
-      outcome: { kind: "rejected", code: "outcome_binding_mismatch" },
-    };
   // The record command is attempted from here: if it throws, the fact stays "unknown" (attempted, result not known), not "not_attempted".
+  if (aborted(controlled.signal))
+    return {
+      status: "ambiguous",
+      reservation: mine,
+      code: "provider_observation_canceled",
+    };
   facts.outcome_record = "unknown";
+  facts.errorStage = "record";
   const outcome = await recordProviderOutcome(pool, authored, recordContext);
   facts.outcome_record = outcome.kind;
   await faultPoint("after_outcome_commit");
-  return { status: "performed", reservation: mine, outcome };
+  return {
+    status: "performed",
+    reservation: mine,
+    outcome: safeOutcome(outcome),
+  };
 }
 
 /**
@@ -905,6 +1195,7 @@ export async function executeProviderCall<R>(
   adapter: SideEffectAdapter<R>,
   finish: (result: R) => AuthoredOutcome,
   context: ObserverContext,
+  controls?: unknown,
 ): Promise<ExecuteResult> {
   const rc = readContext(context);
   if (!rc.ok)
@@ -914,29 +1205,93 @@ export async function executeProviderCall<R>(
     };
   const base = rc.context; // a plain snapshot: no property of the caller's object is read again
   const startedAt = performance.now();
-  const attemptId = peek(() => reservation.attempt_id);
-  const run = await readAttemptRun(pool, attemptId);
+  let authored: AuthoredReservation;
+  try {
+    const properties = Object.getOwnPropertyDescriptors(reservation);
+    const data: Record<string, unknown> = {};
+    for (const name of [
+      "provider_call_id",
+      "attempt_id",
+      "provider",
+      "operation",
+      "model_identifier",
+      "request_fingerprint",
+      "logical_request_key",
+      "operational_try_number",
+      "intentional_take_index",
+      "retry_of_provider_call_id",
+      "reroll_of_provider_call_id",
+      "reroll_trigger_id",
+      "started_at",
+    ]) {
+      const property = properties[name];
+      if (!property || !("value" in property))
+        return {
+          status: "rejected",
+          result: { kind: "rejected", code: "provider_reservation_invalid" },
+        };
+      data[name] = property.value;
+    }
+    authored = validateReservation(data as unknown as AuthoredReservation);
+  } catch (error) {
+    return {
+      status: "rejected",
+      result: {
+        kind: "rejected",
+        code: ownedRejection(error) ?? "provider_reservation_invalid",
+      },
+    };
+  }
+  const admission = readControls(controls);
+  const attemptId = authored.attempt_id;
+  let run: AttemptRun | undefined;
   const id = typeof attemptId === "string" ? attemptId : undefined;
   const facts: ExecuteFacts = {
     perform: "not_attempted",
     outcome_record: "not_attempted",
+    errorStage: "reserve",
+  };
+  let reserveEvent: CommandEvent | undefined;
+  let recordEvent: CommandEvent | undefined;
+  const tracked: ObserverContext = {
+    correlationId: base.correlationId,
+    observer: (event) => {
+      if (event.command === "provider_call.reserve")
+        reserveEvent = Object.freeze({ ...event });
+      if (event.command === "provider_outcome.record")
+        recordEvent = Object.freeze({ ...event });
+      return base.observer(event);
+    },
   };
   let result: ExecuteResult;
+  let workStarted = false;
   try {
+    run = await readAttemptRun(pool, attemptId);
+    workStarted = true;
     result = await executeCore(
       pool,
-      reservation,
+      authored,
       adapter,
       finish,
       facts,
-      stageContext(base, "reserve", id, run),
-      stageContext(base, "record", id, run),
+      stageContext(tracked, "reserve", id, run),
+      stageContext(tracked, "record", id, run),
+      admission,
     );
-  } catch (error) {
+  } catch (raw) {
+    const error = new ProviderExecutionError(
+      base.correlationId,
+      facts.errorStage,
+      facts.errorStage === "reserve" ? reserveEvent : recordEvent,
+      workStarted ? "unknown" : "not_committed",
+      ownedRejection(raw),
+      reserveEvent?.durability ?? (workStarted ? "unknown" : "not_committed"),
+    );
     emitWorkflow(base, "provider_call.execute", id, run, startedAt, {
       outcome: "error",
-      error_class: error instanceof Rejection ? "Rejection" : "unclassified",
-      provider_call_id: peek(() => reservation.provider_call_id),
+      error_class: error.error_class,
+      code: error.code,
+      provider_call_id: authored.provider_call_id,
       reservation: facts.reservation,
       perform: facts.perform,
       outcome_record: facts.outcome_record,
@@ -945,7 +1300,12 @@ export async function executeProviderCall<R>(
   }
   emitWorkflow(base, "provider_call.execute", id, run, startedAt, {
     status: result.status,
-    provider_call_id: peek(() => reservation.provider_call_id),
+    ...(result.status === "ambiguous" ? { code: result.code } : {}),
+    ...(result.status === "unfinished" &&
+    result.reason === "provider_not_invoked_canceled"
+      ? { code: "provider_not_invoked_canceled" }
+      : {}),
+    provider_call_id: authored.provider_call_id,
     reservation: facts.reservation,
     perform: facts.perform,
     outcome_record: facts.outcome_record,

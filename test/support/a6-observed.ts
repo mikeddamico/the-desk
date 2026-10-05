@@ -17,6 +17,7 @@ import {
   type SideEffectAdapter,
 } from "../../src/runtime/provider.js";
 import { runEvidenceSlice, type SliceInput } from "../../src/runtime/slice.js";
+import { nonNetworkControls } from "./a5-provider.js";
 
 export const noopContext = (): ObserverContext => ({
   correlationId: randomUUID(),
@@ -48,7 +49,15 @@ export const executeObserved = <R>(
   reservation: AuthoredReservation,
   adapter: SideEffectAdapter<R>,
   finish: (result: R) => AuthoredOutcome,
-) => executeProviderCall(pool, reservation, adapter, finish, noopContext());
+) =>
+  executeProviderCall(
+    pool,
+    reservation,
+    adapter,
+    finish,
+    noopContext(),
+    nonNetworkControls(),
+  );
 
 export const reconcileObserved = <R>(
   pool: Pool,

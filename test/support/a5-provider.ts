@@ -13,11 +13,24 @@ import type {
   AuthoredReservation,
   ProviderRequest,
   SideEffectAdapter,
+  NonNetworkExecutionControls,
 } from "../../src/runtime/provider.js";
 import { TestCluster, type DbEnv } from "./db-env.js";
 import { attemptIds, seedPrerequisites } from "./a5-fixture.js";
 
 export const EFFECT_SCHEMA = "a5_2_effects";
+
+/** Explicit trusted offline test construction, never selected by provider name or cost. */
+export const nonNetworkControls = (
+  overrides: Partial<NonNetworkExecutionControls> = {},
+): NonNetworkExecutionControls => ({
+  mode: "non_network",
+  DESK_ENV: "test",
+  PROVIDERS_ENABLED: false,
+  GENERATION_KILL_SWITCH: false,
+  PROVIDER_CALL_TIMEOUT_MS: 30000,
+  ...overrides,
+});
 
 export interface EffectResult {
   invocation_id: string;
