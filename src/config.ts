@@ -11,6 +11,12 @@ const schema = z
     DEPLOYED_COMMIT: z.string().min(1),
     PROVIDERS_ENABLED: boolean.default(false),
     GENERATION_KILL_SWITCH: boolean.default(true),
+    PROVIDER_CALL_TIMEOUT_MS: z
+      .string()
+      .regex(/^[0-9]+$/)
+      .transform(Number)
+      .pipe(z.number().int().min(1).max(2147483647))
+      .optional(),
     LOG_LEVEL: z
       .enum(["fatal", "error", "warn", "info", "debug", "trace", "silent"])
       .default("info"),
@@ -45,7 +51,13 @@ export type Config = z.output<typeof schema>;
 export function loadConfig(
   environment: NodeJS.ProcessEnv = process.env,
 ): Config {
-  return schema.parse(environment);
+  const config = schema.parse(environment);
+  if (
+    config.PROVIDER_CALL_TIMEOUT_MS === undefined &&
+    ["development", "test"].includes(config.DESK_ENV)
+  )
+    config.PROVIDER_CALL_TIMEOUT_MS = 30000;
+  return config;
 }
 
 /** The synthetic fixture load is a development/test tool; staging use is a Completion B decision. */

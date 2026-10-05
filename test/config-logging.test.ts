@@ -19,6 +19,36 @@ const base = {
 };
 
 describe("environment and security foundation", () => {
+  it("validates optional provider observation bounds without enabling providers", () => {
+    expect(loadConfig(base).PROVIDER_CALL_TIMEOUT_MS).toBe(30000);
+    expect(
+      loadConfig({ ...base, PROVIDER_CALL_TIMEOUT_MS: "1" })
+        .PROVIDER_CALL_TIMEOUT_MS,
+    ).toBe(1);
+    expect(
+      loadConfig({ ...base, PROVIDER_CALL_TIMEOUT_MS: "2147483647" })
+        .PROVIDER_CALL_TIMEOUT_MS,
+    ).toBe(2147483647);
+    for (const PROVIDER_CALL_TIMEOUT_MS of [
+      "0",
+      "-1",
+      "1.5",
+      "NaN",
+      "Infinity",
+      "2147483648",
+      "1e3",
+    ])
+      expect(() => loadConfig({ ...base, PROVIDER_CALL_TIMEOUT_MS })).toThrow();
+    expect(
+      loadConfig({
+        ...base,
+        DESK_ENV: "production",
+        DEPLOYED_COMMIT: "a".repeat(40),
+      }).PROVIDER_CALL_TIMEOUT_MS,
+    ).toBeUndefined();
+    expect(loadConfig(base).PROVIDERS_ENABLED).toBe(false);
+    expect(loadConfig(base).GENERATION_KILL_SWITCH).toBe(true);
+  });
   it("requires explicit identity and separate database credentials", () => {
     expect(() => loadConfig({})).toThrow();
     expect(() =>

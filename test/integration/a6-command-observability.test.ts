@@ -38,6 +38,7 @@ import {
   sliceInput,
 } from "../support/a5-fixture.js";
 import {
+  nonNetworkControls,
   durableAdapter,
   finishSucceeded,
   outcome,
@@ -347,6 +348,7 @@ suite(
               adapter,
               finishSucceeded(a.provider_call_id),
               capA.context,
+              nonNetworkControls(),
             )
           ).status,
         ).toBe("performed");
@@ -406,6 +408,7 @@ suite(
               ambiguous,
               finishSucceeded(b.provider_call_id),
               capB.context,
+              nonNetworkControls(),
             )
           ).status,
         ).toBe("ambiguous");
@@ -447,6 +450,7 @@ suite(
               adapter,
               finishSucceeded(rival.provider_call_id),
               capC.context,
+              nonNetworkControls(),
             )
           ).status,
         ).toBe("unfinished");
@@ -532,8 +536,11 @@ suite(
             throw new Error("finish boom CANARY_FINISH");
           },
           cap.context,
+          nonNetworkControls(),
         );
         expect(res.status).toBe("ambiguous");
+        expect(res).toMatchObject({ code: "provider_finish_ambiguous" });
+        expect(JSON.stringify(res)).not.toContain("CANARY_FINISH");
         const recs = await cap.records();
         expect(
           msgs(recs, "command.completed").some(
@@ -566,8 +573,13 @@ suite(
             adapter,
             finishSucceeded(r.provider_call_id),
             cap.context,
+            nonNetworkControls(),
           ),
-        ).rejects.toThrow("connect failed after reserve");
+        ).rejects.toMatchObject({
+          code: "provider_execution_failed",
+          stage: "record",
+          commit_state: "not_committed",
+        });
         const recs = await cap.records();
         expect(
           must(
@@ -961,6 +973,7 @@ suite(
           durableAdapter(never, { lookup: false }),
           finishSucceeded(randomUUID()),
           context as never,
+          nonNetworkControls(),
         );
         expect(e).toMatchObject({
           status: "rejected",

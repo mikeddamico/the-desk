@@ -1,3 +1,4 @@
+import { nonNetworkControls } from "./support/a5-provider.js";
 // G3-prep: the command event projection, the single emission point in runCommand (scripted client, NOT real-PostgreSQL evidence),
 // and the bounded noninterference contract. Real-PostgreSQL / real-pino proofs are in test/integration/a6-command-observability.test.ts.
 import { EventEmitter } from "node:events";
@@ -990,6 +991,7 @@ describe("review regressions (scripted client, not real-PostgreSQL evidence)", (
         {} as never,
         (() => ({})) as never,
         ctx as never,
+        nonNetworkControls(),
       );
       expect(e).toMatchObject({
         status: "rejected",

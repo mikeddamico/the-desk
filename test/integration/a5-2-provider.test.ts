@@ -631,7 +631,7 @@ suite(
       );
       expect(a).toMatchObject({
         status: "ambiguous",
-        error: "provider timeout",
+        code: "provider_perform_ambiguous",
       });
       expect(await pe.events()).toBe(await pe.events());
       expect(
