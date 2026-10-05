@@ -21,7 +21,8 @@
     "db:load-fixture": "tsx src/db/cli.ts load-fixture",
     "fixture:reenter": "tsx src/cli/fixture-reentry.ts",
     "db:reset": "tsx src/db/cli.ts reset",
-    "program:attempt": "tsx src/cli/program-attempt.ts"
+    "program:attempt": "tsx src/cli/program-attempt.ts",
+    "review:wait": "tsx src/cli/review-wait.ts"
   },
   "dependencies": {
     "pg": "8.16.3",
