@@ -45,6 +45,20 @@ if (cluster && databaseUrl) {
 }
 
 const HOOK = Symbol.for("the-desk.a5.test-fault-hook");
+// D's exact two-int installation arbitration key; test observation only, no lock acquisition.
+const D_HOLDER_SQL = `SELECT a.pid FROM pg_stat_activity a JOIN pg_locks l USING(pid)
+  WHERE a.datname=$1 AND a.application_name=$2 AND a.state='idle in transaction'
+    AND a.backend_xid IS NOT NULL AND a.xact_start IS NOT NULL
+    AND l.database=a.datid AND l.granted AND l.locktype='advisory'
+    AND l.mode='ExclusiveLock' AND l.classid=182736456 AND l.objid=1 AND l.objsubid=2`;
+const D_WAITER_SQL = `SELECT a.pid,a.application_name,pg_blocking_pids(a.pid) AS blockers
+  FROM pg_stat_activity a JOIN pg_locks l USING(pid)
+  WHERE a.datname=$1 AND a.application_name=ANY($2::text[]) AND a.pid<>$3
+    AND a.state='active' AND a.wait_event_type='Lock' AND a.wait_event='advisory'
+    AND l.database=a.datid AND NOT l.granted AND l.locktype='advisory'
+    AND l.mode='ExclusiveLock' AND l.classid=182736456 AND l.objid=1 AND l.objsubid=2
+    AND $3=ANY(pg_blocking_pids(a.pid))`;
+
 /** In-process gate: the FIRST caller to reach `point` parks there until `release()`; later callers pass. Always `dispose()`d. */
 function gate(point: string): {
   reached: Promise<void>;
@@ -157,20 +171,55 @@ suite("A5.2 P1: simultaneous workers, one durable invocation", () => {
         if (!first) throw new Error("pools");
         results.push(run(first, r));
         await within(g.reached, 30000, "first reservation inserted");
-        // the others queue BEHIND the uncommitted reservation insert: PostgreSQL itself reports the waits
+        const holding = await pe.env.owner.query<{ pid: number }>(
+          D_HOLDER_SQL,
+          [pe.env.name, "p1d0"],
+        );
+        expect(holding.rowCount).toBe(1);
+        const holderPid = holding.rows[0]?.pid;
+        if (holderPid === undefined)
+          throw new Error("expected D holder missing");
+        expect(await reservationRows(r.provider_call_id)).toBe(0);
+        const expectedWaiters = rest.map((_p, i) => `p1d${String(i + 1)}`);
+        // D installation arbitration queues behind the uncommitted creator before uniqueness checks.
         for (const p of rest)
           results.push(run(p, { ...r, provider_call_id: randomUUID() }));
-        const waiting = await waitForBlocked(
-          pe.env.owner,
-          pe.env.name,
-          (w) =>
-            w.filter(
-              (x) =>
-                x.locktype === "transactionid" &&
-                x.application_name.startsWith("p1d"),
-            ).length >= rest.length,
+        const waiting = await waitForBlocked(pe.env.owner, pe.env.name, (w) =>
+          expectedWaiters.every(
+            (name) =>
+              w.filter(
+                (x) =>
+                  x.application_name === name &&
+                  x.state === "active" &&
+                  x.wait_event_type === "Lock" &&
+                  x.wait_event === "advisory" &&
+                  x.locktype === "advisory" &&
+                  x.mode === "ExclusiveLock" &&
+                  x.classid === 182736456 &&
+                  x.objid === 1 &&
+                  x.blockers.includes(holderPid),
+              ).length === 1,
+          ),
         );
         expect(waiting.length).toBeGreaterThanOrEqual(rest.length);
+        // pg-wait remains unchanged; this independent read also requires objsubid=2 and the exact database OID.
+        const exact = await pe.env.owner.query<{
+          pid: number;
+          application_name: string;
+          blockers: number[];
+        }>(D_WAITER_SQL, [pe.env.name, expectedWaiters, holderPid]);
+        expect(exact.rowCount).toBe(expectedWaiters.length);
+        expect(new Set(exact.rows.map((row) => row.pid)).size).toBe(
+          expectedWaiters.length,
+        );
+        for (const name of expectedWaiters) {
+          const found = exact.rows.filter(
+            (row) => row.application_name === name,
+          );
+          expect(found).toHaveLength(1);
+          expect(found[0]?.blockers).toContain(holderPid);
+          expect(found[0]?.pid).toBeGreaterThan(0);
+        }
         g.release();
         const done = await within(Promise.all(results), 30000, "workers");
         expect(statuses(done).filter((s) => s === "performed")).toHaveLength(1);
@@ -216,17 +265,52 @@ suite("A5.2 P1: simultaneous workers, one durable invocation", () => {
         if (!first) throw new Error("pools");
         results.push(run(first, r));
         await within(g.reached, 30000, "first reservation inserted");
-        for (const p of rest) results.push(run(p, r));
-        await waitForBlocked(
-          pe.env.owner,
-          pe.env.name,
-          (w) =>
-            w.filter(
-              (x) =>
-                x.locktype === "transactionid" &&
-                x.application_name.startsWith("p1s"),
-            ).length >= rest.length,
+        const holding = await pe.env.owner.query<{ pid: number }>(
+          D_HOLDER_SQL,
+          [pe.env.name, "p1s0"],
         );
+        expect(holding.rowCount).toBe(1);
+        const holderPid = holding.rows[0]?.pid;
+        if (holderPid === undefined)
+          throw new Error("expected D holder missing");
+        expect(await reservationRows(r.provider_call_id)).toBe(0);
+        const expectedWaiters = rest.map((_p, i) => `p1s${String(i + 1)}`);
+        for (const p of rest) results.push(run(p, r));
+        await waitForBlocked(pe.env.owner, pe.env.name, (w) =>
+          expectedWaiters.every(
+            (name) =>
+              w.filter(
+                (x) =>
+                  x.application_name === name &&
+                  x.state === "active" &&
+                  x.wait_event_type === "Lock" &&
+                  x.wait_event === "advisory" &&
+                  x.locktype === "advisory" &&
+                  x.mode === "ExclusiveLock" &&
+                  x.classid === 182736456 &&
+                  x.objid === 1 &&
+                  x.blockers.includes(holderPid),
+              ).length === 1,
+          ),
+        );
+        // pg-wait remains unchanged; this independent read also requires objsubid=2 and the exact database OID.
+        const exact = await pe.env.owner.query<{
+          pid: number;
+          application_name: string;
+          blockers: number[];
+        }>(D_WAITER_SQL, [pe.env.name, expectedWaiters, holderPid]);
+        expect(exact.rowCount).toBe(expectedWaiters.length);
+        expect(new Set(exact.rows.map((row) => row.pid)).size).toBe(
+          expectedWaiters.length,
+        );
+        for (const name of expectedWaiters) {
+          const found = exact.rows.filter(
+            (row) => row.application_name === name,
+          );
+          expect(found).toHaveLength(1);
+          expect(found[0]?.blockers).toContain(holderPid);
+          expect(found[0]?.pid).toBeGreaterThan(0);
+        }
         g.release();
         const done = await within(Promise.all(results), 30000, "workers");
         expect(statuses(done).filter((s) => s === "performed")).toHaveLength(1);
@@ -586,20 +670,46 @@ suite(
                 async () =>
                   (
                     await pe.rows(
-                      "SELECT 1 FROM pg_stat_activity WHERE application_name = 'a5child_p5' AND state = 'idle in transaction' AND backend_xid IS NOT NULL",
+                      "SELECT 1 FROM pg_stat_activity WHERE datname = $1 AND application_name = 'a5child_p5' AND state = 'idle in transaction' AND backend_xid IS NOT NULL",
+                      [pe.env.name],
                     )
                   ).length === 1,
                 "child holds an uncommitted reservation",
               );
               expect(await reservationRows(r.provider_call_id)).toBe(0);
+              const holding = await pe.env.owner.query<{ pid: number }>(
+                D_HOLDER_SQL,
+                [pe.env.name, "a5child_p5"],
+              );
+              expect(holding.rowCount).toBe(1);
+              const holderPid = holding.rows[0]?.pid;
+              if (holderPid === undefined)
+                throw new Error("expected D child holder missing");
               queued = run(p, rival);
               await waitForBlocked(pe.env.owner, pe.env.name, (w) =>
                 w.some(
                   (x) =>
                     x.application_name === "p5w" &&
-                    x.locktype === "transactionid",
+                    x.state === "active" &&
+                    x.wait_event_type === "Lock" &&
+                    x.wait_event === "advisory" &&
+                    x.locktype === "advisory" &&
+                    x.mode === "ExclusiveLock" &&
+                    x.classid === 182736456 &&
+                    x.objid === 1 &&
+                    x.blockers.includes(holderPid),
                 ),
               );
+              const waiting = await pe.env.owner.query<{
+                pid: number;
+                application_name: string;
+                blockers: number[];
+              }>(D_WAITER_SQL, [pe.env.name, ["p5w"], holderPid]);
+              expect(waiting.rowCount).toBe(1);
+              expect(waiting.rows[0]?.application_name).toBe("p5w");
+              expect(waiting.rows[0]?.blockers).toContain(holderPid);
+              expect(waiting.rows[0]?.pid).not.toBe(holderPid);
+              expect(waiting.rows[0]?.pid).toBeGreaterThan(0);
               expect(await count(r)).toBe(0);
             },
           );

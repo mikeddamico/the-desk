@@ -45,6 +45,29 @@ describe("projectEvent: a flat projection of validated values", () => {
     duration_ms: 3.4,
   };
 
+  it("certified reconcile reasons remain closed safe diagnostics; arbitrary canary reason is omitted", () => {
+    for (const reason of [
+      "provider_sim_receipt_invalid",
+      "provider_sim_receipt_unattributed",
+      "provider_sim_receipt_binding_invalid",
+    ] as const) {
+      const event = projectEvent({
+        event: "workflow.completed",
+        workflow: "provider_call.reconcile",
+        stage: "standalone",
+        correlation_id: randomUUID(),
+        reconcile_reason: reason,
+        detail: "RECONCILE_PROTECTED_CANARY",
+        result: { body: "RECONCILE_PROTECTED_CANARY" },
+      });
+      expect(event.reconcile_reason).toBe(reason);
+      expect(JSON.stringify(event)).not.toContain("CANARY");
+    }
+    expect(
+      projectEvent({ ...base, reconcile_reason: "RECONCILE_PROTECTED_CANARY" }),
+    ).not.toHaveProperty("reconcile_reason");
+  });
+
   it("picks keys only: bodies, details, usage, messages and unknown keys never appear", () => {
     const e = projectEvent({
       ...base,

@@ -2,6 +2,7 @@ import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { bounded } from "./a5-crash.js";
 import type { AuthoredReservation } from "../../src/runtime/provider.js";
+import type { Invocation } from "../../src/runtime/provider-admission.js";
 
 export interface G1ChildSpec {
   runtimeUrl: string;
@@ -11,6 +12,11 @@ export interface G1ChildSpec {
   fault?: string;
   neverReturn?: boolean;
   timeoutMs?: number;
+  simulation?: {
+    invocation: Invocation;
+    holdAfterInvocation?: boolean;
+    reconcile?: boolean;
+  };
 }
 
 export function g1Child(spec: G1ChildSpec) {

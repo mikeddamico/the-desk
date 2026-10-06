@@ -236,11 +236,31 @@ suite("Fixture v0.4.6 load (A2)", () => {
     ).rows as { table_name: string; cols: string[]; j: string[] | null }[];
     for (const f of families) {
       const row = cols.find((c) => c.table_name === f.table);
+      // Exact dependent-contract UNION, never a subset check or an edit to frozen families/fixture bytes.
+      const addedColumns =
+        f.table === "provider_calls"
+          ? [
+              "admitted_at",
+              "reserved_cost_upper_bound",
+              "admission_currency",
+              "admission_policy_hash",
+              "admission_certificate",
+              "admission_certificate_hash",
+            ]
+          : f.table === "provider_call_events"
+            ? ["recorded_at", "admission_settlement"]
+            : [];
+      const addedJsonb =
+        f.table === "provider_calls"
+          ? ["admission_certificate"]
+          : f.table === "provider_call_events"
+            ? ["admission_settlement"]
+            : [];
       expect([...(row?.cols ?? [])].sort(), f.table).toEqual(
-        [...f.columns].sort(),
+        [...f.columns, ...addedColumns].sort(),
       );
       expect([...(row?.j ?? [])].sort(), `${f.table} jsonb`).toEqual(
-        [...f.jsonb].sort(),
+        [...f.jsonb, ...addedJsonb].sort(),
       );
     }
   }, 60000);
