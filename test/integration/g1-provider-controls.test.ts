@@ -26,6 +26,20 @@ import { Rejection } from "../../src/runtime/command.js";
 const url = process.env.TEST_DATABASE_URL;
 const suite = url ? describe : describe.skip;
 const hook = Symbol.for("the-desk.a5.test-fault-hook");
+// D's exact two-int installation arbitration key; test observation only, no lock acquisition.
+const D_HOLDER_SQL = `SELECT a.pid FROM pg_stat_activity a JOIN pg_locks l USING(pid)
+  WHERE a.datname=$1 AND a.application_name=$2 AND a.state='idle in transaction'
+    AND a.backend_xid IS NOT NULL AND a.xact_start IS NOT NULL
+    AND l.database=a.datid AND l.granted AND l.locktype='advisory'
+    AND l.mode='ExclusiveLock' AND l.classid=182736456 AND l.objid=1 AND l.objsubid=2`;
+const D_WAITER_SQL = `SELECT a.pid,a.application_name,pg_blocking_pids(a.pid) AS blockers
+  FROM pg_stat_activity a JOIN pg_locks l USING(pid)
+  WHERE a.datname=$1 AND a.application_name=ANY($2::text[]) AND a.pid<>$3
+    AND a.state='active' AND a.wait_event_type='Lock' AND a.wait_event='advisory'
+    AND l.database=a.datid AND NOT l.granted AND l.locktype='advisory'
+    AND l.mode='ExclusiveLock' AND l.classid=182736456 AND l.objid=1 AND l.objsubid=2
+    AND $3=ANY(pg_blocking_pids(a.pid))`;
+
 afterEach(() => {
   Reflect.deleteProperty(globalThis, hook);
   delete process.env.DESK_TEST_FAULTS;
@@ -1329,21 +1343,31 @@ suite("G1-A real PostgreSQL controlled non-network execution", () => {
   );
 
   it.each(["winner_commit", "winner_rollback"])(
-    "two real children observe PG uniqueness blocking and %s",
+    "two real children observe exact D installation arbitration and %s",
     async (kind) => {
       await scenario(async (pe) => {
         const request = reservation(pe.attempt);
         const protectedBefore = await snapshot(pe.env.owner, false);
+        const holderTag = `g1_holder_${randomUUID().slice(0, 8)}`;
         const holder = g1Child({
           runtimeUrl: pe.env.runtimeUrl,
           ownerUrl: pe.ownerUrl,
           reservation: request,
-          tag: `g1_holder_${randomUUID().slice(0, 8)}`,
+          tag: holderTag,
           fault: "reservation_inserted_uncommitted",
         });
         let waiter: ReturnType<typeof g1Child> | undefined;
         try {
           await holder.held();
+          const holding = await pe.env.owner.query<{ pid: number }>(
+            D_HOLDER_SQL,
+            [pe.env.name, holderTag],
+          );
+          expect(holding.rowCount).toBe(1);
+          const holderPid = holding.rows[0]?.pid;
+          if (holderPid === undefined)
+            throw new Error("expected D holder missing");
+          expect(await pe.providerCalls()).toBe(0); // The holder's inserted row is not yet committed.
           const tag = `g1_waiter_${randomUUID().slice(0, 8)}`;
           waiter = g1Child({
             runtimeUrl: pe.env.runtimeUrl,
@@ -1354,13 +1378,25 @@ suite("G1-A real PostgreSQL controlled non-network execution", () => {
           await observe(
             async () =>
               (
-                await pe.env.owner.query(
-                  "SELECT 1 FROM pg_locks l JOIN pg_stat_activity a USING(pid) WHERE a.application_name=$1 AND NOT l.granted AND l.locktype='transactionid'",
+                await pe.env.owner.query(D_WAITER_SQL, [
+                  pe.env.name,
                   [tag],
-                )
+                  holderPid,
+                ])
               ).rowCount === 1,
-            "G1 child PostgreSQL uniqueness blocking",
+            "G1 child exact D installation arbitration behind the named uncommitted holder",
           );
+          const waiting = await pe.env.owner.query<{
+            pid: number;
+            application_name: string;
+            blockers: number[];
+          }>(D_WAITER_SQL, [pe.env.name, [tag], holderPid]);
+          expect(waiting.rowCount).toBe(1);
+          expect(waiting.rows[0]?.application_name).toBe(tag);
+          expect(waiting.rows[0]?.blockers).toContain(holderPid);
+          expect(waiting.rows[0]?.pid).not.toBe(holderPid);
+          expect(waiting.rows[0]?.pid).toBeGreaterThan(0);
+
           if (kind === "winner_rollback") {
             const killed = await holder.kill();
             expect(killed).toMatchObject({ code: null, signal: "SIGKILL" });

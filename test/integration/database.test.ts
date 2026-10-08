@@ -1237,7 +1237,7 @@ suite("PostgreSQL 17 foundation under effective capability roles", () => {
       ))
         await copyFile(join("migrations", name), join(dir, name));
       await writeFile(
-        join(dir, "003_privilege_probe.sql"),
+        join(dir, "999_privilege_probe.sql"),
         "CREATE TABLE privilege_probe(id uuid PRIMARY KEY);\n",
       );
       await migrate(migrator, dir);
@@ -1259,7 +1259,7 @@ suite("PostgreSQL 17 foundation under effective capability roles", () => {
     } finally {
       await migrator.query("DROP TABLE IF EXISTS privilege_probe");
       await migrator.query(
-        "DELETE FROM desk_internal.schema_migrations WHERE migration_name='003_privilege_probe.sql'",
+        "DELETE FROM desk_internal.schema_migrations WHERE migration_name='999_privilege_probe.sql'",
       );
       await rm(dir, { recursive: true, force: true });
     }

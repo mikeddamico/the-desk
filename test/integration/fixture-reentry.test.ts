@@ -1,10 +1,31 @@
 import { createHash, randomUUID } from "node:crypto";
+import { copyFile, mkdtemp, readFile, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 import type pg from "pg";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 
 import { createMigrationPool, createRuntimePool } from "../../src/db/pool.js";
-import { allTables } from "../../src/fixture/families.js";
+import { migrate, verifyMigrationIntegrity } from "../../src/db/migrations.js";
+import { allTables, families } from "../../src/fixture/families.js";
+import { seedPrerequisites, attemptIds } from "../support/a5-fixture.js";
+import {
+  simulationPolicy,
+  simulationRequest,
+  invocationObservation,
+  receiptPacket,
+} from "../support/g1-provider-admission-receipt.js";
+import {
+  buildCertificate,
+  certificateHash,
+  policyHash,
+  requestHash,
+  invocationHash,
+  projectReceipt,
+  type FinalReceipt,
+} from "../../src/runtime/provider-admission.js";
+import type { AuthoredReservation } from "../../src/runtime/provider.js";
 import {
   FixtureTargetNotEmptyError,
   persistFixture,
@@ -64,6 +85,58 @@ const digest = async (pool: pg.Pool): Promise<string> => {
     );
   return hash.digest("hex");
 };
+const callMetadata = [
+  "admitted_at",
+  "reserved_cost_upper_bound",
+  "admission_currency",
+  "admission_policy_hash",
+  "admission_certificate",
+  "admission_certificate_hash",
+];
+const eventMetadata = ["recorded_at", "admission_settlement"];
+const historicalDigest = async (pool: pg.Pool): Promise<string> => {
+  const hash = createHash("sha256");
+  for (const table of allTables) {
+    const omitted =
+      table === "provider_calls"
+        ? callMetadata
+        : table === "provider_call_events"
+          ? eventMetadata
+          : [];
+    hash.update(
+      JSON.stringify(
+        (
+          await pool.query(
+            `SELECT (to_jsonb(x)-$1::text[])::text AS value,xmin::text,ctid::text FROM "${table}" x ORDER BY 1`,
+            [omitted],
+          )
+        ).rows,
+      ),
+    );
+  }
+  return hash.digest("hex");
+};
+interface MigrationLedgerRow {
+  migration_name: string;
+  checksum: string;
+  applied_at: string;
+  xmin: string;
+  ctid: string;
+}
+async function assertBothMetadataNull(db: DbEnv): Promise<void> {
+  for (const [table, columns] of [
+    ["provider_calls", callMetadata],
+    ["provider_call_events", eventMetadata],
+  ] as const) {
+    const row = (
+      await db.runtime.query<{ total: number; absent: number }>(
+        `SELECT count(*)::int AS total,count(*) FILTER(WHERE num_nonnulls(${columns.join(",")})=0)::int AS absent FROM ${table}`,
+      )
+    ).rows[0];
+    expect(row?.total).toBeGreaterThan(0);
+    expect(row?.absent).toBe(row?.total);
+  }
+}
 const mutate = async (db: DbEnv, sql: string): Promise<void> => {
   const c = await db.owner.connect();
   try {
@@ -92,6 +165,293 @@ suite("complete pinned fixture re-entry (local G5 candidate only)", () => {
   afterEach(async () => {
     for (const db of openDbs.splice(0)) await db.close();
   }, 60000);
+
+  it("fresh003 complete398 keeps ALL six call/two event metadata NULL and exact no-write reuse", async () => {
+    const db = await fresh();
+    expect((await ensure(db)).rows).toBe(398);
+    await assertBothMetadataNull(db);
+    expect((await counts(db.owner)).reduce((a, b) => a + b, 0)).toBe(398);
+    const before = await digest(db.owner);
+    expect((await ensure(db)).outcome).toBe("reused");
+    expect(await verifyCompletePinnedFixture(db.runtime)).toEqual({
+      rows: 398,
+      families: 40,
+    });
+    expect(await digest(db.owner)).toBe(before);
+  }, 60000);
+  it("003 on retained001+002 complete398 preserves historical values/xmin/ctid, eight NULL fields and immutable checksum/order", async () => {
+    if (!cluster) throw new Error("test database required");
+    const directory = await mkdtemp(
+      join(tmpdir(), "desk-g1-b-retained-migrations-"),
+    );
+    try {
+      for (const name of ["001_foundation.sql", "002_persistence_profile.sql"])
+        await copyFile(join("migrations", name), join(directory, name));
+      const db = await cluster.create({
+        migrate: true,
+        migrationsDirectory: directory,
+      });
+      openDbs.push(db);
+      expect(
+        (
+          await persistFixture(db.migrator, openFixturePack(), {
+            migrationsDirectory: directory,
+          })
+        ).rows,
+      ).toBe(398);
+      const before = await historicalDigest(db.owner),
+        oldLedger = (
+          await db.owner.query<MigrationLedgerRow>(
+            "SELECT migration_name,checksum,applied_at::text,xmin::text,ctid::text FROM desk_internal.schema_migrations ORDER BY migration_name",
+          )
+        ).rows;
+      expect(oldLedger.map((row) => row.migration_name)).toEqual([
+        "001_foundation.sql",
+        "002_persistence_profile.sql",
+      ]);
+      await migrate(db.migrator);
+      await assertBothMetadataNull(db);
+      expect(await historicalDigest(db.owner)).toBe(before);
+      const ledger = (
+        await db.owner.query<MigrationLedgerRow>(
+          "SELECT migration_name,checksum,applied_at::text,xmin::text,ctid::text FROM desk_internal.schema_migrations ORDER BY migration_name",
+        )
+      ).rows;
+      expect(ledger.slice(0, 2)).toEqual(oldLedger);
+      expect(ledger.map((row) => row.migration_name)).toEqual([
+        "001_foundation.sql",
+        "002_persistence_profile.sql",
+        "003_provider_admission.sql",
+      ]);
+      expect(ledger[2]?.checksum).toBe(
+        createHash("sha256")
+          .update(await readFile("migrations/003_provider_admission.sql"))
+          .digest("hex"),
+      );
+      const complete = await digest(db.owner);
+      await migrate(db.migrator);
+      await verifyMigrationIntegrity(db.migrator);
+      expect(
+        (
+          await db.owner.query(
+            "SELECT migration_name,checksum,applied_at::text,xmin::text,ctid::text FROM desk_internal.schema_migrations ORDER BY migration_name",
+          )
+        ).rows,
+      ).toEqual(ledger);
+      expect((await ensure(db)).outcome).toBe("reused");
+      expect(await verifyCompletePinnedFixture(db.runtime)).toEqual({
+        rows: 398,
+        families: 40,
+      });
+      expect(await digest(db.owner)).toBe(complete);
+      expect((await counts(db.owner)).reduce((a, b) => a + b, 0)).toBe(398);
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  }, 120000);
+  it.each([
+    {
+      table: "provider_calls",
+      column: "admitted_at",
+      value: "'2026-10-06T00:00:00.000001Z'::timestamptz",
+    },
+    {
+      table: "provider_calls",
+      column: "reserved_cost_upper_bound",
+      value: "0.03",
+    },
+    { table: "provider_calls", column: "admission_currency", value: "'USD'" },
+    {
+      table: "provider_calls",
+      column: "admission_policy_hash",
+      value: "repeat('a',64)",
+    },
+    {
+      table: "provider_calls",
+      column: "admission_certificate",
+      value: '\'{"canary":"G1_B_FIXTURE_METADATA_CANARY"}\'::jsonb',
+    },
+    {
+      table: "provider_calls",
+      column: "admission_certificate_hash",
+      value: "repeat('b',64)",
+    },
+    {
+      table: "provider_call_events",
+      column: "recorded_at",
+      value: "'2026-10-06T00:00:00.000001Z'::timestamptz",
+    },
+    {
+      table: "provider_call_events",
+      column: "admission_settlement",
+      value: '\'{"canary":"G1_B_FIXTURE_METADATA_CANARY"}\'::jsonb',
+    },
+  ])(
+    "exact398 with guards ACTIVE refuses isolated $table.$column INSERT; no metadata readback credit",
+    async ({ table, column, value }) => {
+      const db = await fresh();
+      await ensure(db);
+      await assertBothMetadataNull(db);
+      const before = await digest(db.owner);
+      expect((await counts(db.owner)).reduce((a, b) => a + b, 0)).toBe(398);
+      expect(
+        (
+          await db.runtime.query<{ session_replication_role: string }>(
+            "SHOW session_replication_role",
+          )
+        ).rows[0]?.session_replication_role,
+      ).toBe("origin");
+      const fixture = VerifiedFixture.fromPack(openFixturePack()),
+        row = fixture.rows.tables[table]?.[0],
+        family = families.find((f) => f.table === table);
+      if (!row || !family) throw new Error("fixture row missing");
+      const cols = family.columns;
+      const sql = `INSERT INTO ${table} (${[...cols, column].join(",")}) VALUES(${cols.map((_, i) => "$" + String(i + 1)).join(",")},${value})`;
+      const values = cols.map((key) =>
+        family.jsonb.includes(key) && row[key] !== null
+          ? JSON.stringify(row[key])
+          : row[key],
+      );
+      await expect(db.runtime.query(sql, values)).rejects.toMatchObject({
+        code: "23514",
+        constraint:
+          column === "admitted_at"
+            ? "provider_admission_clock_reversed"
+            : "provider_admission_certificate_invalid",
+      });
+      await assertBothMetadataNull(db);
+      expect((await ensure(db)).outcome).toBe("reused");
+      expect(await verifyCompletePinnedFixture(db.runtime)).toEqual({
+        rows: 398,
+        families: 40,
+      });
+      expect(await digest(db.owner)).toBe(before);
+    },
+    60000,
+  );
+  it.each([false, true])(
+    "valid guarded partial envelope, coupled six CALL fields + event=%s, refuses fixture reuse without repair",
+    async (withEvent) => {
+      // This is a structural partial setup, NOT an otherwise-exact398 fixture or production stage execution.
+      const db = await fresh();
+      await seedPrerequisites(db.migrator);
+      const policy = simulationPolicy(),
+        request = simulationRequest(),
+        attempt = attemptIds()[0];
+      if (!attempt) throw new Error("attempt missing");
+      const run = (
+        await db.runtime.query<{ id: string }>(
+          "SELECT program_run_id::text AS id FROM program_run_attempts WHERE attempt_id=$1",
+          [attempt],
+        )
+      ).rows[0]?.id;
+      if (typeof run !== "string")
+        throw new Error("expected actual attempt run identity");
+      const authored: AuthoredReservation = {
+        provider_call_id: randomUUID(),
+        attempt_id: attempt,
+        provider: "g1-simulator",
+        operation: "g1_sim_text",
+        model_identifier: "bytes-v1",
+        request_fingerprint: requestHash(request),
+        logical_request_key: "fixture-envelope:" + randomUUID(),
+        operational_try_number: 1,
+        intentional_take_index: null,
+        retry_of_provider_call_id: null,
+        reroll_of_provider_call_id: null,
+        reroll_trigger_id: null,
+        started_at: "2026-10-06T00:00:00.000001Z",
+      };
+      const cert = buildCertificate(authored, run, policy, request),
+        row = {
+          ...authored,
+          reserved_cost_upper_bound: cert.reserved_cost_upper_bound,
+          admission_currency: cert.currency,
+          admission_policy_hash: policyHash(policy),
+          admission_certificate: cert,
+          admission_certificate_hash: certificateHash(cert),
+        };
+      const cols = Object.keys(row);
+      await db.runtime.query(
+        `INSERT INTO provider_calls(${cols.join(",")}) VALUES(${cols.map((_, i) => "$" + String(i + 1)).join(",")})`,
+        Object.values(row).map((v) =>
+          typeof v === "object" && v !== null ? JSON.stringify(v) : v,
+        ),
+      );
+      expect(
+        (
+          await db.runtime.query<{ present: number }>(
+            `SELECT num_nonnulls(${callMetadata.join(",")}) AS present FROM provider_calls`,
+          )
+        ).rows[0]?.present,
+      ).toBe(6);
+      if (withEvent) {
+        const io = invocationObservation(cert, request),
+          fr: FinalReceipt = {
+            schema: "g1-sim-final-receipt/1",
+            receipt_id: randomUUID(),
+            kind: "final_accounting",
+            invocation_observation_hash: invocationHash(io),
+            attribution: io.attribution,
+            consumption: io.consumption,
+            work_ended: true,
+            observed_output_bytes: 1,
+            price_status: "known_final",
+            event: {
+              provider_call_id: cert.provider_call_id,
+              event_type: "succeeded",
+              ended_at: "2026-10-06T00:00:01.000001Z",
+              usage: { input_bytes: 2, output_bytes: 1 },
+              actual_cost: "0.02",
+              currency: "USD",
+              response_artifact_id: null,
+              response_reference: null,
+            },
+          };
+        const projection = projectReceipt(receiptPacket(io, fr), cert);
+        await db.runtime.query(
+          "INSERT INTO provider_call_events(provider_call_id,event_type,ended_at,usage,actual_cost,currency,admission_settlement) VALUES($1,'succeeded',$2,$3,$4,'USD',$5)",
+          [
+            cert.provider_call_id,
+            fr.event.ended_at,
+            JSON.stringify(fr.event.usage),
+            fr.event.actual_cost,
+            JSON.stringify(projection.settlement),
+          ],
+        );
+        expect(
+          (
+            await db.runtime.query<{ present: number }>(
+              `SELECT num_nonnulls(${eventMetadata.join(",")}) AS present FROM provider_call_events`,
+            )
+          ).rows[0]?.present,
+        ).toBe(2);
+      }
+      expect(
+        (
+          await db.runtime.query<{ session_replication_role: string }>(
+            "SHOW session_replication_role",
+          )
+        ).rows[0]?.session_replication_role,
+      ).toBe("origin");
+      const before = await digest(db.owner);
+      // A certified event necessarily has its coupled certified parent; call metadata is correctly the first refusal.
+      for (let retry = 0; retry < 2; retry++) {
+        await expect(ensure(db)).rejects.toMatchObject({
+          code: "complete_fixture_mismatch",
+          message: "complete_fixture_mismatch: provider_calls",
+        });
+        await expect(
+          verifyCompletePinnedFixture(db.runtime),
+        ).rejects.toMatchObject({
+          code: "complete_fixture_mismatch",
+          message: "complete_fixture_mismatch: provider_calls",
+        });
+        expect(await digest(db.owner)).toBe(before);
+      }
+    },
+    60000,
+  );
 
   it("fresh398; committed runtime snapshot; identical twice means no writes; old empty-only loader remains the negative control", async () => {
     const db = await fresh();

@@ -55,6 +55,7 @@ interface Env {
 const created: Env[] = [];
 let counter = 0;
 let only001 = "";
+let only001002 = "";
 const logins = {
   migrator: `m002_${run}_migrator`,
   runtime: `m002_${run}_runtime`,
@@ -313,6 +314,10 @@ suite("Migration 002 persistence profile on disposable PostgreSQL 17", () => {
       "migrations/001_foundation.sql",
       join(only001, "001_foundation.sql"),
     );
+    // Pin this historical acceptance suite to exact 001+002 bytes; the 003 suite retains default discovery.
+    only001002 = await mkdtemp(join(tmpdir(), "desk-m002-001002-"));
+    for (const name of ["001_foundation.sql", "002_persistence_profile.sql"])
+      await copyFile(join("migrations", name), join(only001002, name));
     // Bootstrap cluster-wide capability roles and per-run LOGIN wrappers once.
     const boot = await createEnv();
     for (const [capability, login] of Object.entries(logins)) {
@@ -324,12 +329,13 @@ suite("Migration 002 persistence profile on disposable PostgreSQL 17", () => {
     await boot.close();
     created.splice(created.indexOf(boot), 1);
     ready = await createEnv();
-    await migrate(ready.migrator);
+    await migrate(ready.migrator, only001002);
   }, 60000);
 
   afterAll(async () => {
     for (const env of created) await env.close().catch(() => undefined);
     await rm(only001, { recursive: true, force: true });
+    await rm(only001002, { recursive: true, force: true });
     for (const login of Object.values(logins))
       await admin.query(`DROP ROLE IF EXISTS ${login}`);
     await admin.end();
@@ -348,12 +354,14 @@ suite("Migration 002 persistence profile on disposable PostgreSQL 17", () => {
             .update(await readFile(join("migrations", row.migration_name)))
             .digest("hex"),
         );
-      await expect(migrate(ready.migrator)).resolves.toBeUndefined();
       await expect(
-        verifyMigrationIntegrity(ready.migrator),
+        migrate(ready.migrator, only001002),
+      ).resolves.toBeUndefined();
+      await expect(
+        verifyMigrationIntegrity(ready.migrator, only001002),
       ).resolves.toBeUndefined();
       expect(await ledger(ready)).toEqual(rows);
-      await expect(migrate(ready.owner)).rejects.toThrow(
+      await expect(migrate(ready.owner, only001002)).rejects.toThrow(
         /effective desk_migrator/,
       );
     });
@@ -384,14 +392,16 @@ suite("Migration 002 persistence profile on disposable PostgreSQL 17", () => {
         expect(before.map((row) => row.migration_name)).toEqual([
           "001_foundation.sql",
         ]);
-        await migrate(env.migrator);
+        await migrate(env.migrator, only001002);
         const after = await ledger(env);
         expect(after).toHaveLength(2);
         expect(after[0]).toEqual(before[0]);
         expect(after[1]?.applied_at.getTime()).toBeGreaterThanOrEqual(
           before[0]?.applied_at.getTime() ?? 0,
         );
-        await expect(migrate(env.migrator)).resolves.toBeUndefined();
+        await expect(
+          migrate(env.migrator, only001002),
+        ).resolves.toBeUndefined();
         expect(await ledger(env)).toEqual(after);
       });
     }, 60000);
@@ -400,7 +410,7 @@ suite("Migration 002 persistence profile on disposable PostgreSQL 17", () => {
       await useEnv(async (env) => {
         await migrate001(env);
         const before = await snapshot(env);
-        await migrate(env.migrator);
+        await migrate(env.migrator, only001002);
         const after = await snapshot(env);
         expect(after.relations).toEqual(before.relations);
         expect(after.privileges).toEqual(before.privileges);
@@ -571,7 +581,7 @@ suite("Migration 002 persistence profile on disposable PostgreSQL 17", () => {
           await migrate001(env);
           await seedBare(env, protectedSeeds[table] ?? "");
           const legacy = await snapshot(env);
-          await expect(migrate(env.migrator)).rejects.toThrow(
+          await expect(migrate(env.migrator, only001002)).rejects.toThrow(
             new RegExp(`requires empty protected table ${table}`),
           );
           expect((await ledger(env)).map((row) => row.migration_name)).toEqual([
@@ -609,7 +619,9 @@ suite("Migration 002 persistence profile on disposable PostgreSQL 17", () => {
         await env.owner.query(
           "INSERT INTO voice_profile_versions(voice_profile_id, version, render_fields) SELECT voice_profile_id, 1, '{}' FROM voice_profiles",
         );
-        await expect(migrate(env.migrator)).resolves.toBeUndefined();
+        await expect(
+          migrate(env.migrator, only001002),
+        ).resolves.toBeUndefined();
         expect(await ledger(env)).toHaveLength(2);
       });
     }, 60000);
@@ -621,7 +633,7 @@ suite("Migration 002 persistence profile on disposable PostgreSQL 17", () => {
         try {
           await writer.query("BEGIN");
           await writer.query(protectedSeeds.claims ?? "");
-          const pending = migrate(env.migrator).then(
+          const pending = migrate(env.migrator, only001002).then(
             () => "migrated",
             (error: unknown) => (error as Error).message,
           );
@@ -655,7 +667,7 @@ suite("Migration 002 persistence profile on disposable PostgreSQL 17", () => {
         try {
           await writer.query("BEGIN");
           await writer.query(protectedSeeds.claims ?? "");
-          const pending = migrate(env.migrator);
+          const pending = migrate(env.migrator, only001002);
           await sleep(500);
           await writer.query("ROLLBACK");
           await expect(pending).resolves.toBeUndefined();
@@ -672,7 +684,9 @@ suite("Migration 002 persistence profile on disposable PostgreSQL 17", () => {
         await env.migrator.query(
           "ALTER TABLE evidence_units DROP CONSTRAINT evidence_units_content_hash_key",
         );
-        await expect(migrate(env.migrator)).rejects.toThrow(/does not exist/);
+        await expect(migrate(env.migrator, only001002)).rejects.toThrow(
+          /does not exist/,
+        );
         expect(await ledger(env)).toHaveLength(1);
         expect(await columnExists(env, "claims", "initial_status")).toBe(false);
       });
@@ -681,7 +695,9 @@ suite("Migration 002 persistence profile on disposable PostgreSQL 17", () => {
         await env.migrator.query(
           "ALTER TABLE claims ADD COLUMN initial_status text",
         );
-        await expect(migrate(env.migrator)).rejects.toThrow(/already exists/);
+        await expect(migrate(env.migrator, only001002)).rejects.toThrow(
+          /already exists/,
+        );
         expect(await ledger(env)).toHaveLength(1);
         expect(await columnExists(env, "prompt_manifests", "artifact_id")).toBe(
           false,
@@ -693,7 +709,9 @@ suite("Migration 002 persistence profile on disposable PostgreSQL 17", () => {
       await useEnv(
         async (env) => {
           await migrate001(env);
-          await expect(migrate(env.migrator)).rejects.toThrow(/UTF8/);
+          await expect(migrate(env.migrator, only001002)).rejects.toThrow(
+            /UTF8/,
+          );
           expect(await ledger(env)).toHaveLength(1);
         },
         { encoding: "SQL_ASCII" },

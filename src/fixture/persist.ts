@@ -1,5 +1,5 @@
 // Transactional persistence of the verified Fixture v0.4.6 load (D1: the existing migration pool / setup role).
-// One connection, one transaction: migration advisory lock -> migration ledger -> table locks (fixed order) -> emptiness ->
+// One connection, one transaction: migration lock -> installation lock -> migration ledger -> fixed table locks -> emptiness ->
 // dependency-ordered inserts -> read-back of the persisted rows -> COMMIT. Any failure rolls everything back.
 import type { Pool, PoolClient } from "pg";
 
@@ -53,6 +53,27 @@ async function exactFixtureChecks(
   fixture: VerifiedFixture,
 ): Promise<void> {
   fixture.assertUnchanged();
+  // The frozen fixture includes no certified-admission metadata. Check BOTH tables independently,
+  // including their server-time additions; ordinary shipped-column comparison alone would omit these.
+  for (const [table, columns] of [
+    [
+      "provider_calls",
+      [
+        "admitted_at",
+        "reserved_cost_upper_bound",
+        "admission_currency",
+        "admission_policy_hash",
+        "admission_certificate",
+        "admission_certificate_hash",
+      ],
+    ],
+    ["provider_call_events", ["recorded_at", "admission_settlement"]],
+  ] as const) {
+    const result = await db.query(`SELECT 1 FROM public."${table}"
+      WHERE ${columns.map((column) => `"${column}" IS NOT NULL`).join(" OR ")} LIMIT 1`);
+    if (result.rowCount)
+      throw new FixtureReadBackError("complete_fixture_mismatch", table);
+  }
   const bound = new Map<string, Row>();
   for (const attempt of fixture.rows.tables.program_run_attempts ?? [])
     if (!bound.has(String(attempt.program_run_id)))
@@ -586,6 +607,7 @@ async function persistFixtureTransaction(
     false,
     async (client) => {
       await client.query("SELECT pg_advisory_xact_lock(182736451, 1)");
+      await client.query("SELECT pg_advisory_xact_lock(182736456, 1)");
       const who = await client.query<{ current_user: string }>(
         "SELECT current_user",
       );

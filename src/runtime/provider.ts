@@ -1,5 +1,6 @@
-// A5.2 provider-call commands: reservation, outcome, reconciliation and a bounded execute helper over the EXISTING provider_calls /
-// provider_call_events tables and runtime privileges (no migration, no lease table, no new dependency).
+// Provider-call commands over the EXISTING provider_calls / provider_call_events ledger and runtime privileges.
+// Legacy callers retain A5.2 execution semantics. This runtime requires additive migration003;
+// certified non-network simulation uses original-bound admission/settlement metadata, with no lease table or new dependency.
 //
 // SAFETY CONTRACT (supervisory correction to the A5 r2 plan, section 4.5)
 // - ONLY the worker whose own COMMITTED reservation command returned `created` may call `adapter.perform`. A reservation that
@@ -9,7 +10,8 @@
 //   unfinished until a DURABLE outcome is recorded explicitly. This is an intentional AVAILABILITY LIMITATION: if the creating worker
 //   dies before recording an outcome, the logical slot is stuck until an operator-governed decision (outside this tranche) resolves it.
 // - A `perform` that throws or times out is AMBIGUOUS (the provider may have acted). It is never converted into a retryable failure;
-//   only an outcome the adapter RETURNS as governed evidence may be recorded, by the caller's `finish`.
+//   only an outcome the adapter RETURNS as governed evidence may be recorded. Legacy callers use `finish`; certified G1-B
+//   projects an original-bound ReceiptPacket directly to truthful scalar outcome/settlement and NEVER invokes generic finish.
 // - Reconciliation never performs. `performed` requires adapter evidence bound to THIS reservation (logical key, request fingerprint,
 //   provider call id); it may enable an explicit `recordProviderOutcome` of that existing outcome. No lookup, a failed lookup, `unknown`
 //   or `not_performed` leave the reservation safely unfinished.
@@ -18,6 +20,27 @@
 // the SAME value (PostgreSQL numeric equality) while the stored scale is whatever the first writer's text had; a converged retry returns
 // the STORED text. Lexical forms the grammar does not admit (exponent, sign, leading zeros) are rejected, never normalized.
 import type { Pool } from "pg";
+import {
+  ADMISSION_CODES,
+  AdmissionError,
+  admissionBounds,
+  buildCertificate,
+  certificateHash,
+  extractOriginalClaim,
+  decimal,
+  policyHash,
+  projectReceipt,
+  readCertificate,
+  readInvocation,
+  requestHash,
+  type AdmissionCode,
+  type AdmissionRequest,
+  type Certificate,
+  type Invocation,
+  type OriginalClaim,
+  type Settlement,
+} from "./provider-admission.js";
+import { sha256 } from "../identity/canonical-json.js";
 
 import {
   assertJson,
@@ -97,6 +120,13 @@ export interface ReservationRecord {
   reservation: StoredReservation;
   /** The durable outcome of the call, if any. */
   outcome: StoredOutcome | null;
+  /** Present only on the new certified profile; historical reservation/receipt objects retain their shape. */
+  admission?: StoredAdmission;
+}
+export interface StoredAdmission {
+  certificate: Certificate;
+  certificate_hash: string;
+  admitted_at: string;
 }
 
 const RESERVATION_COLUMNS = `c.provider_call_id::text AS provider_call_id, c.attempt_id::text AS attempt_id, c.provider, c.operation,
@@ -105,6 +135,40 @@ const RESERVATION_COLUMNS = `c.provider_call_id::text AS provider_call_id, c.att
   c.reroll_trigger_id::text AS reroll_trigger_id, ${utcText("c.started_at")} AS started_at`;
 const OUTCOME_COLUMNS = `e.provider_call_id::text AS provider_call_id, e.event_type, ${utcText("e.ended_at")} AS ended_at, e.usage,
   e.actual_cost::text AS actual_cost, e.currency, e.response_artifact_id::text AS response_artifact_id, e.response_reference`;
+const ADMISSION_COLUMNS = `${utcText("c.admitted_at")} AS admitted_at,c.reserved_cost_upper_bound::text AS reserved_cost_upper_bound,
+ c.admission_currency,c.admission_policy_hash,c.admission_certificate,c.admission_certificate_hash,
+ (SELECT program_run_id::text FROM program_run_attempts WHERE attempt_id=c.attempt_id) AS certification_run_id`;
+function toAdmission(
+  row: Row,
+  reservation: StoredReservation,
+): { admission: StoredAdmission } | Record<string, never> {
+  if (row.admission_certificate === null) return {};
+  const certificate = readCertificate(
+    row.admission_certificate,
+    reservation,
+    row.certification_run_id as string,
+  );
+  if (
+    certificateHash(certificate) !== row.admission_certificate_hash ||
+    policyHash(certificate.policy) !== row.admission_policy_hash ||
+    certificate.currency !== row.admission_currency ||
+    certificate.reserved_cost_upper_bound !==
+      decimal(
+        row.reserved_cost_upper_bound,
+        "provider_admission_certificate_invalid",
+        true,
+      ) ||
+    typeof row.admitted_at !== "string"
+  )
+    throw new AdmissionError("provider_admission_certificate_invalid");
+  return {
+    admission: Object.freeze({
+      certificate,
+      certificate_hash: row.admission_certificate_hash,
+      admitted_at: row.admitted_at,
+    }),
+  };
+}
 
 const toReservation = (r: Row): StoredReservation => ({
   provider_call_id: r.provider_call_id as string,
@@ -264,6 +328,37 @@ const guessRejection = (error: DbError): Outcome<never> | undefined => {
     };
   return undefined;
 };
+function admissionRejection(
+  error: unknown,
+  localCertifiedTimeoutInstalled = false,
+): Outcome<never> | undefined {
+  try {
+    if (error === null || typeof error !== "object") return undefined;
+    const code: unknown = Object.getOwnPropertyDescriptor(error, "code")?.value;
+    const constraint: unknown = Object.getOwnPropertyDescriptor(
+      error,
+      "constraint",
+    )?.value;
+    if (
+      (code === "23514" || code === "0A000") &&
+      typeof constraint === "string" &&
+      (ADMISSION_CODES as readonly string[]).includes(constraint)
+    )
+      return { kind: "rejected", code: constraint, sqlstate: code };
+    if (
+      localCertifiedTimeoutInstalled &&
+      (code === "55P03" || code === "57014")
+    )
+      return {
+        kind: "rejected",
+        code: "provider_admission_local_timeout",
+        sqlstate: code,
+      };
+  } catch {
+    /* Exotic raw errors remain unknown to this closed classifier. */
+  }
+  return undefined;
+}
 
 // ---- reserveProviderCall -------------------------------------------------------------------------------------------------
 async function readOutcome(
@@ -308,7 +403,7 @@ async function classifyExisting(
   r: AuthoredReservation,
 ): Promise<Outcome<ReservationRecord> | undefined> {
   const byId = await tx.query(
-    `SELECT ${RESERVATION_COLUMNS}, ${FIELD_FLAGS.map(([n, sql]) => `(${sql}) AS same_${n}`).join(", ")}
+    `SELECT ${RESERVATION_COLUMNS}, ${ADMISSION_COLUMNS}, ${FIELD_FLAGS.map(([n, sql]) => `(${sql}) AS same_${n}`).join(", ")}
        FROM provider_calls c WHERE c.provider_call_id = $1::uuid`,
     [
       r.provider_call_id,
@@ -335,6 +430,7 @@ async function classifyExisting(
     const record: ReservationRecord = {
       reservation: stored,
       outcome: await readOutcome(tx, stored.provider_call_id),
+      ...toAdmission(row, stored),
     };
     if (differs.length === 0) return { kind: "converged", record };
     return {
@@ -345,7 +441,7 @@ async function classifyExisting(
     };
   }
   const bySlot = await tx.query(
-    `SELECT ${RESERVATION_COLUMNS} FROM provider_calls c WHERE c.logical_request_key = $1 AND c.operational_try_number = $2::int`,
+    `SELECT ${RESERVATION_COLUMNS}, ${ADMISSION_COLUMNS} FROM provider_calls c WHERE c.logical_request_key = $1 AND c.operational_try_number = $2::int`,
     [r.logical_request_key, r.operational_try_number],
   );
   const other = bySlot.rows[0];
@@ -356,6 +452,7 @@ async function classifyExisting(
       record: {
         reservation: stored,
         outcome: await readOutcome(tx, stored.provider_call_id),
+        ...toAdmission(other, stored),
       },
     };
   }
@@ -391,6 +488,11 @@ async function reserveCore(
   authored: AuthoredReservation,
   context?: CommandContext,
   beforeInsert?: () => string | undefined,
+  certification?: {
+    claim: OriginalClaim;
+    prepare: (tx: Tx) => Promise<Certificate | undefined>;
+    bounds?: { lock: number; statement: number };
+  },
 ): Promise<Outcome<ReservationRecord>> {
   const trace: CommandTrace | undefined = context && {
     context,
@@ -418,16 +520,69 @@ async function reserveCore(
   return runCommand(
     pool,
     async (tx) => {
+      let localCertifiedTimeoutInstalled = false;
+      try {
+        if (certification?.bounds) {
+          await tx.query(
+            "SELECT set_config('lock_timeout',$1,true),set_config('statement_timeout',$2,true)",
+            [
+              String(certification.bounds.lock),
+              String(certification.bounds.statement),
+            ],
+          );
+          localCertifiedTimeoutInstalled = true;
+        }
+        await tx.query("SELECT pg_advisory_xact_lock(182736456,1)");
+      } catch (error) {
+        const refused = admissionRejection(
+          error,
+          localCertifiedTimeoutInstalled,
+        );
+        if (refused) return refused;
+        throw error;
+      }
       const existing = await classifyExisting(tx, r);
-      if (existing) return existing;
+      if (existing) {
+        if (
+          existing.kind !== "conflict" &&
+          certification?.claim.kind === "hash" &&
+          (existing.kind === "converged" ||
+            existing.kind === "held_by_other") &&
+          existing.record.admission?.certificate_hash !==
+            certification.claim.hash
+        )
+          return {
+            kind: "rejected",
+            code: "provider_admission_certificate_conflict",
+          };
+        return existing;
+      }
+      if (certification?.claim.kind === "hash")
+        return {
+          kind: "rejected",
+          code: "provider_admission_original_missing",
+        };
       const refused = beforeInsert?.();
       if (refused) return { kind: "rejected", code: refused };
+      let certificate: Certificate | undefined;
+      try {
+        certificate = await certification?.prepare(tx);
+      } catch (error) {
+        const code = ownedRejection(error);
+        if (code) return { kind: "rejected", code };
+        const refused = admissionRejection(
+          error,
+          localCertifiedTimeoutInstalled,
+        );
+        if (refused) return refused;
+        throw error;
+      }
       const insert = await tx.attempt(
         `INSERT INTO provider_calls AS c (provider_call_id, attempt_id, provider, operation, model_identifier, request_fingerprint,
          logical_request_key, operational_try_number, intentional_take_index, retry_of_provider_call_id, reroll_of_provider_call_id,
-         reroll_trigger_id, started_at)
-       VALUES ($1::uuid, $2::uuid, $3, $4, $5, $6, $7, $8::int, $9::int, $10::uuid, $11::uuid, $12::uuid, $13::timestamptz)
-       RETURNING ${RESERVATION_COLUMNS}`,
+         reroll_trigger_id, started_at,reserved_cost_upper_bound,admission_currency,admission_policy_hash,admission_certificate,admission_certificate_hash)
+       VALUES ($1::uuid, $2::uuid, $3, $4, $5, $6, $7, $8::int, $9::int, $10::uuid, $11::uuid, $12::uuid, $13::timestamptz,$14::numeric,$15,$16,$17::jsonb,$18)
+       RETURNING ${RESERVATION_COLUMNS}, ${ADMISSION_COLUMNS}`,
         [
           r.provider_call_id,
           r.attempt_id,
@@ -442,6 +597,11 @@ async function reserveCore(
           r.reroll_of_provider_call_id,
           r.reroll_trigger_id,
           r.started_at,
+          certificate?.reserved_cost_upper_bound ?? null,
+          certificate?.currency ?? null,
+          certificate?.policy_hash ?? null,
+          certificate ? JSON.stringify(certificate) : null,
+          certificate ? certificateHash(certificate) : null,
         ],
       );
       if (insert.ok) {
@@ -452,7 +612,11 @@ async function reserveCore(
         if (canceled) return { kind: "rejected", code: canceled };
         return {
           kind: "created",
-          record: { reservation: toReservation(row), outcome: null },
+          record: {
+            reservation: toReservation(row),
+            outcome: null,
+            ...toAdmission(row, toReservation(row)),
+          },
         };
       }
       // The savepoint is already rolled back, so a fresh statement sees the winner's COMMITTED row.
@@ -466,7 +630,11 @@ async function reserveCore(
           sqlstate: "23505",
         };
       }
-      return guessRejection(insert.error) ?? rethrow(insert.error);
+      return (
+        admissionRejection(insert.error, localCertifiedTimeoutInstalled) ??
+        guessRejection(insert.error) ??
+        rethrow(insert.error)
+      );
     },
     trace,
   );
@@ -522,6 +690,14 @@ export async function recordProviderOutcome(
   authored: AuthoredOutcome,
   context?: CommandContext,
 ): Promise<Outcome<StoredOutcome>> {
+  return recordCore(pool, authored, context);
+}
+async function recordCore(
+  pool: Pool,
+  authored: AuthoredOutcome,
+  context?: CommandContext,
+  settlement?: Settlement,
+): Promise<Outcome<StoredOutcome>> {
   const trace: CommandTrace | undefined = context && {
     context,
     command: "provider_outcome.record",
@@ -544,6 +720,7 @@ export async function recordProviderOutcome(
   return runCommand(
     pool,
     async (tx) => {
+      await tx.query("SELECT pg_advisory_xact_lock(182736456,1)");
       const reserved = await tx.query(
         "SELECT 1 FROM provider_calls WHERE provider_call_id = $1::uuid",
         [o.provider_call_id],
@@ -554,8 +731,8 @@ export async function recordProviderOutcome(
       if (prior) return prior;
       const insert = await tx.attempt(
         `INSERT INTO provider_call_events AS e (provider_call_id, event_type, ended_at, usage, actual_cost, currency, response_artifact_id,
-         response_reference)
-       VALUES ($1::uuid, $2, $3::timestamptz, $4::jsonb, $5::numeric, $6, $7::uuid, $8)
+         response_reference,admission_settlement)
+       VALUES ($1::uuid, $2, $3::timestamptz, $4::jsonb, $5::numeric, $6, $7::uuid, $8,$9::jsonb)
        RETURNING ${OUTCOME_COLUMNS}`,
         [
           o.provider_call_id,
@@ -566,6 +743,7 @@ export async function recordProviderOutcome(
           o.currency,
           o.response_artifact_id,
           o.response_reference,
+          settlement ? JSON.stringify(settlement) : null,
         ],
       );
       if (insert.ok) {
@@ -577,7 +755,11 @@ export async function recordProviderOutcome(
         const winner = await classifyOutcome(tx, o);
         if (winner) return winner;
       }
-      return guessRejection(insert.error) ?? rethrow(insert.error);
+      return (
+        admissionRejection(insert.error) ??
+        guessRejection(insert.error) ??
+        rethrow(insert.error)
+      );
     },
     trace,
   );
@@ -590,7 +772,7 @@ export async function lookupProviderCall(
 ): Promise<ReservationRecord | null> {
   requireUuid(providerCallId, "provider_call_id");
   const res = await pool.query(
-    `SELECT ${RESERVATION_COLUMNS} FROM provider_calls c WHERE c.provider_call_id = $1::uuid`,
+    `SELECT ${RESERVATION_COLUMNS},${ADMISSION_COLUMNS} FROM provider_calls c WHERE c.provider_call_id = $1::uuid`,
     [providerCallId],
   );
   const row = res.rows[0] as Row | undefined;
@@ -603,6 +785,7 @@ export async function lookupProviderCall(
   return {
     reservation: toReservation(row),
     outcome: orow ? toOutcome(orow) : null,
+    ...toAdmission(row, toReservation(row)),
   };
 }
 
@@ -614,6 +797,8 @@ export interface ProviderRequest {
   model_identifier: string;
   request_fingerprint: string;
   logical_request_key: string;
+  /** Trusted simulation only: immutable actual text/cap plus ORIGINAL committed certification. */
+  admission?: Readonly<{ request: AdmissionRequest; certificate: Certificate }>;
 }
 
 /** A durable record held by the provider/adapter side, bound to the request that produced it. */
@@ -683,8 +868,52 @@ async function reconcileWith<R>(
   } catch {
     return { status: "unknown", reason: "lookup_failed" };
   }
-  if (evidence === undefined) return { status: "not_performed" };
+  // Missing final Packet is no negative invocation/completion proof for a certified call.
+  if (evidence === undefined)
+    return found.admission
+      ? { status: "unknown", reason: "provider_sim_receipt_invalid" }
+      : { status: "not_performed" };
   const res = found.reservation;
+  if (found.admission) {
+    let projection: ReturnType<typeof projectReceipt>;
+    try {
+      const d: Partial<Record<string, PropertyDescriptor>> =
+        Object.getOwnPropertyDescriptors(evidence);
+      for (const name of [
+        "provider_call_id",
+        "logical_request_key",
+        "request_fingerprint",
+        "result",
+      ])
+        if (!d[name] || !("value" in d[name]))
+          throw new AdmissionError("provider_sim_receipt_invalid");
+      if (
+        d.provider_call_id?.value !== res.provider_call_id ||
+        d.logical_request_key?.value !== res.logical_request_key ||
+        d.request_fingerprint?.value !== res.request_fingerprint
+      )
+        return {
+          status: "unknown",
+          reason: "provider_sim_receipt_unattributed",
+        };
+      projection = projectReceipt(d.result?.value, found.admission.certificate);
+    } catch (error) {
+      return {
+        status: "unknown",
+        reason: ownedRejection(error) ?? "provider_sim_receipt_invalid",
+      };
+    }
+    return {
+      status: "performed",
+      evidence,
+      recorded: await recordCore(
+        pool,
+        projection.outcome,
+        recordContext,
+        projection.settlement,
+      ),
+    };
+  }
   if (
     evidence.provider_call_id !== res.provider_call_id ||
     evidence.logical_request_key !== res.logical_request_key ||
@@ -808,7 +1037,8 @@ export type ExecuteResult =
       reason:
         | "converged_without_outcome"
         | "held_by_other"
-        | "provider_not_invoked_canceled";
+        | "provider_not_invoked_canceled"
+        | "provider_admission_request_mismatch";
       reservation: StoredReservation;
     }
   /** `perform` (or `finish`) threw: the provider may have acted. Nothing was recorded; use reconcile, never retry blindly. */
@@ -819,7 +1049,8 @@ export type ExecuteResult =
         | "provider_perform_ambiguous"
         | "provider_finish_ambiguous"
         | "provider_observation_timeout"
-        | "provider_observation_canceled";
+        | "provider_observation_canceled"
+        | AdmissionCode;
     }
   | { status: "conflict"; result: Outcome<ReservationRecord> }
   | { status: "rejected"; result: Outcome<ReservationRecord> };
@@ -832,6 +1063,7 @@ export interface NonNetworkExecutionControls {
   GENERATION_KILL_SWITCH: false;
   PROVIDER_CALL_TIMEOUT_MS: number;
   signal?: AbortSignal;
+  simulation_admission?: unknown;
 }
 
 const abortedGetter: unknown = Reflect.get(
@@ -862,6 +1094,7 @@ function readControls(input: unknown): Controls {
       "GENERATION_KILL_SWITCH",
       "PROVIDER_CALL_TIMEOUT_MS",
       "signal",
+      "simulation_admission",
     ];
     if (
       Reflect.ownKeys(properties).some(
@@ -872,7 +1105,11 @@ function readControls(input: unknown): Controls {
     const value: Record<string, unknown> = {};
     for (const name of names) {
       const property = properties[name];
-      if (property === undefined && name === "signal") continue;
+      if (
+        property === undefined &&
+        (name === "signal" || name === "simulation_admission")
+      )
+        continue;
       if (!property || !("value" in property))
         throw new Rejection("provider_controls_invalid");
       value[name] = property.value;
@@ -1020,12 +1257,16 @@ function safeOutcome<T>(outcome: Outcome<T>): Outcome<T> {
 
 function ownedRejection(error: unknown): string | undefined {
   try {
-    if (error instanceof Rejection) {
+    if (error instanceof Rejection || error instanceof AdmissionError) {
       const code: unknown = Object.getOwnPropertyDescriptor(
         error,
         "code",
       )?.value;
-      if (typeof code === "string" && KNOWN_OUTCOME_CODES.has(code))
+      if (
+        typeof code === "string" &&
+        (KNOWN_OUTCOME_CODES.has(code) ||
+          (ADMISSION_CODES as readonly string[]).includes(code))
+      )
         return code;
     }
   } catch {
@@ -1054,13 +1295,45 @@ async function executeCore<R>(
   reserveContext: CommandContext,
   recordContext: CommandContext,
   controls: Controls,
+  claim: OriginalClaim,
 ): Promise<ExecuteResult> {
   const guard = () =>
     controls.refusal ??
     (aborted(controls.value?.signal)
       ? "provider_execution_canceled"
       : undefined);
-  const reserved = await reserveCore(pool, reservation, reserveContext, guard);
+  let invocation: Invocation | undefined;
+  const bounds = admissionBounds(controls.value?.simulation_admission);
+  const reserved = await reserveCore(pool, reservation, reserveContext, guard, {
+    claim,
+    ...(bounds ? { bounds } : {}),
+    prepare: async (tx) => {
+      if (controls.value?.simulation_admission === undefined) return undefined;
+      invocation = readInvocation(controls.value.simulation_admission);
+      // Complete immutable NEW snapshot only after original identity/slot classification.
+      await tx.query(
+        "SELECT set_config('lock_timeout',$1,true),set_config('statement_timeout',$2,true)",
+        [
+          String(invocation.lock_timeout_ms),
+          String(invocation.statement_timeout_ms),
+        ],
+      );
+      const row = (
+        await tx.query(
+          "SELECT program_run_id::text AS run_id FROM program_run_attempts WHERE attempt_id=$1::uuid",
+          [reservation.attempt_id],
+        )
+      ).rows[0];
+      if (!row || typeof row.run_id !== "string")
+        throw new AdmissionError("provider_admission_certificate_invalid");
+      return buildCertificate(
+        reservation,
+        row.run_id,
+        invocation.policy,
+        invocation.request,
+      );
+    },
+  });
   facts.reservation = reserved.kind;
   switch (reserved.kind) {
     case "conflict":
@@ -1105,11 +1378,34 @@ async function executeCore<R>(
   // Only a committing created result, after the guarded insert, can reach here.
   const controlled = controls.value;
   if (!controlled) throw new Rejection("provider_admission_unavailable");
-  const observation = await observePerform(
-    adapter,
-    requestOf(mine),
-    controlled,
-  );
+  let request = requestOf(mine);
+  if (reserved.record.admission) {
+    const cert = reserved.record.admission.certificate,
+      r = invocation?.request;
+    if (
+      !r ||
+      Buffer.byteLength(r.input_text, "utf8") !== cert.input_bytes ||
+      sha256(Buffer.from(r.input_text, "utf8")) !== cert.input_text_hash ||
+      requestHash(r) !== cert.request_fingerprint ||
+      r.max_output_bytes !== cert.max_output_bytes
+    )
+      return {
+        status: "unfinished",
+        reason: "provider_admission_request_mismatch",
+        reservation: mine,
+      };
+    request = Object.freeze({
+      ...request,
+      admission: Object.freeze({ request: r, certificate: cert }),
+    });
+  }
+  if (aborted(controlled.signal))
+    return {
+      status: "unfinished",
+      reason: "provider_not_invoked_canceled",
+      reservation: mine,
+    };
+  const observation = await observePerform(adapter, request, controlled);
   if (observation.kind === "ambiguous") {
     facts.perform = "ambiguous";
     return {
@@ -1127,41 +1423,55 @@ async function executeCore<R>(
       code: "provider_observation_canceled",
     };
   let authored: AuthoredOutcome;
+  let settlement: Settlement | undefined;
   try {
-    const properties = Object.getOwnPropertyDescriptors(
-      finish(observation.value),
-    );
-    const data: Record<string, unknown> = {};
-    for (const name of [
-      "provider_call_id",
-      "event_type",
-      "ended_at",
-      "usage",
-      "actual_cost",
-      "currency",
-      "response_artifact_id",
-      "response_reference",
-    ]) {
-      const property = properties[name];
-      if (!property || !("value" in property))
-        throw new Rejection("provider_finish_ambiguous");
-      data[name] = property.value;
+    if (reserved.record.admission) {
+      // Certified path NEVER invokes generic finish. This projector is synchronous/pure and original-bound.
+      const projection = projectReceipt(
+        observation.value,
+        reserved.record.admission.certificate,
+      );
+      authored = projection.outcome;
+      settlement = projection.settlement;
+    } else {
+      const properties = Object.getOwnPropertyDescriptors(
+        finish(observation.value),
+      );
+      const data: Record<string, unknown> = {};
+      for (const name of [
+        "provider_call_id",
+        "event_type",
+        "ended_at",
+        "usage",
+        "actual_cost",
+        "currency",
+        "response_artifact_id",
+        "response_reference",
+      ]) {
+        const property = properties[name];
+        if (!property || !("value" in property))
+          throw new Rejection("provider_finish_ambiguous");
+        data[name] = property.value;
+      }
+      authored = validateOutcome(data as unknown as AuthoredOutcome);
+      authored.usage = JSON.parse(JSON.stringify(authored.usage)) as Json;
+      if (authored.provider_call_id !== mine.provider_call_id)
+        return {
+          status: "performed",
+          reservation: mine,
+          outcome: { kind: "rejected", code: "outcome_binding_mismatch" },
+        };
     }
-    authored = validateOutcome(data as unknown as AuthoredOutcome);
-    authored.usage = JSON.parse(JSON.stringify(authored.usage)) as Json;
-    if (authored.provider_call_id !== mine.provider_call_id)
-      return {
-        status: "performed",
-        reservation: mine,
-        outcome: { kind: "rejected", code: "outcome_binding_mismatch" },
-      };
-  } catch {
+  } catch (error) {
     // `perform` itself was acknowledged (facts.perform stays "performed"); only the outcome could not be produced, so the WORKFLOW
     // status is ambiguous while the perform fact is not rewritten.
     return {
       status: "ambiguous",
       reservation: mine,
-      code: "provider_finish_ambiguous",
+      code: reserved.record.admission
+        ? ((ownedRejection(error) as AdmissionCode | undefined) ??
+          "provider_sim_receipt_invalid")
+        : "provider_finish_ambiguous",
     };
   }
   // The record command is attempted from here: if it throws, the fact stays "unknown" (attempted, result not known), not "not_attempted".
@@ -1173,7 +1483,7 @@ async function executeCore<R>(
     };
   facts.outcome_record = "unknown";
   facts.errorStage = "record";
-  const outcome = await recordProviderOutcome(pool, authored, recordContext);
+  const outcome = await recordCore(pool, authored, recordContext, settlement);
   facts.outcome_record = outcome.kind;
   await faultPoint("after_outcome_commit");
   return {
@@ -1242,6 +1552,27 @@ export async function executeProviderCall<R>(
       },
     };
   }
+  const claim = extractOriginalClaim(controls);
+  if (claim.kind === "invalid") {
+    emitPreflight(
+      {
+        context: stageContext(base, "reserve", authored.attempt_id, undefined),
+        command: "provider_call.reserve",
+        subject: {
+          provider_call_id: authored.provider_call_id,
+          attempt_id: authored.attempt_id,
+        },
+      },
+      "provider_admission_original_claim_invalid",
+    );
+    return {
+      status: "rejected",
+      result: {
+        kind: "rejected",
+        code: "provider_admission_original_claim_invalid",
+      },
+    };
+  }
   const admission = readControls(controls);
   const attemptId = authored.attempt_id;
   let run: AttemptRun | undefined;
@@ -1277,6 +1608,7 @@ export async function executeProviderCall<R>(
       stageContext(tracked, "reserve", id, run),
       stageContext(tracked, "record", id, run),
       admission,
+      claim,
     );
   } catch (raw) {
     const error = new ProviderExecutionError(
@@ -1304,6 +1636,10 @@ export async function executeProviderCall<R>(
     ...(result.status === "unfinished" &&
     result.reason === "provider_not_invoked_canceled"
       ? { code: "provider_not_invoked_canceled" }
+      : {}),
+    ...(result.status === "unfinished" &&
+    result.reason === "provider_admission_request_mismatch"
+      ? { code: result.reason }
       : {}),
     provider_call_id: authored.provider_call_id,
     reservation: facts.reservation,
