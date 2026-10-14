@@ -192,6 +192,7 @@ export const KNOWN_OUTCOME_CODES: ReadonlySet<string> = new Set([
   "evidence_package_id_occupied",
   "first_sequence_not_one",
   "guard_rejected",
+  "input_resource_limit",
   "internal_missing",
   "invalid_body",
   "invalid_ceiling",
@@ -323,6 +324,7 @@ export const KNOWN_OUTCOME_CODES: ReadonlySet<string> = new Set([
   "supersedes_unit_not_found",
   "supersession",
   "timestamp_precision",
+  "unexpected_failure",
   "unit_rights_identity_mismatch",
 ]);
 
