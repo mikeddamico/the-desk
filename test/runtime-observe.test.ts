@@ -7,6 +7,7 @@ import { randomUUID } from "node:crypto";
 
 import pg from "pg";
 import type { Pool } from "pg";
+import ts from "typescript";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { commandObserver } from "../src/logging.js";
@@ -1154,18 +1155,502 @@ describe("bounded noninterference: result, error and cleanup errors never change
   });
 });
 
-describe("supplementary drift check (NOT the proof): code literals in src/ are in the known set", () => {
-  it('every `code: "..."`, Rejection("...") and ClaimStateError("...") literal is a member of KNOWN_OUTCOME_CODES', () => {
+// ROOT72/74: private finite syntax recognition, supplementary to behavior proof.
+// The TypeScript dependency boots normally; captured source text is never executed.
+function unwrapScannerExpression(expression: ts.Expression): ts.Expression {
+  let current = expression;
+  while (
+    ts.isParenthesizedExpression(current) ||
+    ts.isAsExpression(current) ||
+    ts.isSatisfiesExpression(current) ||
+    ts.isTypeAssertionExpression(current) ||
+    ts.isNonNullExpression(current)
+  ) {
+    current = current.expression;
+  }
+  return current;
+}
+
+function scannerString(expression: ts.Expression): string | undefined {
+  const current = unwrapScannerExpression(expression);
+  return ts.isStringLiteral(current) ||
+    ts.isNoSubstitutionTemplateLiteral(current)
+    ? current.text
+    : undefined;
+}
+
+function scannerPropertyName(name: ts.PropertyName): string | undefined {
+  if (ts.isIdentifier(name)) return name.text;
+  if (ts.isStringLiteral(name) || ts.isNoSubstitutionTemplateLiteral(name))
+    return name.text;
+  if (ts.isComputedPropertyName(name)) return scannerString(name.expression);
+  return undefined;
+}
+
+function scannerCalleeName(expression: ts.Expression): string | undefined {
+  const current = unwrapScannerExpression(expression);
+  if (ts.isIdentifier(current)) return current.text;
+  if (ts.isPropertyAccessExpression(current)) return current.name.text;
+  if (ts.isElementAccessExpression(current))
+    return scannerString(current.argumentExpression);
+  return undefined;
+}
+
+function collectOutcomeCodeLiterals(sourceText: string): Set<string> {
+  const fileName = "/SCANNER_INPUT.ts";
+  const options: ts.CompilerOptions = {
+    target: ts.ScriptTarget.ES2024,
+    noEmit: true,
+    noLib: true,
+    noResolve: true,
+    types: [],
+  };
+  const sourceFile = ts.createSourceFile(
+    fileName,
+    sourceText,
+    ts.ScriptTarget.ES2024,
+    false,
+    ts.ScriptKind.TS,
+  );
+  // Only the captured input is served. No ts.sys/default-host delegation.
+  const host: ts.CompilerHost = {
+    getSourceFile: (name) => (name === fileName ? sourceFile : undefined),
+    getDefaultLibFileName: () => "/UNREAD_SCANNER_LIB.d.ts",
+    writeFile: () => {
+      throw new Error("Supplementary scanner unexpected emit");
+    },
+    getCurrentDirectory: () => "/",
+    getCanonicalFileName: (name) => name,
+    useCaseSensitiveFileNames: () => true,
+    getNewLine: () => "\n",
+    fileExists: (name) => name === fileName,
+    readFile: (name) => (name === fileName ? sourceText : undefined),
+    directoryExists: () => false,
+    getDirectories: () => [],
+  };
+  const program = ts.createProgram([fileName], options, host);
+  if (program.getSyntacticDiagnostics(sourceFile).length !== 0)
+    throw new Error("Supplementary scanner syntax failure");
+
+  const collected = new Set<string>();
+  const addLiteral = (expression: ts.Expression): void => {
+    const value = scannerString(expression);
+    // A whole nonempty ASCII word: unlike $, this rejects final LF/CR too.
+    if (value !== undefined && value.length !== 0 && !/[^a-z0-9_]/.test(value))
+      collected.add(value);
+  };
+  const visit = (node: ts.Node): void => {
+    if (
+      ts.isPropertyAssignment(node) &&
+      scannerPropertyName(node.name) === "code"
+    ) {
+      addLiteral(node.initializer);
+    }
+    if (ts.isCallExpression(node) || ts.isNewExpression(node)) {
+      const name = scannerCalleeName(node.expression);
+      if (
+        name !== undefined &&
+        (name.endsWith("Rejection") || name.endsWith("ClaimStateError"))
+      ) {
+        const first = node.arguments?.[0];
+        if (first !== undefined) addLiteral(first);
+      }
+    }
+    // Always traverse children, including non-applicable outer syntax.
+    // The explicit void callback never returns a truthy early-stop value.
+    ts.forEachChild(node, visit);
+  };
+  visit(sourceFile);
+  return collected;
+}
+
+function missingOutcomeCodes(codes: ReadonlySet<string>): string[] {
+  return [...codes].filter((code) => !KNOWN_OUTCOME_CODES.has(code)).sort();
+}
+
+describe("supplementary scanner: independent syntax and catalog canaries", () => {
+  it("S1 retains genuine known and unknown literal positions and suffix calls", () => {
+    const source = `
+const a = {code: "rights", reason_code: "silent_usage_class"};
+const b = {code: "scanner_unregistered_canary"};
+new Rejection("scanner_rejection_canary", "not_first_argument");
+ns.ClaimStateError("scanner_claim_canary");
+new OtherRejection("scanner_suffix_canary");
+`;
+    const codes = collectOutcomeCodeLiterals(source);
+    expect([...codes].sort()).toEqual([
+      "rights",
+      "scanner_claim_canary",
+      "scanner_rejection_canary",
+      "scanner_suffix_canary",
+      "scanner_unregistered_canary",
+    ]);
+    expect(missingOutcomeCodes(codes)).toEqual([
+      "scanner_claim_canary",
+      "scanner_rejection_canary",
+      "scanner_suffix_canary",
+      "scanner_unregistered_canary",
+    ]);
+  });
+
+  it("S2 distinguishes complete code names from all four suffix neighbors", () => {
+    const source = `
+const a = {reason_code:"silent_usage_class", reader_code:"outside_current_show_editorial_policy", parser_code:"audit_only_untrusted_fixture", stopped_code:"central_question"};
+const b = {reason_code:"supporter_consequence", code:"scanner_unregistered_canary"};
+`;
+    const codes = collectOutcomeCodeLiterals(source);
+    expect([...codes].sort()).toEqual(["scanner_unregistered_canary"]);
+    expect(missingOutcomeCodes(codes)).toEqual(["scanner_unregistered_canary"]);
+    const reasonsOnly = `
+const a = {reason_code:"silent_usage_class"};
+const b = {reason_code:"outside_current_show_editorial_policy"};
+const c = {reason_code:"audit_only_untrusted_fixture"};
+const d = {reason_code:"central_question"};
+const e = {reason_code:"supporter_consequence"};
+`;
+    expect([...collectOutcomeCodeLiterals(reasonsOnly)]).toEqual([]);
+  });
+
+  it("S3 excludes annotations and documentary text but retains the same-value neighbor", () => {
+    const nonApplicable = `
+function check(code:"provenance_hash_mismatch" | "brief_hash_mismatch"):void {}
+interface I {code:"provenance_hash_mismatch"}
+type T = {code:"brief_hash_mismatch"};
+class C {declare readonly code:"unexpected_failure";}
+// code: "scanner_comment_canary"
+/* new Rejection("scanner_comment_canary") */
+const example = 'code: "scanner_string_canary" Rejection("scanner_string_canary")';
+`;
+    expect([...collectOutcomeCodeLiterals(nonApplicable)]).toEqual([]);
+    const source =
+      nonApplicable + 'const neighbor = {code:"provenance_hash_mismatch"};';
+    const codes = collectOutcomeCodeLiterals(source);
+    expect([...codes]).toEqual(["provenance_hash_mismatch"]);
+    expect(missingOutcomeCodes(codes)).toEqual(["provenance_hash_mismatch"]);
+  });
+
+  it("S4 collects quoted, computed, template, wrapped and escaped property spellings", () => {
+    const source = `
+const a = {'code':'scanner_quote_canary', "code":\`scanner_template_canary\`};
+const b = {["code"]:"scanner_computed_canary", [\`code\`]:"scanner_static_template_key_canary"};
+const c = {[('code' as const)]:("scanner_wrapped_canary" as const) satisfies string};
+const d = {co\\u0064e:"scanner_escaped_canary", "co\\u0064e":"scanner_escaped_canary"};
+`;
+    const codes = collectOutcomeCodeLiterals(source);
+    expect([...codes].sort()).toEqual([
+      "scanner_computed_canary",
+      "scanner_escaped_canary",
+      "scanner_quote_canary",
+      "scanner_static_template_key_canary",
+      "scanner_template_canary",
+      "scanner_wrapped_canary",
+    ]);
+    expect(missingOutcomeCodes(codes)).toEqual([
+      "scanner_computed_canary",
+      "scanner_escaped_canary",
+      "scanner_quote_canary",
+      "scanner_static_template_key_canary",
+      "scanner_template_canary",
+      "scanner_wrapped_canary",
+    ]);
+    const escapedValue = 'const x = {code:"scanner_esc\\u0061ped_value"};';
+    expect([...collectOutcomeCodeLiterals(escapedValue)]).toEqual([
+      "scanner_escaped_value",
+    ]);
+  });
+
+  it("S5 traverses nested applicable children and keeps static member call forms", () => {
+    const source = `
+new ns.Rejection(("scanner_new_canary" as const));
+(ns["ClaimStateError"]!)("scanner_computed_call_canary");
+Rejection("rights", {code:"scanner_nested_canary"});
+Unrelated("scanner_unrelated_canary");
+`;
+    const codes = collectOutcomeCodeLiterals(source);
+    expect([...codes].sort()).toEqual([
+      "rights",
+      "scanner_computed_call_canary",
+      "scanner_nested_canary",
+      "scanner_new_canary",
+    ]);
+    expect(missingOutcomeCodes(codes)).toEqual([
+      "scanner_computed_call_canary",
+      "scanner_nested_canary",
+      "scanner_new_canary",
+    ]);
+  });
+
+  it("S6 excludes dynamic values and rejects complete-word grammar violations", () => {
+    const source = `
+const a = {[dynamicName]:"scanner_dynamic_name_canary", code:dynamicValue};
+const b = {code:\`scanner_\${dynamicValue}\`, reason_code:"scanner_reason_canary"};
+const c = {code:"", code:"UPPER", code:"has-hyphen", code:"trailing_lf\\n"};
+new Rejection(dynamicValue, "scanner_second_argument_canary");
+`;
+    const codes = collectOutcomeCodeLiterals(source);
+    expect([...codes]).toEqual([]);
+    expect(missingOutcomeCodes(codes)).toEqual([]);
+    const otherInvalid = `
+const a = {code:"trailing_cr\\r", code:"internal\\nlf", code:"non_ascii_é"};
+const b = {code:"scanner_" + suffix, code:null, code:42};
+ns[dynamicRejection]("scanner_dynamic_callee_canary");
+ns["OtherRejection\\n"]("scanner_callee_final_lf_canary");
+`;
+    expect([...collectOutcomeCodeLiterals(otherInvalid)]).toEqual([]);
+  });
+
+  it("S7 throws a fixed syntax failure before collecting and recognizes the repair", () => {
+    expect(() =>
+      collectOutcomeCodeLiterals(
+        'const broken = {code: "scanner_unregistered_canary";',
+      ),
+    ).toThrow(new Error("Supplementary scanner syntax failure"));
+    const repaired = collectOutcomeCodeLiterals(
+      'const broken = {code: "scanner_unregistered_canary"};',
+    );
+    expect([...repaired]).toEqual(["scanner_unregistered_canary"]);
+    expect(missingOutcomeCodes(repaired)).toEqual([
+      "scanner_unregistered_canary",
+    ]);
+  });
+
+  it("S8 keeps private/optional terminals while external references stay inert", () => {
+    const source = `
+/// <reference path="/UNREAD_SCANNER_REFERENCE.ts" />
+import {value} from "UNREAD_SCANNER_MODULE";
+const a = {code:"scanner_unregistered_canary"};
+class C { #Rejection = handler; m() { this.#Rejection("scanner_private_canary"); } }
+ns?.Rejection?.("scanner_optional_canary");
+`;
+    const read = vi.spyOn(ts.sys, "readFile").mockImplementation(() => {
+      throw new Error("Supplementary scanner unexpected system read");
+    });
+    const exists = vi.spyOn(ts.sys, "fileExists").mockImplementation(() => {
+      throw new Error("Supplementary scanner unexpected system lookup");
+    });
+    const directory = vi
+      .spyOn(ts.sys, "readDirectory")
+      .mockImplementation(() => {
+        throw new Error(
+          "Supplementary scanner unexpected system directory read",
+        );
+      });
+    const write = vi.spyOn(ts.sys, "writeFile").mockImplementation(() => {
+      throw new Error("Supplementary scanner unexpected system write");
+    });
+    try {
+      const codes = collectOutcomeCodeLiterals(source);
+      expect([...codes].sort()).toEqual([
+        "scanner_optional_canary",
+        "scanner_private_canary",
+        "scanner_unregistered_canary",
+      ]);
+      expect(missingOutcomeCodes(codes)).toEqual([
+        "scanner_optional_canary",
+        "scanner_private_canary",
+        "scanner_unregistered_canary",
+      ]);
+      expect(read).not.toHaveBeenCalled();
+      expect(exists).not.toHaveBeenCalled();
+      expect(directory).not.toHaveBeenCalled();
+      expect(write).not.toHaveBeenCalled();
+    } finally {
+      read.mockRestore();
+      exists.mockRestore();
+      directory.mockRestore();
+      write.mockRestore();
+    }
+  });
+
+  it("covers every declared value wrapper without executing a value", () => {
+    const source = `
+const a = {code:(("scanner_paren_canary"))};
+const b = {code:("scanner_as_canary" as const)};
+const c = {code:("scanner_satisfies_canary" satisfies string)};
+const d = {code:(<string>"scanner_assertion_canary")};
+const e = {code:("scanner_nonnull_canary"!)};
+`;
+    const codes = collectOutcomeCodeLiterals(source);
+    expect([...codes].sort()).toEqual([
+      "scanner_as_canary",
+      "scanner_assertion_canary",
+      "scanner_nonnull_canary",
+      "scanner_paren_canary",
+      "scanner_satisfies_canary",
+    ]);
+    expect(missingOutcomeCodes(codes)).toEqual([
+      "scanner_as_canary",
+      "scanner_assertion_canary",
+      "scanner_nonnull_canary",
+      "scanner_paren_canary",
+      "scanner_satisfies_canary",
+    ]);
+  });
+
+  it("covers every declared static-name and callee wrapper", () => {
+    const source = `
+const a = {[("code")]:"scanner_name_paren_canary"};
+const b = {["code" as const]:"scanner_name_as_canary"};
+const c = {["code" satisfies string]:"scanner_name_satisfies_canary"};
+const d = {[(<string>"code")]:"scanner_name_assertion_canary"};
+const e = {["code"!]:"scanner_name_nonnull_canary"};
+(Rejection)("scanner_callee_paren_canary");
+(Rejection as unknown)("scanner_callee_as_canary");
+(Rejection satisfies unknown)("scanner_callee_satisfies_canary");
+(<unknown>Rejection)("scanner_callee_assertion_canary");
+(Rejection!)("scanner_callee_nonnull_canary");
+ns[("Rejection" as const)]("scanner_member_as_canary");
+ns[(<string>"ClaimStateError")]("scanner_member_assertion_canary");
+ns["Rejection" satisfies string]("scanner_member_satisfies_canary");
+ns["ClaimStateError"!]("scanner_member_nonnull_canary");
+new OtherClaimStateError("scanner_suffix_claim_canary");
+`;
+    const codes = collectOutcomeCodeLiterals(source);
+    expect([...codes].sort()).toEqual([
+      "scanner_callee_as_canary",
+      "scanner_callee_assertion_canary",
+      "scanner_callee_nonnull_canary",
+      "scanner_callee_paren_canary",
+      "scanner_callee_satisfies_canary",
+      "scanner_member_as_canary",
+      "scanner_member_assertion_canary",
+      "scanner_member_nonnull_canary",
+      "scanner_member_satisfies_canary",
+      "scanner_name_as_canary",
+      "scanner_name_assertion_canary",
+      "scanner_name_nonnull_canary",
+      "scanner_name_paren_canary",
+      "scanner_name_satisfies_canary",
+      "scanner_suffix_claim_canary",
+    ]);
+    expect(missingOutcomeCodes(codes)).toEqual([
+      "scanner_callee_as_canary",
+      "scanner_callee_assertion_canary",
+      "scanner_callee_nonnull_canary",
+      "scanner_callee_paren_canary",
+      "scanner_callee_satisfies_canary",
+      "scanner_member_as_canary",
+      "scanner_member_assertion_canary",
+      "scanner_member_nonnull_canary",
+      "scanner_member_satisfies_canary",
+      "scanner_name_as_canary",
+      "scanner_name_assertion_canary",
+      "scanner_name_nonnull_canary",
+      "scanner_name_paren_canary",
+      "scanner_name_satisfies_canary",
+      "scanner_suffix_claim_canary",
+    ]);
+  });
+
+  it("keeps mixed nested unknown neighbors despite duplicates and irrelevant outers", () => {
+    const source = `
+Unrelated({code:"scanner_mixed_nested_canary"});
+const a = {code:"rights", reason_code:"silent_usage_class"};
+new OtherClaimStateError("scanner_mixed_suffix_canary", {code:"scanner_mixed_nested_canary"});
+const b = {code:"scanner_unregistered_canary", code:"scanner_unregistered_canary"};
+const c = {code:"scanner_mixed_neighbor_canary", example:'code: "scanner_string_canary"'};
+`;
+    const codes = collectOutcomeCodeLiterals(source);
+    expect([...codes].sort()).toEqual([
+      "rights",
+      "scanner_mixed_neighbor_canary",
+      "scanner_mixed_nested_canary",
+      "scanner_mixed_suffix_canary",
+      "scanner_unregistered_canary",
+    ]);
+    expect(missingOutcomeCodes(codes)).toEqual([
+      "scanner_mixed_neighbor_canary",
+      "scanner_mixed_nested_canary",
+      "scanner_mixed_suffix_canary",
+      "scanner_unregistered_canary",
+    ]);
+  });
+
+  it("does not silently expand into class fields, local constants or assignments", () => {
+    const source = `
+class C { code = "scanner_class_field_canary"; m() { return {code:"scanner_method_neighbor_canary"}; } }
+const code: string = "scanner_local_const_canary";
+object.code = "scanner_assignment_canary";
+`;
+    const codes = collectOutcomeCodeLiterals(source);
+    expect([...codes]).toEqual(["scanner_method_neighbor_canary"]);
+    expect(missingOutcomeCodes(codes)).toEqual([
+      "scanner_method_neighbor_canary",
+    ]);
+  });
+
+  it("retains known collection through multiline and comment-separated syntax", () => {
+    const source = `
+const a = {
+  code /* key */ : /* value */ "rights"
+};
+new /* class */ Rejection /* call */ (
+  /* first */ "scanner_spacing_canary",
+  "scanner_second_argument_canary"
+);
+`;
+    const codes = collectOutcomeCodeLiterals(source);
+    expect([...codes].sort()).toEqual(["rights", "scanner_spacing_canary"]);
+    expect(missingOutcomeCodes(codes)).toEqual(["scanner_spacing_canary"]);
+  });
+
+  it("keeps documentary labels unknown and private payloads absent from projection", () => {
+    const base = {
+      event: "workflow.completed",
+      workflow: "evidence_slice.run",
+      stage: "S1_evidence_unit",
+      correlation_id: U1,
+      status: "stopped",
+      stopped_step: "S3_binding",
+      stopped_outcome: "conflict",
+    };
+    const known = projectEvent({
+      ...base,
+      code: "rights",
+      stopped_code: "rights",
+    });
+    expect(known).toMatchObject({
+      code: "rights",
+      code_known: true,
+      stopped_code: "rights",
+    });
+    for (const label of [
+      "silent_usage_class",
+      "outside_current_show_editorial_policy",
+      "audit_only_untrusted_fixture",
+      "central_question",
+      "supporter_consequence",
+    ]) {
+      expect(KNOWN_OUTCOME_CODES.has(label)).toBe(false);
+      const projected = projectEvent({
+        ...base,
+        code: label,
+        stopped_code: label,
+        message: "SCANNER_PROTECTED_CANARY",
+        detail: "SCANNER_PROTECTED_CANARY",
+        path: "SCANNER_PROTECTED_CANARY",
+        payload: { body: "SCANNER_PROTECTED_CANARY" },
+      });
+      expect(projected).not.toHaveProperty("code");
+      expect(projected.code_known).toBe(false);
+      expect(projected).not.toHaveProperty("stopped_code");
+      for (const field of ["message", "detail", "path", "payload"])
+        expect(projected).not.toHaveProperty(field);
+      expect(JSON.stringify(projected)).not.toContain(
+        "SCANNER_PROTECTED_CANARY",
+      );
+    }
+  });
+});
+
+describe("supplementary drift check (NOT the proof): syntax-scoped code literals in src/ are in the known set", () => {
+  it("every collected object-code or suffix-named call/new literal is a member of KNOWN_OUTCOME_CODES", () => {
     const missing = new Set<string>();
     for (const dir of ["src/runtime", "src/knowledge"])
       for (const f of readdirSync(dir).filter((n) => n.endsWith(".ts"))) {
         const text = readFileSync(`${dir}/${f}`, "utf8");
-        for (const m of text.matchAll(
-          /(?:code: |Rejection\(\s*|ClaimStateError\(\s*)"([a-z0-9_]+)"/g,
-        )) {
-          const code = m[1];
-          if (code !== undefined && !KNOWN_OUTCOME_CODES.has(code))
-            missing.add(`${f}:${code}`);
+        for (const code of collectOutcomeCodeLiterals(text)) {
+          if (!KNOWN_OUTCOME_CODES.has(code)) missing.add(`${f}:${code}`);
         }
       }
     expect([...missing]).toEqual([]);
