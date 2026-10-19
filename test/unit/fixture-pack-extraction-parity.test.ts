@@ -1,6 +1,6 @@
 // Independent primary DATA and literal original extraction precede subject import.
 // ROOT126C +126E +F1 / ROOT126G; Mike's exact mechanism approval: 2026-10-17 17:21:17 EDT.
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { runP33 } from "../support/p33-parity-runner.js";
 import { Buffer } from "node:buffer";
 import * as child from "node:child_process";
@@ -13,6 +13,12 @@ import { z } from "zod";
 import { FIXTURE_V046_PINS } from "../../src/fixture/pins.js";
 import type { FixturePins } from "../../src/fixture/pins.js";
 import type { PackSource } from "../../src/fixture/pack.js";
+import {
+  mark,
+  caseEntry,
+  nativeCall,
+} from "../support/parity-boundary-observer.mjs";
+mark("module-enter");
 
 const N = 832024;
 const H = "7e1bb1108cdd84e47269b9ab2dab20ba934fcec64d44262f86d2b505616b0747";
@@ -72,9 +78,11 @@ function originalRead(path: string, name: string, maxBytes: number): Buffer {
   )
     throw new OriginalFixtureIntegrityError("unsafe_member_name", name);
   try {
-    return child.execFileSync("unzip", ["-p", path, name], {
-      maxBuffer: maxBytes + 1,
-    });
+    return nativeCall("originalRead", "unzip", ["-p", path, name], () =>
+      child.execFileSync("unzip", ["-p", path, name], {
+        maxBuffer: maxBytes + 1,
+      }),
+    );
   } catch (error) {
     throw new OriginalFixtureIntegrityError(
       "member_read_failed",
@@ -100,6 +108,7 @@ interface Golden {
   bytes: Buffer;
   sha256: string;
 }
+mark("goldens-enter");
 const PRIMARY = fs.readFileSync(ZIP);
 expect(PRIMARY.length).toBe(N);
 expect(sha(PRIMARY)).toBe(H);
@@ -119,6 +128,7 @@ for (const row of MANIFEST.members) {
   GOLDENS.push({ name: row.path, bytes, sha256: row.sha256 });
 }
 expect(new Set(GOLDENS.map((g) => g.name)).size).toBe(134);
+mark("goldens-return");
 expect(MANIFEST.members[0]).toEqual({
   path: INVENTORY,
   bytes: 16352,
@@ -488,7 +498,9 @@ async function subject(controls: Controls = {}): Promise<{
           trace.events.push("legacy");
           if (controls.legacy) return controls.legacy();
         }
-        return apply(actual.execFileSync, actual, args) as unknown;
+        return nativeCall("subject", args[0], args[1], () =>
+          apply(actual.execFileSync, actual, args),
+        ) as unknown;
       },
     });
   });
@@ -507,9 +519,11 @@ async function subject(controls: Controls = {}): Promise<{
       });
       return actual;
     });
+  mark("subject-import-enter");
   const module = (await import(
     SUBJECT
   )) as typeof import("../../src/fixture/pack.js");
+  mark("subject-import-return");
   return { module, trace };
 }
 const profiles = {
@@ -574,7 +588,11 @@ function dataStat(
   });
   return copy;
 }
-afterEach(() => {
+beforeEach(({ task }) => {
+  caseEntry(task);
+});
+afterEach(({ task }) => {
+  mark("cleanup-enter", { state: task.result?.state ?? "unknown" });
   const leaked = realFds.size;
   for (const fd of realFds) fs.closeSync(fd);
   realFds.clear();
@@ -593,6 +611,7 @@ afterEach(() => {
   for (const directory of directories.splice(0))
     fs.rmSync(directory, { recursive: true });
   expect(leaked).toBe(0);
+  mark("cleanup-return");
 });
 
 describe("P01 all 134 independent primary members", () => {
@@ -1984,3 +2003,5 @@ describe("P38 finite ordered compounds A-H against original oracle", () => {
       counts(s.trace, "N");
     });
 });
+
+mark("registration-complete");
