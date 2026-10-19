@@ -1,0 +1,82 @@
+name: pr28-affected-validation
+
+on:
+  push:
+    branches: [diagnostic/pr28-affected-validation-001]
+
+permissions:
+  contents: read
+
+jobs:
+  affected-validation:
+    if: ${{ github.run_attempt == 1 }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        timeout-minutes: 2
+        with:
+          fetch-depth: 2
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        timeout-minutes: 2
+        with:
+          node-version: 24.21.0
+          package-manager-cache: false
+      - name: Install pinned npm
+        run: npm install --global npm@11.19.0 --ignore-scripts
+        timeout-minutes: 3
+      - name: Install locked dependencies
+        run: npm ci --ignore-scripts --no-audit --no-fund
+        timeout-minutes: 3
+      - name: Initialize evidence and record environment
+        run: /usr/bin/python3 -I -B tools/affected-validation/av.py init
+        timeout-minutes: 1
+      - name: Bind source before execution
+        run: /usr/bin/python3 -I -B tools/affected-validation/av.py bind --label pre --manifest-sha256 86f920055cb1708674aef8a76bf4c1c3466fce09239312000ec1baae0b323d4b
+        timeout-minutes: 1
+      - name: Stage 1 prerequisite - run
+        run: /bin/bash tools/affected-validation/run-stage.sh prerequisite
+        timeout-minutes: 1
+      - name: Stage 1 prerequisite - validate
+        run: /usr/bin/python3 -I -B tools/affected-validation/av.py check prerequisite --manifest-sha256 86f920055cb1708674aef8a76bf4c1c3466fce09239312000ec1baae0b323d4b
+        timeout-minutes: 1
+      - name: Stage 2 focused - run
+        run: /bin/bash tools/affected-validation/run-stage.sh focused
+        timeout-minutes: 3
+      - name: Stage 2 focused - validate
+        run: /usr/bin/python3 -I -B tools/affected-validation/av.py check focused --manifest-sha256 86f920055cb1708674aef8a76bf4c1c3466fce09239312000ec1baae0b323d4b
+        timeout-minutes: 1
+      - name: Stage 3 p33 - run
+        run: /bin/bash tools/affected-validation/run-stage.sh p33
+        timeout-minutes: 3
+      - name: Stage 3 p33 - validate
+        run: /usr/bin/python3 -I -B tools/affected-validation/av.py check p33 --manifest-sha256 86f920055cb1708674aef8a76bf4c1c3466fce09239312000ec1baae0b323d4b
+        timeout-minutes: 1
+      - name: Stage 4 parity - run
+        run: /bin/bash tools/affected-validation/run-stage.sh parity
+        timeout-minutes: 11
+      - name: Stage 4 parity - validate
+        run: /usr/bin/python3 -I -B tools/affected-validation/av.py check parity --manifest-sha256 86f920055cb1708674aef8a76bf4c1c3466fce09239312000ec1baae0b323d4b
+        timeout-minutes: 1
+      - name: Collect whitelisted evidence
+        if: ${{ always() }}
+        run: /usr/bin/python3 -I -B tools/affected-validation/av.py collect
+        timeout-minutes: 2
+      - name: Upload evidence
+        id: upload
+        if: ${{ always() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        timeout-minutes: 2
+        with:
+          name: pr28-affected-validation-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/av/upload/
+          if-no-files-found: error
+          include-hidden-files: false
+          retention-days: 30
+      - name: Final verdict
+        if: ${{ always() }}
+        env:
+          UPLOAD_OUTCOME: ${{ steps.upload.outcome }}
+        run: /usr/bin/python3 -I -B tools/affected-validation/av.py final
+        timeout-minutes: 1
