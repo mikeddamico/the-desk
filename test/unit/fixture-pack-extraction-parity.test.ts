@@ -1,9 +1,9 @@
-// Independent primary DATA and literal original extraction precede subject import.
+import { revisedLegacyRead } from "../support/legacy-native-kill-v1-reference.js";
+// Independent primary DATA and versioned reference extraction precede subject import.
 // ROOT126C +126E +F1 / ROOT126G; Mike's exact mechanism approval: 2026-10-17 17:21:17 EDT.
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { runP33 } from "../support/p33-parity-runner.js";
 import { Buffer } from "node:buffer";
-import * as child from "node:child_process";
 import * as crypto from "node:crypto";
 import * as fs from "node:fs";
 import { tmpdir } from "node:os";
@@ -13,6 +13,12 @@ import { z } from "zod";
 import { FIXTURE_V046_PINS } from "../../src/fixture/pins.js";
 import type { FixturePins } from "../../src/fixture/pins.js";
 import type { PackSource } from "../../src/fixture/pack.js";
+import {
+  mark,
+  caseEntry,
+  nativeCall,
+} from "../support/parity-boundary-observer.mjs";
+mark("module-enter");
 
 const N = 832024;
 const H = "7e1bb1108cdd84e47269b9ab2dab20ba934fcec64d44262f86d2b505616b0747";
@@ -55,33 +61,6 @@ function backing(bytes: object): unknown {
   return apply(backingGetter, bytes, []) as unknown;
 }
 
-class OriginalFixtureIntegrityError extends Error {
-  readonly code: string;
-  constructor(code: string, detail = "") {
-    super(detail ? `${code}: ${detail}` : code);
-    this.name = "FixtureIntegrityError";
-    this.code = code;
-  }
-}
-// Literal original per-member algorithm, independently bound to original reader
-// 7268 /3e14621f888f2d10e5618833fa93d34e2685c64c1298ca070d0bcc550a52a793.
-function originalRead(path: string, name: string, maxBytes: number): Buffer {
-  if (
-    !/^[A-Za-z0-9_][A-Za-z0-9_./-]*$/.test(name) ||
-    name.split("/").includes("..")
-  )
-    throw new OriginalFixtureIntegrityError("unsafe_member_name", name);
-  try {
-    return child.execFileSync("unzip", ["-p", path, name], {
-      maxBuffer: maxBytes + 1,
-    });
-  } catch (error) {
-    throw new OriginalFixtureIntegrityError(
-      "member_read_failed",
-      `${name}: ${(error as Error).message.slice(0, 120)}`,
-    );
-  }
-}
 interface Declared {
   path: string;
   bytes: number;
@@ -100,10 +79,11 @@ interface Golden {
   bytes: Buffer;
   sha256: string;
 }
+mark("goldens-enter");
 const PRIMARY = fs.readFileSync(ZIP);
 expect(PRIMARY.length).toBe(N);
 expect(sha(PRIMARY)).toBe(H);
-const MANIFEST_BYTES = originalRead(ZIP, "PACK_MEMBERS.json", 4194304);
+const MANIFEST_BYTES = revisedLegacyRead(ZIP, "PACK_MEMBERS.json", 4194304);
 expect(MANIFEST_BYTES.length).toBe(54308);
 expect(sha(MANIFEST_BYTES)).toBe(MH);
 const MANIFEST = JSON.parse(MANIFEST_BYTES.toString("utf8")) as Manifest;
@@ -113,12 +93,13 @@ const GOLDENS: Golden[] = [
   { name: "PACK_MEMBERS.json", bytes: MANIFEST_BYTES, sha256: MH },
 ];
 for (const row of MANIFEST.members) {
-  const bytes = originalRead(ZIP, row.path, row.bytes);
+  const bytes = revisedLegacyRead(ZIP, row.path, row.bytes);
   expect(bytes.length).toBe(row.bytes);
   expect(sha(bytes)).toBe(row.sha256);
   GOLDENS.push({ name: row.path, bytes, sha256: row.sha256 });
 }
 expect(new Set(GOLDENS.map((g) => g.name)).size).toBe(134);
+mark("goldens-return");
 expect(MANIFEST.members[0]).toEqual({
   path: INVENTORY,
   bytes: 16352,
@@ -488,7 +469,13 @@ async function subject(controls: Controls = {}): Promise<{
           trace.events.push("legacy");
           if (controls.legacy) return controls.legacy();
         }
-        return apply(actual.execFileSync, actual, args) as unknown;
+        return nativeCall(
+          "subject",
+          args[0],
+          args[1],
+          (): unknown => apply(actual.execFileSync, actual, args) as unknown,
+          args[2],
+        );
       },
     });
   });
@@ -507,9 +494,11 @@ async function subject(controls: Controls = {}): Promise<{
       });
       return actual;
     });
+  mark("subject-import-enter");
   const module = (await import(
     SUBJECT
   )) as typeof import("../../src/fixture/pack.js");
+  mark("subject-import-return");
   return { module, trace };
 }
 const profiles = {
@@ -574,7 +563,11 @@ function dataStat(
   });
   return copy;
 }
-afterEach(() => {
+beforeEach(({ task }) => {
+  caseEntry(task);
+});
+afterEach(({ task }) => {
+  mark("cleanup-enter", { state: task.result?.state ?? "unknown" });
   const leaked = realFds.size;
   for (const fd of realFds) fs.closeSync(fd);
   realFds.clear();
@@ -593,6 +586,7 @@ afterEach(() => {
   for (const directory of directories.splice(0))
     fs.rmSync(directory, { recursive: true });
   expect(leaked).toBe(0);
+  mark("cleanup-return");
 });
 
 describe("P01 all 134 independent primary members", () => {
@@ -760,10 +754,14 @@ function readVector(vector: ReadVector): void {
       s.module.unzipSource(path).read(name, maximum),
     );
     // The baseline observes the same then-current path after deliberate mutations.
-    const expected = snapshot(() => originalRead(path, name, maximum));
+    const expected = snapshot(() => revisedLegacyRead(path, name, maximum));
     expect(actual).toEqual(expected);
     counts(s.trace, vector.profile, vector.stages);
     vector.check?.(s.trace);
+    mark("proof-return", {
+      profile: vector.profile,
+      route: [s.trace.a, s.trace.o, s.trace.c, s.trace.l, s.trace.z],
+    });
   });
 }
 describe("P02 sentinel for all independent members", () => {
@@ -1375,7 +1373,7 @@ describe("P28-P37 legacy formats, freshness and discarded faults", () => {
     counts(s.trace, "F");
     fs.writeFileSync(path, S);
     expect(snapshot(() => source.read(INVENTORY, 16352))).toEqual(
-      snapshot(() => originalRead(path, INVENTORY, 16352)),
+      snapshot(() => revisedLegacyRead(path, INVENTORY, 16352)),
     );
     expect([s.trace.a, s.trace.o, s.trace.c, s.trace.l, s.trace.z]).toEqual([
       1, 1, 1, 1, 1,
@@ -1535,6 +1533,14 @@ const originalSchema = z.object({
     }),
   ),
 });
+class OriginalFixtureIntegrityError extends Error {
+  readonly code: string;
+  constructor(code: string, detail = "") {
+    super(detail ? `${code}: ${detail}` : code);
+    this.name = "FixtureIntegrityError";
+    this.code = code;
+  }
+}
 interface ObservedPack {
   memberNames: readonly string[];
   roles: ReadonlyMap<string, string>;
@@ -1905,11 +1911,11 @@ describe("P38 finite ordered compounds A-H against original oracle", () => {
       s = await subject(),
       source = s.module.unzipSource(path);
     expect(snapshot(() => source.read("../x", 16352))).toEqual(
-      snapshot(() => originalRead(path, "../x", 16352)),
+      snapshot(() => revisedLegacyRead(path, "../x", 16352)),
     );
     counts(s.trace, "N");
     expect(snapshot(() => source.read(INVENTORY, 16352))).toEqual(
-      snapshot(() => originalRead(path, INVENTORY, 16352)),
+      snapshot(() => revisedLegacyRead(path, INVENTORY, 16352)),
     );
     counts(s.trace, "L");
     fs.writeFileSync(path, PRIMARY);
@@ -1984,3 +1990,5 @@ describe("P38 finite ordered compounds A-H against original oracle", () => {
       counts(s.trace, "N");
     });
 });
+
+mark("registration-complete");

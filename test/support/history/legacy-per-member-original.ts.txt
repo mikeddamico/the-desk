@@ -1,0 +1,27 @@
+class OriginalFixtureIntegrityError extends Error {
+  readonly code: string;
+  constructor(code: string, detail = "") {
+    super(detail ? `${code}: ${detail}` : code);
+    this.name = "FixtureIntegrityError";
+    this.code = code;
+  }
+}
+// Literal original per-member algorithm, independently bound to original reader
+// 7268 /3e14621f888f2d10e5618833fa93d34e2685c64c1298ca070d0bcc550a52a793.
+function originalRead(path: string, name: string, maxBytes: number): Buffer {
+  if (
+    !/^[A-Za-z0-9_][A-Za-z0-9_./-]*$/.test(name) ||
+    name.split("/").includes("..")
+  )
+    throw new OriginalFixtureIntegrityError("unsafe_member_name", name);
+  try {
+    return child.execFileSync("unzip", ["-p", path, name], {
+      maxBuffer: maxBytes + 1,
+    });
+  } catch (error) {
+    throw new OriginalFixtureIntegrityError(
+      "member_read_failed",
+      `${name}: ${(error as Error).message.slice(0, 120)}`,
+    );
+  }
+}

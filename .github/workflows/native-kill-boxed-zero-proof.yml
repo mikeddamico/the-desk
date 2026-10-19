@@ -1,0 +1,44 @@
+name: pr28-native-kill-boxed-zero-proof
+
+on:
+  push:
+    branches: [diagnostic/pr28-native-kill-boxed-zero-001]
+
+permissions:
+  contents: read
+
+jobs:
+  boxed-zero-once:
+    if: ${{ github.run_attempt == 1 }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: 24.21.0
+      - run: npm install --global npm@11.19.0 --ignore-scripts
+        timeout-minutes: 3
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+        timeout-minutes: 3
+      - name: Record versions without extraction
+        run: /usr/bin/python3 tools/native-kill-proof/versions.py
+        timeout-minutes: 1
+      - name: One boxed-zero proof
+        run: /usr/bin/python3 tools/native-kill-proof/launch.py --released-run-id native-kill-boxed-zero-001 --manifest-sha256 5298fa84d64bf61dc7e2cecb60b45e63799c1cb7f087e6142cb7eba464063ceb
+        timeout-minutes: 3
+      - name: Retain evidence
+        if: ${{ always() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: pr28-native-kill-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            .native-kill-versions.json
+            .native-kill-proof-001/*.json
+            .native-kill-proof-001/output.log
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 30

@@ -453,6 +453,7 @@ export function unzipSource(zipPath: string): PackSource {
         if (optional !== undefined) return optional;
         return execFileSync("unzip", ["-p", zipPath, name], {
           maxBuffer: maxBytes + 1,
+          killSignal: "SIGKILL",
         });
       } catch (error) {
         throw new FixtureIntegrityError(
