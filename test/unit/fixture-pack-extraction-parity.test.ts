@@ -1,9 +1,9 @@
-// Independent primary DATA and literal original extraction precede subject import.
+import { revisedLegacyRead } from "../support/legacy-native-kill-v1-reference.js";
+// Independent primary DATA and versioned reference extraction precede subject import.
 // ROOT126C +126E +F1 / ROOT126G; Mike's exact mechanism approval: 2026-10-17 17:21:17 EDT.
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { runP33 } from "../support/p33-parity-runner.js";
 import { Buffer } from "node:buffer";
-import * as child from "node:child_process";
 import * as crypto from "node:crypto";
 import * as fs from "node:fs";
 import { tmpdir } from "node:os";
@@ -55,33 +55,6 @@ function backing(bytes: object): unknown {
   return apply(backingGetter, bytes, []) as unknown;
 }
 
-class OriginalFixtureIntegrityError extends Error {
-  readonly code: string;
-  constructor(code: string, detail = "") {
-    super(detail ? `${code}: ${detail}` : code);
-    this.name = "FixtureIntegrityError";
-    this.code = code;
-  }
-}
-// Literal original per-member algorithm, independently bound to original reader
-// 7268 /3e14621f888f2d10e5618833fa93d34e2685c64c1298ca070d0bcc550a52a793.
-function originalRead(path: string, name: string, maxBytes: number): Buffer {
-  if (
-    !/^[A-Za-z0-9_][A-Za-z0-9_./-]*$/.test(name) ||
-    name.split("/").includes("..")
-  )
-    throw new OriginalFixtureIntegrityError("unsafe_member_name", name);
-  try {
-    return child.execFileSync("unzip", ["-p", path, name], {
-      maxBuffer: maxBytes + 1,
-    });
-  } catch (error) {
-    throw new OriginalFixtureIntegrityError(
-      "member_read_failed",
-      `${name}: ${(error as Error).message.slice(0, 120)}`,
-    );
-  }
-}
 interface Declared {
   path: string;
   bytes: number;
@@ -103,7 +76,7 @@ interface Golden {
 const PRIMARY = fs.readFileSync(ZIP);
 expect(PRIMARY.length).toBe(N);
 expect(sha(PRIMARY)).toBe(H);
-const MANIFEST_BYTES = originalRead(ZIP, "PACK_MEMBERS.json", 4194304);
+const MANIFEST_BYTES = revisedLegacyRead(ZIP, "PACK_MEMBERS.json", 4194304);
 expect(MANIFEST_BYTES.length).toBe(54308);
 expect(sha(MANIFEST_BYTES)).toBe(MH);
 const MANIFEST = JSON.parse(MANIFEST_BYTES.toString("utf8")) as Manifest;
@@ -113,7 +86,7 @@ const GOLDENS: Golden[] = [
   { name: "PACK_MEMBERS.json", bytes: MANIFEST_BYTES, sha256: MH },
 ];
 for (const row of MANIFEST.members) {
-  const bytes = originalRead(ZIP, row.path, row.bytes);
+  const bytes = revisedLegacyRead(ZIP, row.path, row.bytes);
   expect(bytes.length).toBe(row.bytes);
   expect(sha(bytes)).toBe(row.sha256);
   GOLDENS.push({ name: row.path, bytes, sha256: row.sha256 });
@@ -759,8 +732,8 @@ function readVector(vector: ReadVector): void {
     const actual = snapshot(() =>
       s.module.unzipSource(path).read(name, maximum),
     );
-    // The baseline observes the same then-current path after deliberate mutations.
-    const expected = snapshot(() => originalRead(path, name, maximum));
+    // The versioned independent reference observes the same then-current path.
+    const expected = snapshot(() => revisedLegacyRead(path, name, maximum));
     expect(actual).toEqual(expected);
     counts(s.trace, vector.profile, vector.stages);
     vector.check?.(s.trace);
@@ -1375,7 +1348,7 @@ describe("P28-P37 legacy formats, freshness and discarded faults", () => {
     counts(s.trace, "F");
     fs.writeFileSync(path, S);
     expect(snapshot(() => source.read(INVENTORY, 16352))).toEqual(
-      snapshot(() => originalRead(path, INVENTORY, 16352)),
+      snapshot(() => revisedLegacyRead(path, INVENTORY, 16352)),
     );
     expect([s.trace.a, s.trace.o, s.trace.c, s.trace.l, s.trace.z]).toEqual([
       1, 1, 1, 1, 1,
@@ -1535,6 +1508,14 @@ const originalSchema = z.object({
     }),
   ),
 });
+class OriginalFixtureIntegrityError extends Error {
+  readonly code: string;
+  constructor(code: string, detail = "") {
+    super(detail ? `${code}: ${detail}` : code);
+    this.name = "FixtureIntegrityError";
+    this.code = code;
+  }
+}
 interface ObservedPack {
   memberNames: readonly string[];
   roles: ReadonlyMap<string, string>;
@@ -1905,11 +1886,11 @@ describe("P38 finite ordered compounds A-H against original oracle", () => {
       s = await subject(),
       source = s.module.unzipSource(path);
     expect(snapshot(() => source.read("../x", 16352))).toEqual(
-      snapshot(() => originalRead(path, "../x", 16352)),
+      snapshot(() => revisedLegacyRead(path, "../x", 16352)),
     );
     counts(s.trace, "N");
     expect(snapshot(() => source.read(INVENTORY, 16352))).toEqual(
-      snapshot(() => originalRead(path, INVENTORY, 16352)),
+      snapshot(() => revisedLegacyRead(path, INVENTORY, 16352)),
     );
     counts(s.trace, "L");
     fs.writeFileSync(path, PRIMARY);

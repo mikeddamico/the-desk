@@ -10,7 +10,8 @@ permissions:
 
 jobs:
   verify:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
+    timeout-minutes: 190
     services:
       postgres:
         image: postgres:17
@@ -26,53 +27,106 @@ jobs:
       TEST_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/the_desk_test
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        timeout-minutes: 2
         with: { fetch-depth: 0 }
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        timeout-minutes: 2
         with:
           node-version: 24.21.0
           cache: npm
       - run: npm install --global npm@11.19.0 --ignore-scripts
+        timeout-minutes: 3
       - run: npm ci --ignore-scripts
+        timeout-minutes: 5
+      - name: Bind source, identity and runner before anything runs
+        id: init
+        run: /usr/bin/python3 -I -B tools/ci-validation/ci.py init
+        timeout-minutes: 2
+      - name: Probe the disposable database (read-only)
+        run: /usr/bin/python3 -I -B tools/ci-validation/ci.py dbprobe
+        timeout-minutes: 1
       - run: npm run format:check
+        timeout-minutes: 3
       - run: npm run lint
+        timeout-minutes: 5
       - run: npm run typecheck
+        timeout-minutes: 5
       - run: npm run build
-      - name: Locate P33 evidence
-        id: p33-evidence
-        run: |
-          /usr/bin/python3 - <<'PYTHON' >> "$GITHUB_OUTPUT"
-          import hashlib, os, pathlib, tempfile
-          key = hashlib.sha256(str(pathlib.Path.cwd().resolve()).encode()).hexdigest()[:24]
-          print(f"path={tempfile.gettempdir()}/the-desk-p33-{os.getuid()}-{key}/attempt-*/**/*.json")
-          PYTHON
-      - name: Verify P33 process prerequisites
-        run: npm run test:p33:prerequisite
-      - name: Verify P33 contained deadline handling
-        run: npm run test:p33:harness
-      - name: Retain P33 controls evidence
-        if: ${{ always() && steps.p33-evidence.outputs.path != '' }}
+        timeout-minutes: 5
+      - name: Bind the emitted build output
+        run: /usr/bin/python3 -I -B tools/ci-validation/ci.py bind-build
+        timeout-minutes: 2
+      - name: Guard P33 prerequisite
+        run: /bin/bash tools/ci-validation/run-stage.sh prerequisite
+        timeout-minutes: 1
+      - name: Validate P33 prerequisite
+        run: /usr/bin/python3 -I -B tools/ci-validation/ci.py check prerequisite
+        timeout-minutes: 1
+      - name: Guard P33 focused controls
+        run: /bin/bash tools/ci-validation/run-stage.sh focused
+        timeout-minutes: 3
+      - name: Validate P33 focused controls
+        run: /usr/bin/python3 -I -B tools/ci-validation/ci.py check focused
+        timeout-minutes: 1
+      - name: Collect controls evidence
+        id: collect-controls
+        if: ${{ always() && steps.init.outcome != 'skipped' }}
+        run: /usr/bin/python3 -I -B tools/ci-validation/ci.py collect --scope controls
+        timeout-minutes: 1
+      - name: Retain controls evidence
+        id: upload-controls
+        if: ${{ always() && steps.collect-controls.outcome == 'success' }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        timeout-minutes: 2
         with:
-          name: p33-controls-${{ github.run_id }}-${{ github.run_attempt }}
-          path: ${{ steps.p33-evidence.outputs.path }}
+          name: ci-controls-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/ci/upload-controls
           if-no-files-found: error
           retention-days: 30
-      - run: npm run test:all
-      - name: Retain P33 full evidence
-        if: ${{ always() && steps.p33-evidence.outputs.path != '' }}
+      - name: Guard P33 aggregate (all)
+        run: /bin/bash tools/ci-validation/run-stage.sh all
+        timeout-minutes: 122
+      - name: Validate aggregate counts, coverage and source
+        run: /usr/bin/python3 -I -B tools/ci-validation/ci.py check all
+        timeout-minutes: 2
+      - name: Collect full evidence
+        id: collect-full
+        if: ${{ always() && steps.init.outcome != 'skipped' }}
+        run: /usr/bin/python3 -I -B tools/ci-validation/ci.py collect --scope full
+        timeout-minutes: 2
+      - name: Retain full evidence
+        id: upload-full
+        if: ${{ always() && steps.collect-full.outcome == 'success' }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        timeout-minutes: 3
         with:
-          name: p33-full-${{ github.run_id }}-${{ github.run_attempt }}
-          path: ${{ steps.p33-evidence.outputs.path }}
+          name: ci-full-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/ci/upload-full
           if-no-files-found: error
           retention-days: 30
-      - run: npm audit --audit-level=high
-      - uses: gitleaks/gitleaks-action@e0c47f4f8be36e29cdc102c57e68cb5cbf0e8d1e # v3.0.0
+      - id: audit
+        run: npm audit --audit-level=high
+        timeout-minutes: 5
+      - id: gitleaks
+        uses: gitleaks/gitleaks-action@e0c47f4f8be36e29cdc102c57e68cb5cbf0e8d1e # v3.0.0
+        timeout-minutes: 5
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Final evidence gate
+        if: ${{ always() && steps.init.outcome != 'skipped' }}
+        run: /usr/bin/python3 -I -B tools/ci-validation/ci.py final
+        timeout-minutes: 1
+        env:
+          CONTROLS_UPLOAD_OUTCOME: ${{ steps.upload-controls.outcome }}
+          UPLOAD_OUTCOME: ${{ steps.upload-full.outcome }}
+          AUDIT_OUTCOME: ${{ steps.audit.outcome }}
+          GITLEAKS_OUTCOME: ${{ steps.gitleaks.outcome }}
 
   container:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        timeout-minutes: 2
       - run: docker build --tag the-desk:${GITHUB_SHA} --build-arg DEPLOYED_COMMIT=${GITHUB_SHA} .
+        timeout-minutes: 25
