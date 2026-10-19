@@ -37,7 +37,35 @@ jobs:
       - run: npm run lint
       - run: npm run typecheck
       - run: npm run build
+      - name: Locate P33 evidence
+        id: p33-evidence
+        run: |
+          /usr/bin/python3 - <<'PYTHON' >> "$GITHUB_OUTPUT"
+          import hashlib, os, pathlib, tempfile
+          key = hashlib.sha256(str(pathlib.Path.cwd().resolve()).encode()).hexdigest()[:24]
+          print(f"path={tempfile.gettempdir()}/the-desk-p33-{os.getuid()}-{key}/attempt-*/**/*.json")
+          PYTHON
+      - name: Verify P33 process prerequisites
+        run: npm run test:p33:prerequisite
+      - name: Verify P33 contained deadline handling
+        run: npm run test:p33:harness
+      - name: Retain P33 controls evidence
+        if: ${{ always() && steps.p33-evidence.outputs.path != '' }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: p33-controls-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ steps.p33-evidence.outputs.path }}
+          if-no-files-found: error
+          retention-days: 30
       - run: npm run test:all
+      - name: Retain P33 full evidence
+        if: ${{ always() && steps.p33-evidence.outputs.path != '' }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: p33-full-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ steps.p33-evidence.outputs.path }}
+          if-no-files-found: error
+          retention-days: 30
       - run: npm audit --audit-level=high
       - uses: gitleaks/gitleaks-action@e0c47f4f8be36e29cdc102c57e68cb5cbf0e8d1e # v3.0.0
         env:

@@ -13,16 +13,19 @@
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "lint": "eslint .",
-    "test": "vitest run --exclude 'test/integration/**'",
-    "test:integration": "vitest run test/integration",
-    "test:all": "vitest run",
+    "test": "/usr/bin/python3 test/support/p33-parity-supervisor.py guard unit",
+    "test:integration": "/usr/bin/python3 test/support/p33-parity-supervisor.py guard integration",
+    "test:all": "/usr/bin/python3 test/support/p33-parity-supervisor.py guard all",
     "db:migrate": "tsx src/db/cli.ts migrate",
     "db:verify": "tsx src/db/cli.ts verify",
     "db:load-fixture": "tsx src/db/cli.ts load-fixture",
     "fixture:reenter": "tsx src/cli/fixture-reentry.ts",
     "db:reset": "tsx src/db/cli.ts reset",
     "program:attempt": "tsx src/cli/program-attempt.ts",
-    "review:wait": "tsx src/cli/review-wait.ts"
+    "review:wait": "tsx src/cli/review-wait.ts",
+    "test:p33:prerequisite": "/usr/bin/python3 test/support/p33-parity-supervisor.py guard prerequisite",
+    "test:p33:harness": "/usr/bin/python3 test/support/p33-parity-supervisor.py guard focused",
+    "test:p33": "/usr/bin/python3 test/support/p33-parity-supervisor.py guard p33"
   },
   "dependencies": {
     "pg": "8.16.3",

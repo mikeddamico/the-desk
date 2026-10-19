@@ -1,6 +1,7 @@
 // Independent primary DATA and literal original extraction precede subject import.
 // ROOT126C +126E +F1 / ROOT126G; Mike's exact mechanism approval: 2026-10-17 17:21:17 EDT.
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { runP33 } from "../support/p33-parity-runner.js";
 import { Buffer } from "node:buffer";
 import * as child from "node:child_process";
 import * as crypto from "node:crypto";
@@ -743,6 +744,10 @@ interface ReadVector {
 }
 function readVector(vector: ReadVector): void {
   it(vector.id, async () => {
+    if (vector.id === "P33 multidisk") {
+      await runP33();
+      return;
+    }
     const path = owned(vector.bytes),
       name = vector.name ?? INVENTORY;
     const maximum = (
