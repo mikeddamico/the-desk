@@ -81,7 +81,11 @@ def prerequisite():
     row = stat(os.getpid())
     if row["ppid"] != os.getppid():
         raise RuntimeError("P33 proc identity mismatch")
-    table, incomplete = pid_table(time.monotonic() + 0.25, 4096)
+    evidence = DiscoveryEvidence()
+    now = time.monotonic()
+    scan = DiscoveryScan(evidence, 'prerequisite', now, now + .25, now + .25, None, now)
+    table = pid_table(scan, 4096)
+    incomplete = scan.finish()
     if incomplete or table.get(os.getpid()) != row:
         raise RuntimeError("P33 proc table unavailable")
     return {"python": sys.version, "executable": os.path.realpath(sys.executable),
@@ -104,73 +108,165 @@ def stat(pid):
             'pgid': int(tail[2]), 'sid': int(tail[3]), 'start': int(tail[19])}
 
 
-def pid_table(deadline, maximum):
-    # One bounded process table, not the optional task/<tid>/children interface.
-    # Merely appearing here never establishes ownership or permits signalling.
+class DiscoveryEvidence:
+    """Bounded causal evidence; omitted detail never changes error semantics."""
+    def __init__(self):
+        self.started = self.completed = self.failed = self.skipped = 0
+        self.counts = {}
+        self.records = []
+        self.dropped = 0
+
+    def record(self, value):
+        if len(self.records) < 8:
+            self.records.append(value)
+        else:
+            self.dropped += 1
+
+    def skip(self, phase, now, until):
+        self.skipped += 1
+        self.record({'event': 'phase_scan_not_started', 'phase': phase,
+                     'at': now, 'phaseUntil': until, 'remaining': max(0, until-now)})
+
+    def report(self):
+        value = {'scansStarted': self.started, 'scansCompleted': self.completed,
+                 'scansFailed': self.failed, 'scansNotStarted': self.skipped,
+                 'reasonCounts': self.counts, 'records': self.records,
+                 'droppedRecords': self.dropped}
+        if len(json.dumps(value, separators=(',', ':')).encode()) > 16384:
+            raise ValueError('discovery evidence bound')
+        return value
+
+
+def discovery_identity(row):
+    return None if row is None else {k: row[k] for k in ('pid', 'start', 'ppid')}
+
+
+class DiscoveryScan:
+    def __init__(self, evidence, phase, started, deadline, until, direct, reserved):
+        self.evidence = evidence
+        self.phase = phase
+        self.started = started
+        self.deadline = deadline
+        self.until = until
+        self.reserved = reserved
+        self.direct = discovery_identity(direct)
+        self.failures = 0
+        self.first = None
+        evidence.started += 1
+
+    def fail(self, kind, stage, **detail):
+        self.failures += 1
+        key = self.phase + ':' + kind
+        self.evidence.counts[key] = self.evidence.counts.get(key, 0) + 1
+        if self.first is None:
+            self.first = {'kind': kind, 'stage': stage, **detail}
+
+    def read_error(self, stage, pid, error):
+        self.fail('stat_error', stage, pid=pid, error=type(error).__name__,
+                  errno=getattr(error, 'errno', None))
+
+    def expired(self, stage):
+        if time.monotonic() >= self.deadline:
+            self.fail('deadline', stage)
+            return True
+        return False
+
+    def finish(self):
+        ended = time.monotonic()
+        if ended >= self.deadline:
+            self.fail('deadline', 'scan_end')
+        if self.failures:
+            self.evidence.failed += 1
+            self.evidence.record({'event': 'scan_failed', 'phase': self.phase,
+                'reservedAt': self.reserved, 'started': self.started, 'ended': ended,
+                'deadline': self.deadline, 'phaseUntil': self.until,
+                'grantedSeconds': self.deadline-self.reserved,
+                'direct': self.direct, 'firstFailure': self.first,
+                'failureCount': self.failures, 'omittedFailureDetails': self.failures-1})
+        else:
+            self.evidence.completed += 1
+        return self.failures != 0
+
+
+def pid_table(scan, maximum):
+    # Enumeration never establishes ownership or permits signalling.
     if INJECT_EMPTY:
-        return {}, False  # Harness D only: known-child corroboration must fail.
+        return {}  # Known-child corroboration must still fail.
     rows = {}
-    incomplete = False
     entries_seen = 0
-    with os.scandir('/proc') as entries:
-        while True:
-            if time.monotonic() >= deadline:
-                return rows, True
-            try:
-                entry = next(entries)
-            except StopIteration:
-                break
-            entries_seen += 1
-            if entries_seen > maximum:
-                return rows, True
-            if not entry.name.isascii() or not entry.name.isdecimal():
-                continue
-            try:
-                row = stat(int(entry.name))
-            except FileNotFoundError:
-                # An enumerated process can exit before its stat read. A missing
-                # known child is checked separately, never excused by this race.
-                continue
-            except (OSError, ValueError, IndexError):
-                incomplete = True
-                continue
-            rows[row['pid']] = row
-    return rows, incomplete or time.monotonic() >= deadline
+    try:
+        with os.scandir('/proc') as entries:
+            while True:
+                if scan.expired('table_enumeration'):
+                    break
+                try:
+                    entry = next(entries)
+                except StopIteration:
+                    break
+                entries_seen += 1
+                if entries_seen > maximum:
+                    scan.fail('entry_bound', 'table_enumeration')
+                    break
+                if not entry.name.isascii() or not entry.name.isdecimal():
+                    continue
+                pid = int(entry.name)
+                try:
+                    row = stat(pid)
+                except FileNotFoundError:
+                    # Only an enumerated, not known-direct, disappearing PID.
+                    continue
+                except (OSError, ValueError, IndexError) as error:
+                    scan.read_error('table_stat', pid, error)
+                    continue
+                rows[row['pid']] = row
+    except OSError as error:
+        scan.fail('table_io', 'table_enumeration', error=type(error).__name__, errno=error.errno)
+    return rows
 
 
-def owned(maximum=4096, seconds=2, direct=None):
-    """Bounded PPID closure rooted only in this dedicated supervisor."""
-    deadline = time.monotonic() + seconds
+def owned(maximum=4096, seconds=2, direct=None, *, deadline=None,
+          evidence=None, phase='standalone', phase_until=None, reserved_at=None):
+    """Bounded PPID closure; every attempted scan has one immutable deadline."""
+    started = time.monotonic()
+    deadline = started + seconds if deadline is None else deadline
+    evidence = DiscoveryEvidence() if evidence is None else evidence
+    scan = DiscoveryScan(evidence, phase, started, deadline, phase_until, direct,
+                         started if reserved_at is None else reserved_at)
     root = os.getpid()
-    table, incomplete = pid_table(deadline, maximum)
+    table = pid_table(scan, maximum)
     rows = {}
     queue = [root]
-    # A direct child remains ours until positively reaped. Require a separate
-    # identity read AND corroboration in the table, including for a zombie.
+
+    def done():
+        return list(rows.values()), scan.finish()
+
+    # Never excuse a missing/recycled known child, including a zombie.
     if direct is not None:
-        if time.monotonic() >= deadline:
-            return [], True
+        if scan.expired('direct_identity'):
+            return done()
         try:
             row = stat(direct['pid'])
             if row['start'] != direct['start'] or row['ppid'] != root:
-                incomplete = True
+                scan.fail('direct_identity', 'direct_identity',
+                          expected=discovery_identity(direct), observed=discovery_identity(row))
             else:
                 rows[row['pid']] = row
                 queue.append(row['pid'])
                 observed = table.get(row['pid'])
                 if (observed is None or observed['start'] != row['start'] or
                         observed['ppid'] != root):
-                    incomplete = True
-        except (OSError, ValueError, IndexError):
-            incomplete = True
+                    scan.fail('direct_corroboration', 'direct_identity',
+                              expected=discovery_identity(row), observed=discovery_identity(observed))
+        except (OSError, ValueError, IndexError) as error:
+            scan.read_error('direct_identity', direct['pid'], error)
     by_parent = {}
     for row in table.values():
-        if time.monotonic() >= deadline:
-            return list(rows.values()), True
+        if scan.expired('parent_index'):
+            return done()
         by_parent.setdefault(row['ppid'], []).append(row)
     while queue:
-        if time.monotonic() >= deadline:
-            return list(rows.values()), True
+        if scan.expired('closure'):
+            return done()
         parent = queue.pop()
         if parent != root:
             try:
@@ -178,31 +274,36 @@ def owned(maximum=4096, seconds=2, direct=None):
                 expected = rows[parent]
                 if (current['start'] != expected['start'] or
                         current['ppid'] != expected['ppid']):
-                    incomplete = True
+                    scan.fail('parent_identity', 'closure',
+                              expected=discovery_identity(expected), observed=discovery_identity(current))
                     continue
             except FileNotFoundError:
-                continue  # adoption will be discovered on the next bounded scan
-            except (OSError, ValueError, IndexError):
-                incomplete = True
+                continue  # Existing disappearance treatment; no new PPID exception.
+            except (OSError, ValueError, IndexError) as error:
+                scan.read_error('closure_parent', parent, error)
                 continue
         for row in by_parent.get(parent, ()):
-            if time.monotonic() >= deadline or len(rows) >= maximum:
-                return list(rows.values()), True
+            if scan.expired('closure_child'):
+                return done()
+            if len(rows) >= maximum:
+                scan.fail('row_bound', 'closure_child')
+                return done()
             if row['pid'] in rows or row['pid'] == root:
                 continue
             try:
                 current = stat(row['pid'])
                 if current['start'] != row['start'] or current['ppid'] != parent:
-                    incomplete = True
+                    scan.fail('child_identity', 'closure_child',
+                              expected=discovery_identity(row), observed=discovery_identity(current))
                     continue
             except FileNotFoundError:
                 continue
-            except (OSError, ValueError, IndexError):
-                incomplete = True
+            except (OSError, ValueError, IndexError) as error:
+                scan.read_error('closure_child', row['pid'], error)
                 continue
             rows[row['pid']] = current
             queue.append(row['pid'])
-    return list(rows.values()), incomplete or time.monotonic() >= deadline
+    return done()
 
 
 def signal_rows(rows, sig, deadline, maximum=4096):
@@ -246,6 +347,7 @@ def _settle(proc, direct, budget=1.0):
     """Reserve leader until final group signal; then positive consuming waits."""
     start = time.monotonic()
     errors, reaped = set(), []
+    evidence = DiscoveryEvidence()
     rows = []
     for sig, fraction in ((signal.SIGTERM, .25), (signal.SIGKILL, .75)):
         until = start + budget * fraction
@@ -258,7 +360,16 @@ def _settle(proc, direct, budget=1.0):
             except OSError as error:
                 errors.add('group:' + type(error).__name__)
             try:
-                rows, incomplete = owned(seconds=min(.025, max(0, until-time.monotonic())), direct=direct)
+                now = time.monotonic()
+                phase = 'term' if sig == signal.SIGTERM else 'kill'
+                if now + .025 > until:
+                    evidence.skip(phase, now, until)
+                    # Keep the original transition cutoff, never start a tiny scan.
+                    while time.monotonic() < until:
+                        time.sleep(min(.005, max(0, until-time.monotonic())))
+                    break
+                rows, incomplete = owned(direct=direct, deadline=now+.025,
+                    evidence=evidence, phase=phase, phase_until=until, reserved_at=now)
                 if incomplete:
                     errors.add('discovery_incomplete')
                 errors.update(signal_rows(rows, sig, until))
@@ -288,10 +399,19 @@ def _settle(proc, direct, budget=1.0):
             if pid == proc.pid:
                 direct_reaped = True
                 proc.returncode = os.waitstatus_to_exitcode(raw)
+        # Never reuse completion from before this iteration's consuming waits.
+        complete = False
         try:
-            rows, incomplete = owned(seconds=min(.025, max(0, until-time.monotonic())),
-                                     direct=None if direct_reaped else direct)
+            now = time.monotonic()
+            if now + .025 > until:
+                evidence.skip('final', now, until)
+                break  # No fresh scan: HOLD, even if consuming waits reached ECHILD.
+            rows, incomplete = owned(direct=None if direct_reaped else direct,
+                deadline=now+.025, evidence=evidence, phase='final',
+                phase_until=until, reserved_at=now)
             complete = not incomplete
+            if incomplete:
+                errors.add('discovery_incomplete')
             errors.update(signal_rows(rows, signal.SIGKILL, until))
         except (OSError, ValueError) as error:
             complete = False
@@ -301,7 +421,8 @@ def _settle(proc, direct, budget=1.0):
         time.sleep(min(.005, max(0, until-time.monotonic())))
     return {'settled': direct_reaped and no_children and complete and not rows and not errors,
             'directReaped': direct_reaped, 'noChildren': no_children, 'complete': complete,
-            'reaped': reaped, 'residual': rows, 'errors': sorted(errors)}
+            'reaped': reaped, 'residual': rows, 'errors': sorted(errors),
+            'discoveryDetails': evidence.report()}
 
 
 def settle(proc, direct, budget=1.0):
@@ -457,10 +578,13 @@ def case_owner(args):
                 os.waitpid(-1, os.WNOHANG)
             except ChildProcessError:
                 no_children = True
-            rows, incomplete = owned(seconds=.025)
+            evidence = DiscoveryEvidence()
+            rows, incomplete = owned(seconds=.025, evidence=evidence, phase='no_child')
             settlement = {'settled': no_children and not incomplete and not rows,
                           'directReaped': False, 'childStarted': False, 'noChildren': no_children,
-                          'complete': not incomplete, 'reaped': [], 'residual': rows, 'errors': []}
+                          'complete': not incomplete, 'reaped': [], 'residual': rows,
+                          'errors': ['discovery_incomplete'] if incomplete else [],
+                          'discoveryDetails': evidence.report()}
         else:
             settlement = settle(proc, direct)
             settlement['childStarted'] = True
