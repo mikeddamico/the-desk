@@ -1,7 +1,7 @@
+import { revisedLegacyRead } from "./legacy-native-kill-v1-reference.js";
 // P33 only: no primary corpus import or native extraction during collection.
 import { afterEach, expect, it, vi } from "vitest";
 import { Buffer } from "node:buffer";
-import * as child from "node:child_process";
 import * as fs from "node:fs";
 import * as crypto from "node:crypto";
 import { join } from "node:path";
@@ -37,33 +37,6 @@ function backing(bytes: object): unknown {
   return apply(backingGetter, bytes, []) as unknown;
 }
 
-class OriginalFixtureIntegrityError extends Error {
-  readonly code: string;
-  constructor(code: string, detail = "") {
-    super(detail ? `${code}: ${detail}` : code);
-    this.name = "FixtureIntegrityError";
-    this.code = code;
-  }
-}
-// Literal original per-member algorithm, independently bound to original reader
-// 7268 /3e14621f888f2d10e5618833fa93d34e2685c64c1298ca070d0bcc550a52a793.
-function originalRead(path: string, name: string, maxBytes: number): Buffer {
-  if (
-    !/^[A-Za-z0-9_][A-Za-z0-9_./-]*$/.test(name) ||
-    name.split("/").includes("..")
-  )
-    throw new OriginalFixtureIntegrityError("unsafe_member_name", name);
-  try {
-    return child.execFileSync("unzip", ["-p", path, name], {
-      maxBuffer: maxBytes + 1,
-    });
-  } catch (error) {
-    throw new OriginalFixtureIntegrityError(
-      "member_read_failed",
-      `${name}: ${(error as Error).message.slice(0, 120)}`,
-    );
-  }
-}
 function patchMethod(target: object, key: string, value: unknown): void {
   const descriptor = own(target, key);
   if (!descriptor || !("value" in descriptor))
@@ -346,7 +319,7 @@ it("P33 multidisk", async () => {
   fs.writeFileSync(path, bytes, { flag: "wx" });
   const s = await subject();
   const actual = snapshot(() => s.module.unzipSource(path).read("a.txt", 0));
-  const expected = snapshot(() => originalRead(path, "a.txt", 0));
+  const expected = snapshot(() => revisedLegacyRead(path, "a.txt", 0));
   expect(actual).toEqual(expected);
   expect([s.trace.a, s.trace.o, s.trace.c, s.trace.l, s.trace.z]).toEqual([
     0, 0, 0, 1, 0,
