@@ -103,8 +103,9 @@ const INV_OFFSET = {
   ended_at: "2026-10-19T19:00:01.250000-05:00",
   created_at: "2026-10-20T00:00:02.000001+00:00",
 };
-const ANCHORS = Array.from({ length: 17 }, (_, i) =>
-  `t${String(i + 1).padStart(2, "0")}`,
+const ANCHORS = Array.from(
+  { length: 17 },
+  (_, i) => `t${String(i + 1).padStart(2, "0")}`,
 );
 const C8 = "d1250008-0000-4000-8000-000000000008";
 const E11 = "d1250007-0000-4000-8000-000000000011";
@@ -221,8 +222,7 @@ interface MSpec {
   prediction_candidates: MPrediction[];
   [key: string]: unknown;
 }
-const clone = (): MSpec =>
-  JSON.parse(JSON.stringify(PASS1_SPECIMEN)) as MSpec;
+const clone = (): MSpec => JSON.parse(JSON.stringify(PASS1_SPECIMEN)) as MSpec;
 const turnOf = (spec: MSpec, anchor: string): MTurn => {
   const turn = spec.turns.find((t) => t.semantic_turn_id === anchor);
   if (!turn) throw new Error(`no turn ${anchor}`);
@@ -259,8 +259,7 @@ const stopOf = (result: ReturnType<typeof planWriterPass1>): Pass1Stopped => {
   if (result.kind !== "stopped") throw new Error("expected a stop");
   return result;
 };
-const codeOf = (specimen: unknown): StopCode =>
-  stopOf(planWith(specimen)).code;
+const codeOf = (specimen: unknown): StopCode => stopOf(planWith(specimen)).code;
 /**
  * One-field mutation protocol: the positive control plans first, the mutation stops with the named first error at the admission stage
  * with nothing written and every fact unknown, and the repair (an unmutated clone) plans again.
@@ -343,8 +342,6 @@ const asStored = (planned: PlannedRow, over: Obj = {}): Obj => {
     out[`eq_${c.name}`] = sameJson(out[c.name], planned.row[c.name]);
   return out;
 };
-const stage = (kind: "t1" | "t3", table?: string): PlannedRow[] =>
-  plan[kind].filter((p) => table === undefined || p.spec.table === table);
 
 /** One raw snapshot as the pure classifier receives it, built from the four stage bits (T1, reservation, event, T3). */
 interface Bits {
@@ -377,7 +374,8 @@ const rawFor = (bits: Bits, tweak: Tweak = {}): RawSnapshot => {
   const own: Record<string, Obj[]> = {};
   for (const spec of Object.values(TABLE_SPECS)) own[spec.table] = [];
   const add = (list: readonly PlannedRow[]): void => {
-    for (const planned of list) own[planned.spec.table]?.push(asStored(planned));
+    for (const planned of list)
+      own[planned.spec.table]?.push(asStored(planned));
   };
   if (bits.t1) add(plan.t1);
   if (bits.t3) add(plan.t3);
@@ -459,7 +457,8 @@ class FakeClient extends EventEmitter {
     this.statements.push(text);
     this.log.push(`query ${text.split(" ")[0] ?? text}`);
     this.afterQuery?.(text);
-    if (this.failOn?.(text)) return Promise.reject(new Error("statement failed"));
+    if (this.failOn?.(text))
+      return Promise.reject(new Error("statement failed"));
     const step = this.script.get(text);
     if (step) return step().then(() => ({ rows: [] }));
     if (text.includes("transaction_isolation"))
@@ -531,153 +530,197 @@ const OBSERVER = {
 };
 
 describe("writer Pass-1 plan, admission and mapping (unit)", () => {
-  it("U01 real build: the six pinned identities", () => {
-    const built = buildFixtureWriterInput();
-    expect(built.kind).toBe("fixture_writer_input");
-    if (built.kind !== "fixture_writer_input") return;
-    const data = built.data as unknown as Obj;
-    const w = data.writer_data as Obj;
-    const c = data.writer_context_manifest as Obj;
-    const binding = data.binding as Obj;
-    expect(sha256(canonicalBytes(w))).toBe(PASS1_PIN.w_raw_sha256);
-    expect(domainHash("writer-view-v2", w)).toBe(PASS1_PIN.w_domain_sha256);
-    expect(sha256(canonicalBytes(c))).toBe(PASS1_PIN.c_raw_sha256);
-    expect(domainHash("writer-context-manifest-v2", c)).toBe(
-      PASS1_PIN.c_domain_sha256,
-    );
-    expect((binding.representation_registry as Obj).sha256).toBe(
-      PASS1_PIN.r_raw_sha256,
-    );
-    expect(built.identity.sha256).toBe(PASS1_PIN.a_raw_sha256);
-    expect(Buffer.byteLength(built.writer_data_json, "utf8")).toBe(11788);
-    expect(planWriterPass1(INV).kind).toBe("planned");
-  }, T);
-
-  it("U02 factory boundary: refusal, thrown fault, the unrelated throwable itself, nothing downstream", () => {
-    expect(planWith(PASS1_SPECIMEN).kind).toBe("planned"); // positive control
-    let calls = 0;
-    let downstream = 0;
-    // `specimen` is read only AFTER the factory boundary: a read here proves work continued past a failed factory
-    const watched = (build: () => FixtureWriterInputResult) => ({
-      build: () => {
-        calls += 1;
-        return build();
-      },
-      get specimen(): unknown {
-        downstream += 1;
-        return undefined;
-      },
-    });
-    const refused = {
-      kind: "rejected",
-      profile: "writer-fixture-input/2",
-      phase: 3,
-      code: "reader_refused",
-      field: "pack",
-      reader_code: null,
-      parser_code: null,
-    } as unknown as FixtureWriterInputResult;
-    const a = stopOf(planWriterPass1(INV, watched(() => refused)));
-    expect(a.code).toBe("pass1_input_refused");
-    expect(a.stage).toBe("input");
-    expect(a.input).toEqual({ phase: 3, code: "reader_refused", field: "pack" });
-    expect(a.writes_attempted).toBe(false);
-    expect(a.durable).toEqual(UNKNOWN4);
-    const b = stopOf(
-      planWriterPass1(
-        INV,
-        watched(() => {
-          throw new FixtureWriterInputFault(3);
-        }),
-      ),
-    );
-    expect(b.code).toBe("pass1_input_fault");
-    expect(b.input).toEqual({ phase: 3 });
-    const sentinel = new TypeError("unrelated");
-    let caught: unknown;
-    try {
-      planWriterPass1(
-        INV,
-        watched(() => {
-          throw sentinel;
-        }),
+  it(
+    "U01 real build: the six pinned identities",
+    () => {
+      const built = buildFixtureWriterInput();
+      expect(built.kind).toBe("fixture_writer_input");
+      if (built.kind !== "fixture_writer_input") return;
+      const data = built.data as unknown as Obj;
+      const w = data.writer_data as Obj;
+      const c = data.writer_context_manifest as Obj;
+      const binding = data.binding as Obj;
+      expect(sha256(canonicalBytes(w))).toBe(PASS1_PIN.w_raw_sha256);
+      expect(domainHash("writer-view-v2", w)).toBe(PASS1_PIN.w_domain_sha256);
+      expect(sha256(canonicalBytes(c))).toBe(PASS1_PIN.c_raw_sha256);
+      expect(domainHash("writer-context-manifest-v2", c)).toBe(
+        PASS1_PIN.c_domain_sha256,
       );
-    } catch (error) {
-      caught = error;
-    }
-    expect(caught).toBe(sentinel); // the very same object, not a copy or a wrapper
-    expect(calls).toBe(3);
-    expect(downstream).toBe(0); // nothing past the factory boundary ran in any of the three
-    expect(planWith(PASS1_SPECIMEN).kind).toBe("planned"); // repair
-  }, T);
+      expect((binding.representation_registry as Obj).sha256).toBe(
+        PASS1_PIN.r_raw_sha256,
+      );
+      expect(built.identity.sha256).toBe(PASS1_PIN.a_raw_sha256);
+      expect(Buffer.byteLength(built.writer_data_json, "utf8")).toBe(11788);
+      expect(planWriterPass1(INV).kind).toBe("planned");
+    },
+    T,
+  );
 
-  it("U03 derived ids: deterministic, v4, 40 distinct, independent of every invocation form", () => {
-    const found = (p: Pass1Plan): Record<string, string> => {
-      const out: Record<string, string> = {
-        "artifact:writer_view_v2": String(p.t1[0]?.row.artifact_id),
-        "artifact:writer_context_manifest_v2": String(p.t1[1]?.row.artifact_id),
-        "artifact:prompt_manifest_2": String(p.t1[2]?.row.artifact_id),
-        "artifact:script_pass1": p.ids.script_artifact_id,
-        prompt_manifest: p.ids.prompt_manifest_id,
-        provider_call: p.ids.provider_call_id,
-        model_run: p.ids.model_run_id,
-        script_version: p.ids.script_version_id,
-      };
-      ANCHORS.forEach((anchor, index) => {
-        out[`turn:${anchor}`] = p.ids.turn_ids[index] ?? "";
+  it(
+    "U02 factory boundary: refusal, thrown fault, the unrelated throwable itself, nothing downstream",
+    () => {
+      expect(planWith(PASS1_SPECIMEN).kind).toBe("planned"); // positive control
+      let calls = 0;
+      let downstream = 0;
+      // `specimen` is read only AFTER the factory boundary: a read here proves work continued past a failed factory
+      const watched = (build: () => FixtureWriterInputResult) => ({
+        build: () => {
+          calls += 1;
+          return build();
+        },
+        get specimen(): unknown {
+          downstream += 1;
+          return undefined;
+        },
       });
-      for (const planned of p.t3) {
-        const row = planned.row;
-        const tag =
-          planned.spec.table === "turn_claim_uses"
-            ? "turn_claim_use"
-            : planned.spec.table === "turn_evidence_uses"
-              ? "turn_evidence_use"
-              : undefined;
-        if (tag === undefined) continue;
-        const targetKey = tag === "turn_claim_use" ? "claim_id" : "evidence_unit_id";
-        const idKey = tag === "turn_claim_use" ? "turn_claim_use_id" : "turn_evidence_use_id";
-        const anchor = ANCHORS[p.ids.turn_ids.indexOf(String(row.turn_id))] ?? "";
-        out[`${tag}:${anchor}:${String(row[targetKey]).slice(-2)}:${String(row.use_mode)}:${String(row.span_start)}`] = String(row[idKey]);
+      const refused = {
+        kind: "rejected",
+        profile: "writer-fixture-input/2",
+        phase: 3,
+        code: "reader_refused",
+        field: "pack",
+        reader_code: null,
+        parser_code: null,
+      } as unknown as FixtureWriterInputResult;
+      const a = stopOf(
+        planWriterPass1(
+          INV,
+          watched(() => refused),
+        ),
+      );
+      expect(a.code).toBe("pass1_input_refused");
+      expect(a.stage).toBe("input");
+      expect(a.input).toEqual({
+        phase: 3,
+        code: "reader_refused",
+        field: "pack",
+      });
+      expect(a.writes_attempted).toBe(false);
+      expect(a.durable).toEqual(UNKNOWN4);
+      const b = stopOf(
+        planWriterPass1(
+          INV,
+          watched(() => {
+            throw new FixtureWriterInputFault(3);
+          }),
+        ),
+      );
+      expect(b.code).toBe("pass1_input_fault");
+      expect(b.input).toEqual({ phase: 3 });
+      const sentinel = new TypeError("unrelated");
+      let caught: unknown;
+      try {
+        planWriterPass1(
+          INV,
+          watched(() => {
+            throw sentinel;
+          }),
+        );
+      } catch (error) {
+        caught = error;
       }
-      return out;
-    };
-    expect(found(plan)).toEqual(EXPECTED_IDS);
-    const values = Object.values(EXPECTED_IDS);
-    expect(new Set(values).size).toBe(40);
-    for (const id of values)
-      expect(id).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
-    // independent of the invocation instants and of the way they are written (offset, equivalent instant, 6 fractional digits)
-    for (const invocation of [
-      { ...INV, started_at: "2026-11-01T01:02:03Z", ended_at: "2026-11-01T01:02:04Z", created_at: "2026-11-01T01:02:05Z" },
-      INV_OFFSET,
-      { ...INV, ended_at: INV.started_at }, // ended_at equal to started_at is allowed
-      { ...INV, ended_at: "2026-10-20T02:00:00+02:00" }, // the same instant written with an offset
-    ]) {
-      const again = planWriterPass1(invocation, { build: realBuild });
-      if (again.kind !== "planned") throw new Error(`plan stopped ${again.code}`);
-      expect(found(again.plan)).toEqual(EXPECTED_IDS);
-      expect(again.plan.reservation.started_at).toBe(invocation.started_at);
-    }
-    // invalid invocations stop before anything else, with the closed rejection code
-    const invalid: [Obj, string][] = [
-      [{ ...INV, attempt_id: "not-a-uuid" }, "invalid_uuid"],
-      [{ ...INV, started_at: "2026-10-20 00:00:00" }, "invalid_timestamp"],
-      [{ ...INV, created_at: "2026-10-20T00:00:02" }, "invalid_timestamp"],
-      [{ ...INV, started_at: "2026-10-20T00:00:00.1234567Z" }, "timestamp_precision"],
-      [{ ...INV, ended_at: "2026-10-19T23:59:59.999999Z" }, "invalid_timestamp"], // one microsecond before started_at
-    ];
-    for (const [invocation, code] of invalid) {
-      const stop = stopOf(planWriterPass1(invocation, { build: realBuild }));
-      expect(stop.code).toBe("pass1_invocation_invalid");
-      expect(stop.stage).toBe("input");
-      expect(stop.rejection_code).toBe(code);
-    }
-    // a changed script changes all 17 turn ids
-    const other = "0".repeat(64);
-    const changed = ANCHORS.map((a) => derivePass1Id(`turn:${other}:${a}`));
-    expect(changed.every((id, i) => id !== plan.ids.turn_ids[i])).toBe(true);
-  }, T);
+      expect(caught).toBe(sentinel); // the very same object, not a copy or a wrapper
+      expect(calls).toBe(3);
+      expect(downstream).toBe(0); // nothing past the factory boundary ran in any of the three
+      expect(planWith(PASS1_SPECIMEN).kind).toBe("planned"); // repair
+    },
+    T,
+  );
+
+  it(
+    "U03 derived ids: deterministic, v4, 40 distinct, independent of every invocation form",
+    () => {
+      const found = (p: Pass1Plan): Record<string, string> => {
+        const out: Record<string, string> = {
+          "artifact:writer_view_v2": String(p.t1[0]?.row.artifact_id),
+          "artifact:writer_context_manifest_v2": String(
+            p.t1[1]?.row.artifact_id,
+          ),
+          "artifact:prompt_manifest_2": String(p.t1[2]?.row.artifact_id),
+          "artifact:script_pass1": p.ids.script_artifact_id,
+          prompt_manifest: p.ids.prompt_manifest_id,
+          provider_call: p.ids.provider_call_id,
+          model_run: p.ids.model_run_id,
+          script_version: p.ids.script_version_id,
+        };
+        ANCHORS.forEach((anchor, index) => {
+          out[`turn:${anchor}`] = p.ids.turn_ids[index] ?? "";
+        });
+        for (const planned of p.t3) {
+          const row = planned.row;
+          const tag =
+            planned.spec.table === "turn_claim_uses"
+              ? "turn_claim_use"
+              : planned.spec.table === "turn_evidence_uses"
+                ? "turn_evidence_use"
+                : undefined;
+          if (tag === undefined) continue;
+          const targetKey =
+            tag === "turn_claim_use" ? "claim_id" : "evidence_unit_id";
+          const idKey =
+            tag === "turn_claim_use"
+              ? "turn_claim_use_id"
+              : "turn_evidence_use_id";
+          const anchor =
+            ANCHORS[p.ids.turn_ids.indexOf(String(row.turn_id))] ?? "";
+          out[
+            `${tag}:${anchor}:${String(row[targetKey]).slice(-2)}:${String(row.use_mode)}:${String(row.span_start)}`
+          ] = String(row[idKey]);
+        }
+        return out;
+      };
+      expect(found(plan)).toEqual(EXPECTED_IDS);
+      const values = Object.values(EXPECTED_IDS);
+      expect(new Set(values).size).toBe(40);
+      for (const id of values)
+        expect(id).toMatch(
+          /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/,
+        );
+      // independent of the invocation instants and of the way they are written (offset, equivalent instant, 6 fractional digits)
+      for (const invocation of [
+        {
+          ...INV,
+          started_at: "2026-11-01T01:02:03Z",
+          ended_at: "2026-11-01T01:02:04Z",
+          created_at: "2026-11-01T01:02:05Z",
+        },
+        INV_OFFSET,
+        { ...INV, ended_at: INV.started_at }, // ended_at equal to started_at is allowed
+        { ...INV, ended_at: "2026-10-20T02:00:00+02:00" }, // the same instant written with an offset
+      ]) {
+        const again = planWriterPass1(invocation, { build: realBuild });
+        if (again.kind !== "planned")
+          throw new Error(`plan stopped ${again.code}`);
+        expect(found(again.plan)).toEqual(EXPECTED_IDS);
+        expect(again.plan.reservation.started_at).toBe(invocation.started_at);
+      }
+      // invalid invocations stop before anything else, with the closed rejection code
+      const invalid: [Obj, string][] = [
+        [{ ...INV, attempt_id: "not-a-uuid" }, "invalid_uuid"],
+        [{ ...INV, started_at: "2026-10-20 00:00:00" }, "invalid_timestamp"],
+        [{ ...INV, created_at: "2026-10-20T00:00:02" }, "invalid_timestamp"],
+        [
+          { ...INV, started_at: "2026-10-20T00:00:00.1234567Z" },
+          "timestamp_precision",
+        ],
+        [
+          { ...INV, ended_at: "2026-10-19T23:59:59.999999Z" },
+          "invalid_timestamp",
+        ], // one microsecond before started_at
+      ];
+      for (const [invocation, code] of invalid) {
+        const stop = stopOf(planWriterPass1(invocation, { build: realBuild }));
+        expect(stop.code).toBe("pass1_invocation_invalid");
+        expect(stop.stage).toBe("input");
+        expect(stop.rejection_code).toBe(code);
+      }
+      // a changed script changes all 17 turn ids
+      const other = "0".repeat(64);
+      const changed = ANCHORS.map((a) => derivePass1Id(`turn:${other}:${a}`));
+      expect(changed.every((id, i) => id !== plan.ids.turn_ids[i])).toBe(true);
+    },
+    T,
+  );
 
   it("U04 request: 678 B ASCII, sorted keys, recomputed and reconstructed", () => {
     const text = plan.request_text;
@@ -742,8 +785,10 @@ describe("writer Pass-1 plan, admission and mapping (unit)", () => {
     const evidence = records(wObj.selected_evidence);
     expect(evidence).toHaveLength(3);
     const authorized: Record<string, string> = {
-      [E03]: "Reporting by the North Coast Gazette describes Northbridge working in training on a 5-4-1 setup for late-match situations.",
-      [E04]: "Matchboard Analysis describes Southbank's focus on wide areas after the break as a possible intentional answer to Northbridge compressing midfield.",
+      [E03]:
+        "Reporting by the North Coast Gazette describes Northbridge working in training on a 5-4-1 setup for late-match situations.",
+      [E04]:
+        "Matchboard Analysis describes Southbank's focus on wide areas after the break as a possible intentional answer to Northbridge compressing midfield.",
     };
     for (const [id, text] of Object.entries(authorized)) {
       const unit = evidence.find((e) => e.evidence_unit_id === id);
@@ -753,29 +798,42 @@ describe("writer Pass-1 plan, admission and mapping (unit)", () => {
     }
   });
 
-  it("U06 one-character change of the instruction or template", () => {
-    const refs = (plan.manifest.ordered_input_artifacts as Obj[]).map((r) => ({
-      artifact_id: String(r.artifact_id),
-      artifact_type: String(r.artifact_type),
-      content_hash: String(r.content_hash),
-    }));
-    expect(requestMatchesPin(renderWriterPass1Request(refs))).toBe(true);
-    for (const recipe of [
-      { ...REQUEST_RECIPE, instruction: `${REQUEST_RECIPE.instruction}.` },
-      { ...REQUEST_RECIPE, template_version: "writer-pass1-fixture-v3" },
-    ]) {
-      expect(requestMatchesPin(renderWriterPass1Request(refs, recipe))).toBe(false);
-      const stop = stopOf(planWriterPass1(INV, { build: realBuild, recipe }));
-      expect(stop.code).toBe("pass1_request_hash_mismatch");
-      expect(stop.stage).toBe("admission");
-      expect(planWriterPass1(INV, { build: realBuild, recipe: REQUEST_RECIPE }).kind).toBe("planned"); // repair
-    }
-  }, T);
+  it(
+    "U06 one-character change of the instruction or template",
+    () => {
+      const refs = (plan.manifest.ordered_input_artifacts as Obj[]).map(
+        (r) => ({
+          artifact_id: String(r.artifact_id),
+          artifact_type: String(r.artifact_type),
+          content_hash: String(r.content_hash),
+        }),
+      );
+      expect(requestMatchesPin(renderWriterPass1Request(refs))).toBe(true);
+      for (const recipe of [
+        { ...REQUEST_RECIPE, instruction: `${REQUEST_RECIPE.instruction}.` },
+        { ...REQUEST_RECIPE, template_version: "writer-pass1-fixture-v3" },
+      ]) {
+        expect(requestMatchesPin(renderWriterPass1Request(refs, recipe))).toBe(
+          false,
+        );
+        const stop = stopOf(planWriterPass1(INV, { build: realBuild, recipe }));
+        expect(stop.code).toBe("pass1_request_hash_mismatch");
+        expect(stop.stage).toBe("admission");
+        expect(
+          planWriterPass1(INV, { build: realBuild, recipe: REQUEST_RECIPE })
+            .kind,
+        ).toBe("planned"); // repair
+      }
+    },
+    T,
+  );
 
   it("U07 manifest: sixteen keys, recomputed hash, typed reconcile, ordered refs", () => {
     const manifest = plan.manifest;
     expect(Object.keys(manifest)).toHaveLength(16);
-    expect(() => assertCompletePromptManifestPayload(manifest)).not.toThrow();
+    expect(() => {
+      assertCompletePromptManifestPayload(manifest);
+    }).not.toThrow();
     expect(promptManifestArtifactHash(manifest)).toBe(
       "0331df556dc7ea11739ef600409ec45a6ec2ee694abf8b4303c1ae19e65e683f",
     );
@@ -812,12 +870,27 @@ describe("writer Pass-1 plan, admission and mapping (unit)", () => {
     });
     const versions = manifest.component_versions as Obj;
     expect(checkManifestPair(typed(versions), manifest)).toBeNull(); // positive control
-    const old = { ...versions, writing_fixture_profile_addendum: "writing-fixture-profile-addendum-0.1" };
-    expect(checkManifestPair(typed(old), { ...manifest, component_versions: old })).toBe("pass1_manifest_binding");
-    expect(checkManifestPair(typed(versions), { ...manifest, component_versions: old })).toBe("pass1_manifest_binding");
+    const old = {
+      ...versions,
+      writing_fixture_profile_addendum: "writing-fixture-profile-addendum-0.1",
+    };
+    expect(
+      checkManifestPair(typed(old), { ...manifest, component_versions: old }),
+    ).toBe("pass1_manifest_binding");
+    expect(
+      checkManifestPair(typed(versions), {
+        ...manifest,
+        component_versions: old,
+      }),
+    ).toBe("pass1_manifest_binding");
     const { writing_fixture_profile_addendum: omitted, ...without } = versions;
     expect(omitted).toBe("writing-fixture-profile-addendum-0.2");
-    expect(checkManifestPair(typed(without), { ...manifest, component_versions: without })).toBe("pass1_manifest_binding");
+    expect(
+      checkManifestPair(typed(without), {
+        ...manifest,
+        component_versions: without,
+      }),
+    ).toBe("pass1_manifest_binding");
     expect(checkManifestPair(typed(versions), manifest)).toBeNull(); // repair
   });
 
@@ -830,32 +903,64 @@ describe("writer Pass-1 plan, admission and mapping (unit)", () => {
     };
     expect(checkManifestPair(good, manifest)).toBeNull(); // positive control
     const variants: Obj[] = [
-      { ...good, component_versions: { ...(manifest.component_versions as Obj), claims_policy: "claims-0.1.3" } },
+      {
+        ...good,
+        component_versions: {
+          ...(manifest.component_versions as Obj),
+          claims_policy: "claims-0.1.3",
+        },
+      },
       { ...good, rendered_request_hash: "0".repeat(64) },
-      { ...good, policy_source_hashes: { ...(manifest.policy_source_hashes as Obj), claims_policy: "1".repeat(64) } },
+      {
+        ...good,
+        policy_source_hashes: {
+          ...(manifest.policy_source_hashes as Obj),
+          claims_policy: "1".repeat(64),
+        },
+      },
     ];
     for (const typed of variants)
-      expect(checkManifestPair(typed, manifest)).toBe("pass1_manifest_typed_mismatch");
+      expect(checkManifestPair(typed, manifest)).toBe(
+        "pass1_manifest_typed_mismatch",
+      );
     expect(checkManifestPair(good, manifest)).toBeNull(); // repair
   });
 
   it("U10 semantic-input literal and what does and does not change it", () => {
     const manifest = plan.manifest;
-    const literal = "f1ff636aebda7c07eff9642614fedb6cb376ae61d689c7987bf226e11f787f73";
+    const literal =
+      "f1ff636aebda7c07eff9642614fedb6cb376ae61d689c7987bf226e11f787f73";
     expect(modelSemanticInputHash(manifest)).toBe(literal);
     expect(plan.semantic_input_hash).toBe(literal);
     const changes: Obj[] = [
-      { component_versions: { ...(manifest.component_versions as Obj), writing_policy: "writing-0.2.4" } },
-      { policy_source_hashes: { ...(manifest.policy_source_hashes as Obj), writing_policy: "2".repeat(64) } },
+      {
+        component_versions: {
+          ...(manifest.component_versions as Obj),
+          writing_policy: "writing-0.2.4",
+        },
+      },
+      {
+        policy_source_hashes: {
+          ...(manifest.policy_source_hashes as Obj),
+          writing_policy: "2".repeat(64),
+        },
+      },
       { rendered_request_hash: "3".repeat(64) },
     ];
     for (const change of changes)
-      expect(modelSemanticInputHash({ ...manifest, ...change })).not.toBe(literal);
+      expect(modelSemanticInputHash({ ...manifest, ...change })).not.toBe(
+        literal,
+      );
     const same: Obj[] = [
       { provider: "other" },
       { model_identifier: "other/model" },
       { settings: { deterministic_fixture: false } },
-      { retention: { ...(manifest.retention as Obj), raw_output_retention_policy: "other" } },
+      {
+        retention: {
+          ...(manifest.retention as Obj),
+          raw_output_retention_policy: "other",
+        },
+      },
       { ordered_input_artifacts: [] },
     ];
     for (const change of same)
@@ -869,9 +974,9 @@ describe("writer Pass-1 plan, admission and mapping (unit)", () => {
     expect(domainHash("writer-view-v2", w2?.row.canonical_payload)).toBe(
       "05d2d0ccd6f46cd62d9ce65f6ce79df8b7bc3670a4fb4af3fc2821cedb7735b5",
     );
-    expect(domainHash("writer-context-manifest-v2", c2?.row.canonical_payload)).toBe(
-      "58a54994fecae57803e15544d96901ee21d7a9b743ed242c6794b9c46bb58432",
-    );
+    expect(
+      domainHash("writer-context-manifest-v2", c2?.row.canonical_payload),
+    ).toBe("58a54994fecae57803e15544d96901ee21d7a9b743ed242c6794b9c46bb58432");
     expect(w2?.row.content_hash).toBe(PASS1_PIN.w_domain_sha256);
     expect(c2?.row.content_hash).toBe(PASS1_PIN.c_domain_sha256);
     expect(w2?.row.schema_version).toBe("writer-view/2");
@@ -880,11 +985,15 @@ describe("writer Pass-1 plan, admission and mapping (unit)", () => {
 
   it("U12 the v1 helpers refuse the v2 objects (existing refusals, non-migration)", () => {
     expect(domainHash("writer-view-v2", wObj)).toBe(PASS1_PIN.w_domain_sha256); // v2 positive controls
-    expect(domainHash("writer-context-manifest-v2", cObj)).toBe(PASS1_PIN.c_domain_sha256);
+    expect(domainHash("writer-context-manifest-v2", cObj)).toBe(
+      PASS1_PIN.c_domain_sha256,
+    );
     expect(() => writerViewHash(wObj)).toThrow();
     expect(() => writerContextManifestHash(cObj)).toThrow();
     expect(() => governedDomainHash("writer-view-v2" as never, wObj)).toThrow();
-    expect(() => governedDomainHash("writer-context-manifest-v2" as never, cObj)).toThrow();
+    expect(() =>
+      governedDomainHash("writer-context-manifest-v2" as never, cObj),
+    ).toThrow();
     expect(domainHash("writer-view-v2", wObj)).toBe(PASS1_PIN.w_domain_sha256); // unchanged afterwards
   });
 
@@ -894,9 +1003,18 @@ describe("writer Pass-1 plan, admission and mapping (unit)", () => {
       package_hash: PASS1_SPECIMEN.package_hash,
       writing_policy_version: PASS1_SPECIMEN.writing_policy_version,
       program_block_refs: [...PASS1_SPECIMEN.program_block_refs],
-      turns: PASS1_SPECIMEN.turns.map((t) => ({ ...t, turn_id: id(t.semantic_turn_id) })),
-      turn_claim_uses: PASS1_SPECIMEN.turn_claim_uses.map((u) => ({ ...u, turn_id: id(u.semantic_turn_id) })),
-      turn_evidence_uses: PASS1_SPECIMEN.turn_evidence_uses.map((u) => ({ ...u, turn_id: id(u.semantic_turn_id) })),
+      turns: PASS1_SPECIMEN.turns.map((t) => ({
+        ...t,
+        turn_id: id(t.semantic_turn_id),
+      })),
+      turn_claim_uses: PASS1_SPECIMEN.turn_claim_uses.map((u) => ({
+        ...u,
+        turn_id: id(u.semantic_turn_id),
+      })),
+      turn_evidence_uses: PASS1_SPECIMEN.turn_evidence_uses.map((u) => ({
+        ...u,
+        turn_id: id(u.semantic_turn_id),
+      })),
       prediction_candidates: PASS1_SPECIMEN.prediction_candidates.map((c) => ({
         prediction_candidate_id: c.prediction_candidate_id,
         turn_id: id(c.semantic_turn_id),
@@ -906,8 +1024,12 @@ describe("writer Pass-1 plan, admission and mapping (unit)", () => {
         topic_thread_id: c.topic_thread_id,
       })),
     });
-    const literal = "b18d1fcee6ccd784933fd5e19b957ae252a5c892deb3d342ca768d61cea94ae9";
-    const temporary = scriptHash(mapped((a) => `tmp-turn-${a}`), { brief });
+    const literal =
+      "b18d1fcee6ccd784933fd5e19b957ae252a5c892deb3d342ca768d61cea94ae9";
+    const temporary = scriptHash(
+      mapped((a) => `tmp-turn-${a}`),
+      { brief },
+    );
     expect(temporary).toBe(literal);
     const final = scriptHash(
       mapped((a) => plan.ids.turn_ids[ANCHORS.indexOf(a)] ?? ""),
@@ -916,8 +1038,12 @@ describe("writer Pass-1 plan, admission and mapping (unit)", () => {
     expect(final).toBe(literal);
     expect(scriptHash(plan.script_payload, { brief })).toBe(literal);
     expect(plan.script_hash).toBe(literal);
-    expect(sha256(canonicalBytes(PASS1_SPECIMEN))).toBe(PASS1_SPECIMEN_CANONICAL_SHA256);
-    expect(plan.specimen_canonical_sha256).toBe(PASS1_SPECIMEN_CANONICAL_SHA256);
+    expect(sha256(canonicalBytes(PASS1_SPECIMEN))).toBe(
+      PASS1_SPECIMEN_CANONICAL_SHA256,
+    );
+    expect(plan.specimen_canonical_sha256).toBe(
+      PASS1_SPECIMEN_CANONICAL_SHA256,
+    );
     // the object rebuilt from the relational rows hashes to the same value
     const stored = (table: string): Obj[] =>
       plan.t3.filter((p) => p.spec.table === table).map((p) => ({ ...p.row }));
@@ -927,28 +1053,47 @@ describe("writer Pass-1 plan, admission and mapping (unit)", () => {
       claim_uses: stored("turn_claim_uses"),
       evidence_uses: stored("turn_evidence_uses"),
     });
-    expect(reconcileScriptRows(brief, plan.script_payload, parts(), literal)).toBe(true);
+    expect(
+      reconcileScriptRows(brief, plan.script_payload, parts(), literal),
+    ).toBe(true);
     const damaged = parts();
     damaged.turns[3] = { ...damaged.turns[3], spoken_text: "changed" };
-    expect(reconcileScriptRows(brief, plan.script_payload, damaged, literal)).toBe(false);
-    expect(reconcileScriptRows(brief, plan.script_payload, parts(), literal)).toBe(true); // repair
+    expect(
+      reconcileScriptRows(brief, plan.script_payload, damaged, literal),
+    ).toBe(false);
+    expect(
+      reconcileScriptRows(brief, plan.script_payload, parts(), literal),
+    ).toBe(true); // repair
   });
 
   it("U14 semantic delta (exact changed paths and values) and the storage mapping, enumerated", () => {
     /** Every differing leaf path (dotted, arrays by index) between two JSON values. */
-    const diff = (a: unknown, b: unknown, path = ""): [string, unknown, unknown][] => {
+    const diff = (
+      a: unknown,
+      b: unknown,
+      path = "",
+    ): [string, unknown, unknown][] => {
       if (Array.isArray(a) && Array.isArray(b)) {
         expect(b.length).toBe(a.length);
         return a.flatMap((x, i) => diff(x, b[i], `${path}.${String(i)}`));
       }
-      if (typeof a === "object" && a !== null && typeof b === "object" && b !== null) {
-        const keys = [...new Set([...Object.keys(a), ...Object.keys(b)])].sort();
-        return keys.flatMap((k) => diff((a as Obj)[k], (b as Obj)[k], `${path}.${k}`));
+      if (
+        typeof a === "object" &&
+        a !== null &&
+        typeof b === "object" &&
+        b !== null
+      ) {
+        const keys = [
+          ...new Set([...Object.keys(a), ...Object.keys(b)]),
+        ].sort();
+        return keys.flatMap((k) =>
+          diff((a as Obj)[k], (b as Obj)[k], `${path}.${k}`),
+        );
       }
       return a === b ? [] : [[path, a, b]];
     };
-    const before = scriptProjection(historical, { brief }) as Obj;
-    const after = scriptProjection(plan.script_payload, { brief }) as Obj;
+    const before = scriptProjection(historical, { brief });
+    const after = scriptProjection(plan.script_payload, { brief });
     const changed = diff(before, after);
     // the whole projection (modes, state hashes, rights versions included): exactly two texts and four span ends differ
     expect(changed.map(([path]) => path)).toEqual([
@@ -959,7 +1104,9 @@ describe("writer Pass-1 plan, admission and mapping (unit)", () => {
       ".turns.5.spoken_text",
       ".turns.6.spoken_text",
     ]);
-    const values = Object.fromEntries(changed.map(([path, x, y]) => [path, [x, y]]));
+    const values = Object.fromEntries(
+      changed.map(([path, x, y]) => [path, [x, y]]),
+    );
     expect(values[".turn_claim_uses.3.span_end"]).toEqual([118, 144]);
     expect(values[".turn_claim_uses.4.span_end"]).toEqual([159, 168]);
     expect(values[".turn_evidence_uses.0.span_end"]).toEqual([118, 144]);
@@ -971,13 +1118,17 @@ describe("writer Pass-1 plan, admission and mapping (unit)", () => {
       "One specialist analysis in the package suggests Southbank's focus on the flanks after half-time could have been an intentional answer to Northbridge's narrower midfield. Could. I would keep that word.",
     );
     // storage mapping: the 21-key envelope; exactly these top-level keys differ, every id is fresh, nothing else moves
-    expect(Object.keys(plan.script_payload).sort()).toEqual(Object.keys(historical).sort());
+    expect(Object.keys(plan.script_payload).sort()).toEqual(
+      Object.keys(historical).sort(),
+    );
     expect(Object.keys(plan.script_payload)).toHaveLength(21);
     const stored = diff(historical, plan.script_payload);
     const idPath = /\.(turn_id|turn_claim_use_id|turn_evidence_use_id)$/;
     const ids = stored.filter(([path]) => idPath.test(path));
     expect(ids).toHaveLength(17 + 12 + 12 + 3 + 3 + 2); // turns, claim uses (+turn refs), evidence uses (+turn refs), candidates
-    const other = stored.filter(([path]) => !idPath.test(path)).map(([path]) => path);
+    const other = stored
+      .filter(([path]) => !idPath.test(path))
+      .map(([path]) => path);
     expect(other).toEqual([
       ".artifact_id",
       ".created_at",
@@ -992,164 +1143,261 @@ describe("writer Pass-1 plan, admission and mapping (unit)", () => {
       ".writer_model_run_id",
     ]);
     expect(plan.script_payload.revision_parent_id).toBeNull();
-    expect("revision_parent_content_identity" in plan.script_payload).toBe(false);
+    expect("revision_parent_content_identity" in plan.script_payload).toBe(
+      false,
+    );
     expect(
-      records(plan.script_payload.prediction_candidates).every((c) => "turn_id" in c && !("semantic_turn_id" in c)),
+      records(plan.script_payload.prediction_candidates).every(
+        (c) => "turn_id" in c && !("semantic_turn_id" in c),
+      ),
     ).toBe(true);
   });
 
-  it("U15 the guard is live on both sides inside whole admission", () => {
-    const old = records(historical.turns).find((t) => t.semantic_turn_id === "t07");
-    const stop = refusal((s) => {
-      turnOf(s, "t07").spoken_text = String(old?.spoken_text);
-    }, "pass1_withheld_text_relocated"); // before the golden hash, with the positive control and the repair
-    expect(stop.surface).toBeUndefined();
-  }, T);
+  it(
+    "U15 the guard is live on both sides inside whole admission",
+    () => {
+      const old = records(historical.turns).find(
+        (t) => t.semantic_turn_id === "t07",
+      );
+      const stop = refusal((s) => {
+        turnOf(s, "t07").spoken_text = String(old?.spoken_text);
+      }, "pass1_withheld_text_relocated"); // before the golden hash, with the positive control and the repair
+      expect(stop.surface).toBeUndefined();
+    },
+    T,
+  );
 
-  it("U16 the guard threshold is exactly 24 characters", () => {
-    const original = originals.c4;
-    expect(sharesRun(original.slice(0, 23), original)).toBe(false);
-    expect(sharesRun(original.slice(0, 24), original)).toBe(true);
-    expect(sharesRun(`xx${original.slice(5, 29)}yy`, original)).toBe(true);
-    expect(sharesRun(`xx${original.slice(5, 28)}yy`, original)).toBe(false);
-    // passes step 6 (23 characters) and fails step 7: stated outcome, not a pass
-    refusal((s) => {
-      turnOf(s, "t07").spoken_text += ` ${original.slice(0, 23)}`;
-    }, "pass1_script_hash_mismatch");
-    // a 24-character run is caught at step 6, before the golden hash
-    refusal((s) => {
-      turnOf(s, "t07").spoken_text += ` ${original.slice(0, 24)}`;
-    }, "pass1_withheld_text_relocated");
-  }, T);
-
-  it("U17 all uses target only W-selected ids; state hashes and rights equal W", () => {
-    const claims = records(wObj.selected_claims);
-    const evidence = records(wObj.selected_evidence);
-    for (const use of PASS1_SPECIMEN.turn_claim_uses) {
-      const claim = claims.find((c) => c.claim_id === use.claim_id);
-      expect(claim?.frozen_state_hash).toBe(use.claim_state_hash);
-    }
-    for (const use of PASS1_SPECIMEN.turn_evidence_uses) {
-      const unit = evidence.find((e) => e.evidence_unit_id === use.evidence_unit_id);
-      expect(unit?.rights_policy_version).toBe(use.rights_policy_version);
-    }
-    expect(planWith(PASS1_SPECIMEN).kind).toBe("planned");
-  }, T);
-
-  it("U18 a use of an unselected claim", () => {
-    refusal((s) => {
-      claimUse(s, C4).claim_id = C8;
-    }, "pass1_use_claim_not_selected");
-  }, T);
-
-  it("U19 a use of unselected evidence", () => {
-    refusal((s) => {
-      evidenceUse(s, E03).evidence_unit_id = E11;
-    }, "pass1_use_evidence_not_selected");
-  }, T);
-
-  it("U20 a same-length claim_state_hash alteration", () => {
-    refusal((s) => {
-      const use = claimUse(s, C4);
-      const hash = String(use.claim_state_hash);
-      use.claim_state_hash = `${hash[0] === "a" ? "b" : "a"}${hash.slice(1)}`;
-    }, "pass1_binding_mismatch");
-  }, T);
-
-  it("U21 spans out of range", () => {
-    refusal((s) => {
-      claimUse(s, C4).span_end = 100000;
-    }, "pass1_span_out_of_range");
-    refusal((s) => {
-      const use = claimUse(s, C3);
-      use.span_start = use.span_end;
-    }, "pass1_span_out_of_range");
-  }, T);
-
-  it("U22 a quoted use of a paraphrase-only evidence unit", () => {
-    refusal((s) => {
-      evidenceUse(s, E03).use_mode = "quoted";
-    }, "pass1_use_mode_not_permitted");
-  }, T);
-
-  it("U23 an asserted use of a hedged-only claim", () => {
-    refusal((s) => {
-      claimUse(s, C4).use_mode = "asserted";
-    }, "pass1_use_mode_not_permitted");
-  }, T);
-
-  it("U24 non-NFC text passes grammar and is rejected at step 2; the NFC repair reaches step 7", () => {
-    expect(planWith(clone()).kind).toBe("planned");
-    const spec = clone();
-    turnOf(spec, "t01").spoken_text += "é"; // non-blank string: grammar step 1 is satisfied
-    const stop = stopOf(planWith(spec));
-    expect(stop.code).toBe("pass1_text_not_nfc");
-    expect(stop.stage).toBe("admission");
-    expect(stop.code).not.toBe("pass1_specimen_invalid");
-    const repaired = clone();
-    turnOf(repaired, "t01").spoken_text += "é"; // NFC: steps 1-6 pass, the changed text then fails the golden hash
-    expect(codeOf(repaired)).toBe("pass1_script_hash_mismatch");
-    expect(planWith(clone()).kind).toBe("planned");
-  }, T);
-
-  it("U25 a turn in a block id outside the Brief", () => {
-    refusal((s) => {
-      turnOf(s, "t01").program_block_id = "11111111-1111-4111-8111-111111111111";
-    }, "pass1_program_block_unknown");
-  }, T);
-
-  it("U26 brief_hash and package_hash must equal W", () => {
-    for (const field of ["brief_hash", "package_hash"] as const)
+  it(
+    "U16 the guard threshold is exactly 24 characters",
+    () => {
+      const original = originals.c4;
+      expect(sharesRun(original.slice(0, 23), original)).toBe(false);
+      expect(sharesRun(original.slice(0, 24), original)).toBe(true);
+      expect(sharesRun(`xx${original.slice(5, 29)}yy`, original)).toBe(true);
+      expect(sharesRun(`xx${original.slice(5, 28)}yy`, original)).toBe(false);
+      // passes step 6 (23 characters) and fails step 7: stated outcome, not a pass
       refusal((s) => {
-        s[field] = "f".repeat(64);
+        turnOf(s, "t07").spoken_text += ` ${original.slice(0, 23)}`;
+      }, "pass1_script_hash_mismatch");
+      // a 24-character run is caught at step 6, before the golden hash
+      refusal((s) => {
+        turnOf(s, "t07").spoken_text += ` ${original.slice(0, 24)}`;
+      }, "pass1_withheld_text_relocated");
+    },
+    T,
+  );
+
+  it(
+    "U17 all uses target only W-selected ids; state hashes and rights equal W",
+    () => {
+      const claims = records(wObj.selected_claims);
+      const evidence = records(wObj.selected_evidence);
+      for (const use of PASS1_SPECIMEN.turn_claim_uses) {
+        const claim = claims.find((c) => c.claim_id === use.claim_id);
+        expect(claim?.frozen_state_hash).toBe(use.claim_state_hash);
+      }
+      for (const use of PASS1_SPECIMEN.turn_evidence_uses) {
+        const unit = evidence.find(
+          (e) => e.evidence_unit_id === use.evidence_unit_id,
+        );
+        expect(unit?.rights_policy_version).toBe(use.rights_policy_version);
+      }
+      expect(planWith(PASS1_SPECIMEN).kind).toBe("planned");
+    },
+    T,
+  );
+
+  it(
+    "U18 a use of an unselected claim",
+    () => {
+      refusal((s) => {
+        claimUse(s, C4).claim_id = C8;
+      }, "pass1_use_claim_not_selected");
+    },
+    T,
+  );
+
+  it(
+    "U19 a use of unselected evidence",
+    () => {
+      refusal((s) => {
+        evidenceUse(s, E03).evidence_unit_id = E11;
+      }, "pass1_use_evidence_not_selected");
+    },
+    T,
+  );
+
+  it(
+    "U20 a same-length claim_state_hash alteration",
+    () => {
+      refusal((s) => {
+        const use = claimUse(s, C4);
+        const hash = String(use.claim_state_hash);
+        use.claim_state_hash = `${hash.startsWith("a") ? "b" : "a"}${hash.slice(1)}`;
       }, "pass1_binding_mismatch");
-  }, T);
+    },
+    T,
+  );
 
-  it("U27 a prediction candidate on a turn outside a predictions block reaches the unchanged helper", () => {
-    const stop = refusal((s) => {
-      const first = s.prediction_candidates[0];
-      if (!first) throw new Error("no candidate");
-      first.semantic_turn_id = "t01";
-      first.participant_id = turnOf(s, "t01").participant_id;
-    }, "pass1_specimen_invalid");
-    expect(stop.underlying).toBe("prediction_outside_prediction_block");
-  }, T);
+  it(
+    "U21 spans out of range",
+    () => {
+      refusal((s) => {
+        claimUse(s, C4).span_end = 100000;
+      }, "pass1_span_out_of_range");
+      refusal((s) => {
+        const use = claimUse(s, C3);
+        use.span_start = use.span_end;
+      }, "pass1_span_out_of_range");
+    },
+    T,
+  );
 
-  it("U28 grammar negatives", () => {
-    const mutations: ((spec: MSpec) => void)[] = [
-      (s) => { turnOf(s, "t05").semantic_turn_id = "t01"; },
-      (s) => { turnOf(s, "t05").sequence = 99; },
-      (s) => { turnOf(s, "t05").extra = true; },
-      (s) => { s.purpose = "production"; },
-      (s) => { s.script_phase = "pass_2"; },
-      (s) => { s.revision_reason = "craft_revision"; },
-      (s) => { s.schema = "writer-pass1-specimen/2"; },
-    ];
-    for (const mutate of mutations)
-      expect(refusal(mutate, "pass1_specimen_invalid").underlying).toBeUndefined();
-  }, T);
+  it(
+    "U22 a quoted use of a paraphrase-only evidence unit",
+    () => {
+      refusal((s) => {
+        evidenceUse(s, E03).use_mode = "quoted";
+      }, "pass1_use_mode_not_permitted");
+    },
+    T,
+  );
 
-  it("U29 a one-character same-length text change with every earlier predicate satisfied", () => {
-    refusal((s) => {
-      const turn = turnOf(s, "t02");
-      const flipped = turn.spoken_text.startsWith("a") ? "b" : "a";
-      turn.spoken_text = flipped + turn.spoken_text.slice(1);
-    }, "pass1_script_hash_mismatch");
-  }, T);
+  it(
+    "U23 an asserted use of a hedged-only claim",
+    () => {
+      refusal((s) => {
+        claimUse(s, C4).use_mode = "asserted";
+      }, "pass1_use_mode_not_permitted");
+    },
+    T,
+  );
+
+  it(
+    "U24 non-NFC text passes grammar and is rejected at step 2; the NFC repair reaches step 7",
+    () => {
+      expect(planWith(clone()).kind).toBe("planned");
+      const spec = clone();
+      turnOf(spec, "t01").spoken_text += "é"; // non-blank string: grammar step 1 is satisfied
+      const stop = stopOf(planWith(spec));
+      expect(stop.code).toBe("pass1_text_not_nfc");
+      expect(stop.stage).toBe("admission");
+      expect(stop.code).not.toBe("pass1_specimen_invalid");
+      const repaired = clone();
+      turnOf(repaired, "t01").spoken_text += "é"; // NFC: steps 1-6 pass, the changed text then fails the golden hash
+      expect(codeOf(repaired)).toBe("pass1_script_hash_mismatch");
+      expect(planWith(clone()).kind).toBe("planned");
+    },
+    T,
+  );
+
+  it(
+    "U25 a turn in a block id outside the Brief",
+    () => {
+      refusal((s) => {
+        turnOf(s, "t01").program_block_id =
+          "11111111-1111-4111-8111-111111111111";
+      }, "pass1_program_block_unknown");
+    },
+    T,
+  );
+
+  it(
+    "U26 brief_hash and package_hash must equal W",
+    () => {
+      for (const field of ["brief_hash", "package_hash"] as const)
+        refusal((s) => {
+          s[field] = "f".repeat(64);
+        }, "pass1_binding_mismatch");
+    },
+    T,
+  );
+
+  it(
+    "U27 a prediction candidate on a turn outside a predictions block reaches the unchanged helper",
+    () => {
+      const stop = refusal((s) => {
+        const first = s.prediction_candidates[0];
+        if (!first) throw new Error("no candidate");
+        first.semantic_turn_id = "t01";
+        first.participant_id = turnOf(s, "t01").participant_id;
+      }, "pass1_specimen_invalid");
+      expect(stop.underlying).toBe("prediction_outside_prediction_block");
+    },
+    T,
+  );
+
+  it(
+    "U28 grammar negatives",
+    () => {
+      const mutations: ((spec: MSpec) => void)[] = [
+        (s) => {
+          turnOf(s, "t05").semantic_turn_id = "t01";
+        },
+        (s) => {
+          turnOf(s, "t05").sequence = 99;
+        },
+        (s) => {
+          turnOf(s, "t05").extra = true;
+        },
+        (s) => {
+          s.purpose = "production";
+        },
+        (s) => {
+          s.script_phase = "pass_2";
+        },
+        (s) => {
+          s.revision_reason = "craft_revision";
+        },
+        (s) => {
+          s.schema = "writer-pass1-specimen/2";
+        },
+      ];
+      for (const mutate of mutations)
+        expect(
+          refusal(mutate, "pass1_specimen_invalid").underlying,
+        ).toBeUndefined();
+    },
+    T,
+  );
+
+  it(
+    "U29 a one-character same-length text change with every earlier predicate satisfied",
+    () => {
+      refusal((s) => {
+        const turn = turnOf(s, "t02");
+        const flipped = turn.spoken_text.startsWith("a") ? "b" : "a";
+        turn.spoken_text = flipped + turn.spoken_text.slice(1);
+      }, "pass1_script_hash_mismatch");
+    },
+    T,
+  );
 
   it("U30 the R005 rights / provider-exposure predicate and its named stop", () => {
-    const row = records(rows.rights_versions).find((r) => r.rights_version_id === R005);
+    const row = records(rows.rights_versions).find(
+      (r) => r.rights_version_id === R005,
+    );
     const policy = row?.policy as Obj;
     expect(checkRightsPolicy(policy)).toBe(true);
     const exposure = policy.provider_exposure as Obj;
     const { fixture_stub: removed, ...bare } = exposure;
     expect(typeof removed).toBe("string");
     const mutated: Obj[] = [
-      { ...policy, provider_exposure: { ...exposure, external_providers: true } },
+      {
+        ...policy,
+        provider_exposure: { ...exposure, external_providers: true },
+      },
       { ...policy, provider_exposure: bare },
-      { ...policy, consumer_exposure_ceiling: { ...(policy.consumer_exposure_ceiling as Obj), writer: ["exact_excerpt"] } },
+      {
+        ...policy,
+        consumer_exposure_ceiling: {
+          ...(policy.consumer_exposure_ceiling as Obj),
+          writer: ["exact_excerpt"],
+        },
+      },
     ];
-    const state = (rights: unknown) => classifyPass1Snapshot(rawFor(bitsOf(0), { rights }), plan, "preflight");
+    const state = (rights: unknown) =>
+      classifyPass1Snapshot(rawFor(bitsOf(0), { rights }), plan, "preflight");
     expect(state(policy).kind).toBe("state"); // positive control through the boundary
     for (const m of mutated) {
       expect(checkRightsPolicy(m)).toBe(false);
@@ -1159,111 +1407,221 @@ describe("writer Pass-1 plan, admission and mapping (unit)", () => {
       expect(result.row.code).toBe("pass1_rights_provider_exposure");
       expect(result.row.stage).toBe("preconditions");
       expect(result.row.writes).toBe(false);
-      expect(stopFrom(initialContext(), { ...result.row, facts: {} }).writes_attempted).toBe(false);
+      expect(
+        stopFrom(initialContext(), { ...result.row, facts: {} })
+          .writes_attempted,
+      ).toBe(false);
     }
     expect(state(policy).kind).toBe("state"); // repair
   });
 
-  it("U31 verifyDurableProvider: exact call and event, each mutation reaches its own field; instants are exact", () => {
-    expect(verifyDurableProvider(callRow(), [eventRow()], plan)).toBeNull();
-    const seen = new Set<string>();
-    const mutate = (kind: "call" | "event", field: string, value: unknown, expected: string = field): void => {
-      const call = callRow();
-      const event = eventRow();
-      (kind === "call" ? call : event)[field] = value;
-      const found = verifyDurableProvider(call, [event], plan);
-      expect(found).toBe(expected);
-      seen.add(String(found));
-      expect(verifyDurableProvider(callRow(), [eventRow()], plan)).toBeNull(); // repair after every mutation
-    };
-    const calls: [string, unknown][] = [
-      ["provider_call_id", "00000000-0000-4000-8000-000000000000"],
-      ["attempt_id", "6fc595be-d052-4281-a805-bce4154cb386"],
-      ["provider", "fixture_tts"],
-      ["operation", "tts"],
-      ["model_identifier", "fixture_stub/other"],
-      ["request_fingerprint", "0".repeat(64)],
-      ["logical_request_key", "fixture_stub:writer:other"],
-      ["operational_try_number", 2],
-      ["intentional_take_index", 0],
-      ["retry_of_provider_call_id", "00000000-0000-4000-8000-000000000001"],
-      ["reroll_of_provider_call_id", "00000000-0000-4000-8000-000000000002"],
-      ["reroll_trigger_id", "00000000-0000-4000-8000-000000000003"],
-      ["started_at", utcMicros("2026-10-20T00:00:09Z")],
-      ["admitted_at", "2026-10-20 00:00:00+00"],
-      ["reserved_cost_upper_bound", "1"],
-      ["admission_currency", "USD"],
-      ["admission_policy_hash", "0".repeat(64)],
-      ["admission_certificate", "{}"],
-      ["admission_certificate_hash", "0".repeat(64)],
-    ];
-    for (const [field, value] of calls) mutate("call", field, value);
-    const events: [string, unknown][] = [
-      ["event_type", "terminal_failure"],
-      ["ended_at", utcMicros("2026-10-20T00:00:09Z")],
-      ["usage_eq", false],
-      ["actual_cost_zero", false],
-      ["currency", "EUR"],
-      ["response_artifact_id", "00000000-0000-4000-8000-000000000004"],
-      ["response_reference", "writer-pass1-specimen/1:x:y"], // malformed syntax
-      ["recorded_at", "2026-10-20 00:00:00+00"],
-      ["admission_settlement", "{}"],
-    ];
-    for (const [field, value] of events) {
-      const expected = field === "usage_eq" ? "usage" : field === "actual_cost_zero" ? "actual_cost" : field;
-      mutate("event", field, value, expected);
-    }
-    // valid grammar, wrong value: the right shape with another specimen hash, and with another script hash
-    for (const wrong of [
-      `writer-pass1-specimen/1:${"0".repeat(64)}:${plan.script_hash}`,
-      `writer-pass1-specimen/1:${plan.specimen_canonical_sha256}:${"0".repeat(64)}`,
-    ]) {
-      expect(wrong).toMatch(/^writer-pass1-specimen\/1:[0-9a-f]{64}:[0-9a-f]{64}$/);
-      mutate("event", "response_reference", wrong);
-    }
-    expect(verifyDurableProvider(callRow(), [], plan)).toBe("event_count");
-    expect(verifyDurableProvider(callRow(), [eventRow(), eventRow()], plan)).toBe("event_count");
-    seen.add("event_count");
-    expect(verifyDurableProvider(undefined, [], plan)).toBe("provider_call_id");
-    // the database-generated event primary key is not compared
-    expect(verifyDurableProvider(callRow(), [{ ...eventRow(), provider_call_event_id: "any" }], plan)).toBeNull();
-    expect([...seen].sort()).toEqual([...PROVIDER_FIELDS].sort());
-    // exact instants: an offset-form invocation matches its UTC rendering to the microsecond and not one microsecond away
-    const offset = planWriterPass1(INV_OFFSET, { build: realBuild });
-    if (offset.kind !== "planned") throw new Error(`plan stopped ${offset.code}`);
-    const exact = { ...callRow(), started_at: "2026-10-20T00:00:00.500000Z" };
-    const done = { ...eventRow(), ended_at: "2026-10-20T00:00:01.250000Z" };
-    expect(verifyDurableProvider(exact, [done], offset.plan)).toBeNull();
-    expect(verifyDurableProvider({ ...exact, started_at: "2026-10-20T00:00:00.500001Z" }, [done], offset.plan)).toBe("started_at");
-    expect(verifyDurableProvider(exact, [{ ...done, ended_at: "2026-10-20T00:00:01.249999Z" }], offset.plan)).toBe("ended_at");
-    expect(instantMicros("2026-10-20T02:00:00.500000+02:00")).toBe(instantMicros("2026-10-20T00:00:00.5Z"));
-    expect(instantMicros("2026-10-20T00:00:00.000001Z") - instantMicros("2026-10-20T00:00:00Z")).toBe(1n);
-    expect(utcMicros("2026-10-19T19:00:01.250000-05:00")).toBe("2026-10-20T00:00:01.250000Z");
-    expect(sameInstant("2026-10-20T00:00:00.000000Z", "2026-10-20T01:00:00+01:00")).toBe(true);
-    expect(sameInstant("2026-10-20T00:00:00.000001Z", "2026-10-20T00:00:00Z")).toBe(false);
-    expect(sameInstant(undefined, "2026-10-20T00:00:00Z")).toBe(false);
-    // the narrow UTC-year rollover: a valid four-digit offset input equals the stored five-digit-year database text
-    expect(utcMicros("9999-12-31T23:00:00-01:00")).toBe("10000-01-01T00:00:00.000000Z");
-    expect(sameInstant("10000-01-01T00:00:00.000000Z", "9999-12-31T23:00:00-01:00")).toBe(true);
-    expect(sameInstant("10000-01-01T00:00:00.000001Z", "9999-12-31T23:00:00-01:00")).toBe(false);
-    expect(sameInstant("10000-01-01T00:00:00Z", "9999-12-31T23:59:59.999999Z")).toBe(false);
-    const rolled = planWriterPass1({ ...INV_OFFSET, started_at: "9999-12-31T23:00:00-01:00", ended_at: "9999-12-31T23:00:01-01:00" }, { build: realBuild });
-    if (rolled.kind !== "planned") throw new Error(`plan stopped ${rolled.code}`);
-    const rolledCall = { ...callRow(), started_at: "10000-01-01T00:00:00.000000Z" };
-    const rolledDone = { ...eventRow(), ended_at: "10000-01-01T00:00:01.000000Z" };
-    expect(verifyDurableProvider(rolledCall, [rolledDone], rolled.plan)).toBeNull();
-    expect(verifyDurableProvider({ ...rolledCall, started_at: "10000-01-01T00:00:00.000001Z" }, [rolledDone], rolled.plan)).toBe("started_at");
-    expect(verifyDurableProvider(rolledCall, [{ ...rolledDone, ended_at: "10000-01-01T00:00:00.999999Z" }], rolled.plan)).toBe("ended_at");
-  }, T);
+  it(
+    "U31 verifyDurableProvider: exact call and event, each mutation reaches its own field; instants are exact",
+    () => {
+      expect(verifyDurableProvider(callRow(), [eventRow()], plan)).toBeNull();
+      const seen = new Set<string>();
+      const mutate = (
+        kind: "call" | "event",
+        field: string,
+        value: unknown,
+        expected: string = field,
+      ): void => {
+        const call = callRow();
+        const event = eventRow();
+        (kind === "call" ? call : event)[field] = value;
+        const found = verifyDurableProvider(call, [event], plan);
+        expect(found).toBe(expected);
+        seen.add(String(found));
+        expect(verifyDurableProvider(callRow(), [eventRow()], plan)).toBeNull(); // repair after every mutation
+      };
+      const calls: [string, unknown][] = [
+        ["provider_call_id", "00000000-0000-4000-8000-000000000000"],
+        ["attempt_id", "6fc595be-d052-4281-a805-bce4154cb386"],
+        ["provider", "fixture_tts"],
+        ["operation", "tts"],
+        ["model_identifier", "fixture_stub/other"],
+        ["request_fingerprint", "0".repeat(64)],
+        ["logical_request_key", "fixture_stub:writer:other"],
+        ["operational_try_number", 2],
+        ["intentional_take_index", 0],
+        ["retry_of_provider_call_id", "00000000-0000-4000-8000-000000000001"],
+        ["reroll_of_provider_call_id", "00000000-0000-4000-8000-000000000002"],
+        ["reroll_trigger_id", "00000000-0000-4000-8000-000000000003"],
+        ["started_at", utcMicros("2026-10-20T00:00:09Z")],
+        ["admitted_at", "2026-10-20 00:00:00+00"],
+        ["reserved_cost_upper_bound", "1"],
+        ["admission_currency", "USD"],
+        ["admission_policy_hash", "0".repeat(64)],
+        ["admission_certificate", "{}"],
+        ["admission_certificate_hash", "0".repeat(64)],
+      ];
+      for (const [field, value] of calls) mutate("call", field, value);
+      const events: [string, unknown][] = [
+        ["event_type", "terminal_failure"],
+        ["ended_at", utcMicros("2026-10-20T00:00:09Z")],
+        ["usage_eq", false],
+        ["actual_cost_zero", false],
+        ["currency", "EUR"],
+        ["response_artifact_id", "00000000-0000-4000-8000-000000000004"],
+        ["response_reference", "writer-pass1-specimen/1:x:y"], // malformed syntax
+        ["recorded_at", "2026-10-20 00:00:00+00"],
+        ["admission_settlement", "{}"],
+      ];
+      for (const [field, value] of events) {
+        const expected =
+          field === "usage_eq"
+            ? "usage"
+            : field === "actual_cost_zero"
+              ? "actual_cost"
+              : field;
+        mutate("event", field, value, expected);
+      }
+      // valid grammar, wrong value: the right shape with another specimen hash, and with another script hash
+      for (const wrong of [
+        `writer-pass1-specimen/1:${"0".repeat(64)}:${plan.script_hash}`,
+        `writer-pass1-specimen/1:${plan.specimen_canonical_sha256}:${"0".repeat(64)}`,
+      ]) {
+        expect(wrong).toMatch(
+          /^writer-pass1-specimen\/1:[0-9a-f]{64}:[0-9a-f]{64}$/,
+        );
+        mutate("event", "response_reference", wrong);
+      }
+      expect(verifyDurableProvider(callRow(), [], plan)).toBe("event_count");
+      expect(
+        verifyDurableProvider(callRow(), [eventRow(), eventRow()], plan),
+      ).toBe("event_count");
+      seen.add("event_count");
+      expect(verifyDurableProvider(undefined, [], plan)).toBe(
+        "provider_call_id",
+      );
+      // the database-generated event primary key is not compared
+      expect(
+        verifyDurableProvider(
+          callRow(),
+          [{ ...eventRow(), provider_call_event_id: "any" }],
+          plan,
+        ),
+      ).toBeNull();
+      expect([...seen].sort()).toEqual([...PROVIDER_FIELDS].sort());
+      // exact instants: an offset-form invocation matches its UTC rendering to the microsecond and not one microsecond away
+      const offset = planWriterPass1(INV_OFFSET, { build: realBuild });
+      if (offset.kind !== "planned")
+        throw new Error(`plan stopped ${offset.code}`);
+      const exact = { ...callRow(), started_at: "2026-10-20T00:00:00.500000Z" };
+      const done = { ...eventRow(), ended_at: "2026-10-20T00:00:01.250000Z" };
+      expect(verifyDurableProvider(exact, [done], offset.plan)).toBeNull();
+      expect(
+        verifyDurableProvider(
+          { ...exact, started_at: "2026-10-20T00:00:00.500001Z" },
+          [done],
+          offset.plan,
+        ),
+      ).toBe("started_at");
+      expect(
+        verifyDurableProvider(
+          exact,
+          [{ ...done, ended_at: "2026-10-20T00:00:01.249999Z" }],
+          offset.plan,
+        ),
+      ).toBe("ended_at");
+      expect(instantMicros("2026-10-20T02:00:00.500000+02:00")).toBe(
+        instantMicros("2026-10-20T00:00:00.5Z"),
+      );
+      expect(
+        instantMicros("2026-10-20T00:00:00.000001Z") -
+          instantMicros("2026-10-20T00:00:00Z"),
+      ).toBe(1n);
+      expect(utcMicros("2026-10-19T19:00:01.250000-05:00")).toBe(
+        "2026-10-20T00:00:01.250000Z",
+      );
+      expect(
+        sameInstant("2026-10-20T00:00:00.000000Z", "2026-10-20T01:00:00+01:00"),
+      ).toBe(true);
+      expect(
+        sameInstant("2026-10-20T00:00:00.000001Z", "2026-10-20T00:00:00Z"),
+      ).toBe(false);
+      expect(sameInstant(undefined, "2026-10-20T00:00:00Z")).toBe(false);
+      // the narrow UTC-year rollover: a valid four-digit offset input equals the stored five-digit-year database text
+      expect(utcMicros("9999-12-31T23:00:00-01:00")).toBe(
+        "10000-01-01T00:00:00.000000Z",
+      );
+      expect(
+        sameInstant(
+          "10000-01-01T00:00:00.000000Z",
+          "9999-12-31T23:00:00-01:00",
+        ),
+      ).toBe(true);
+      expect(
+        sameInstant(
+          "10000-01-01T00:00:00.000001Z",
+          "9999-12-31T23:00:00-01:00",
+        ),
+      ).toBe(false);
+      expect(
+        sameInstant("10000-01-01T00:00:00Z", "9999-12-31T23:59:59.999999Z"),
+      ).toBe(false);
+      const rolled = planWriterPass1(
+        {
+          ...INV_OFFSET,
+          started_at: "9999-12-31T23:00:00-01:00",
+          ended_at: "9999-12-31T23:00:01-01:00",
+        },
+        { build: realBuild },
+      );
+      if (rolled.kind !== "planned")
+        throw new Error(`plan stopped ${rolled.code}`);
+      const rolledCall = {
+        ...callRow(),
+        started_at: "10000-01-01T00:00:00.000000Z",
+      };
+      const rolledDone = {
+        ...eventRow(),
+        ended_at: "10000-01-01T00:00:01.000000Z",
+      };
+      expect(
+        verifyDurableProvider(rolledCall, [rolledDone], rolled.plan),
+      ).toBeNull();
+      expect(
+        verifyDurableProvider(
+          { ...rolledCall, started_at: "10000-01-01T00:00:00.000001Z" },
+          [rolledDone],
+          rolled.plan,
+        ),
+      ).toBe("started_at");
+      expect(
+        verifyDurableProvider(
+          rolledCall,
+          [{ ...rolledDone, ended_at: "10000-01-01T00:00:00.999999Z" }],
+          rolled.plan,
+        ),
+      ).toBe("ended_at");
+    },
+    T,
+  );
 
   it("U32 the ExecuteResult allowlist: only three exact results proceed", () => {
-    const stored = (over: Obj = {}) => ({ ...plan.reservation, started_at: utcMicros(INV.started_at), ...over });
-    const outcome = { provider_call_id: plan.ids.provider_call_id, event_type: "succeeded" };
+    const stored = (over: Obj = {}) => ({
+      ...plan.reservation,
+      started_at: utcMicros(INV.started_at),
+      ...over,
+    });
+    const outcome = {
+      provider_call_id: plan.ids.provider_call_id,
+      event_type: "succeeded",
+    };
     const known = [...KNOWN_OUTCOME_CODES][0] ?? "guard_rejected";
     const r = (value: unknown): ExecuteResult => value as ExecuteResult;
     const proceeds = [
-      r({ status: "performed", reservation: stored(), outcome: { kind: "created", record: outcome } }),
-      r({ status: "performed", reservation: stored(), outcome: { kind: "converged", record: outcome } }),
+      r({
+        status: "performed",
+        reservation: stored(),
+        outcome: { kind: "created", record: outcome },
+      }),
+      r({
+        status: "performed",
+        reservation: stored(),
+        outcome: { kind: "converged", record: outcome },
+      }),
       r({ status: "completed", reservation: stored(), outcome }),
     ];
     const convergence = proceeds.map((x) => {
@@ -1274,29 +1632,100 @@ describe("writer Pass-1 plan, admission and mapping (unit)", () => {
     // the same reservation written with an equivalent offset instant is still this authored reservation
     expect(
       classifyExecuteResult(
-        r({ status: "completed", reservation: stored({ started_at: "2026-10-20T02:00:00+02:00" }), outcome }),
+        r({
+          status: "completed",
+          reservation: stored({ started_at: "2026-10-20T02:00:00+02:00" }),
+          outcome,
+        }),
         plan,
       ).kind,
     ).toBe("proceed");
     expect(
       classifyExecuteResult(
-        r({ status: "completed", reservation: stored({ started_at: "2026-10-20T00:00:00.000001Z" }), outcome }),
+        r({
+          status: "completed",
+          reservation: stored({ started_at: "2026-10-20T00:00:00.000001Z" }),
+          outcome,
+        }),
         plan,
       ),
-    ).toMatchObject({ kind: "stop", row: { code: "pass1_provider_completed_mismatch", detail: { mismatch_field: "started_at" } } });
+    ).toMatchObject({
+      kind: "stop",
+      row: {
+        code: "pass1_provider_completed_mismatch",
+        detail: { mismatch_field: "started_at" },
+      },
+    });
     const stops: [ExecuteResult, StopCode][] = [
-      [r({ status: "performed", reservation: stored(), outcome: { kind: "conflict", code: known, stored: null, detail: "" } }), "pass1_provider_outcome_failed"],
-      [r({ status: "performed", reservation: stored(), outcome: { kind: "rejected", code: known } }), "pass1_provider_outcome_failed"],
-      [r({ status: "completed", reservation: stored({ provider_call_id: "00000000-0000-4000-8000-0000000000aa" }), outcome }), "pass1_provider_completed_mismatch"],
-      [r({ status: "completed", reservation: stored({ attempt_id: "6fc595be-d052-4281-a805-bce4154cb386" }), outcome }), "pass1_provider_completed_mismatch"],
-      ...(["converged_without_outcome", "held_by_other", "provider_not_invoked_canceled", "provider_admission_request_mismatch"] as const).map(
-        (reason): [ExecuteResult, StopCode] => [r({ status: "unfinished", reason, reservation: stored() }), "pass1_provider_unfinished"],
-      ),
-      ...(["provider_perform_ambiguous", "provider_finish_ambiguous", "provider_observation_timeout", "provider_observation_canceled"] as const).map(
-        (code): [ExecuteResult, StopCode] => [r({ status: "ambiguous", reservation: stored(), code }), "pass1_provider_ambiguous"],
-      ),
-      [r({ status: "conflict", result: { kind: "conflict", code: known, stored: null, detail: "" } }), "pass1_provider_conflict"],
-      [r({ status: "rejected", result: { kind: "rejected", code: known } }), "pass1_provider_rejected"],
+      [
+        r({
+          status: "performed",
+          reservation: stored(),
+          outcome: { kind: "conflict", code: known, stored: null, detail: "" },
+        }),
+        "pass1_provider_outcome_failed",
+      ],
+      [
+        r({
+          status: "performed",
+          reservation: stored(),
+          outcome: { kind: "rejected", code: known },
+        }),
+        "pass1_provider_outcome_failed",
+      ],
+      [
+        r({
+          status: "completed",
+          reservation: stored({
+            provider_call_id: "00000000-0000-4000-8000-0000000000aa",
+          }),
+          outcome,
+        }),
+        "pass1_provider_completed_mismatch",
+      ],
+      [
+        r({
+          status: "completed",
+          reservation: stored({
+            attempt_id: "6fc595be-d052-4281-a805-bce4154cb386",
+          }),
+          outcome,
+        }),
+        "pass1_provider_completed_mismatch",
+      ],
+      ...(
+        [
+          "converged_without_outcome",
+          "held_by_other",
+          "provider_not_invoked_canceled",
+          "provider_admission_request_mismatch",
+        ] as const
+      ).map((reason): [ExecuteResult, StopCode] => [
+        r({ status: "unfinished", reason, reservation: stored() }),
+        "pass1_provider_unfinished",
+      ]),
+      ...(
+        [
+          "provider_perform_ambiguous",
+          "provider_finish_ambiguous",
+          "provider_observation_timeout",
+          "provider_observation_canceled",
+        ] as const
+      ).map((code): [ExecuteResult, StopCode] => [
+        r({ status: "ambiguous", reservation: stored(), code }),
+        "pass1_provider_ambiguous",
+      ]),
+      [
+        r({
+          status: "conflict",
+          result: { kind: "conflict", code: known, stored: null, detail: "" },
+        }),
+        "pass1_provider_conflict",
+      ],
+      [
+        r({ status: "rejected", result: { kind: "rejected", code: known } }),
+        "pass1_provider_rejected",
+      ],
     ];
     for (const [result, code] of stops) {
       const c = classifyExecuteResult(result, plan);
@@ -1306,8 +1735,12 @@ describe("writer Pass-1 plan, admission and mapping (unit)", () => {
       expect(c.row.stage).toBe("execute");
       expect(c.row.writes).toBe(true);
     }
-    const completed = classifyExecuteResult(stops[2]?.[0] as ExecuteResult, plan);
-    if (completed.kind === "stop") expect(completed.row.detail?.mismatch_field).toBe("provider_call_id");
+    const completedResult = stops[2]?.[0];
+    if (completedResult === undefined)
+      throw new Error("missing completed-other-owner fixture");
+    const completed = classifyExecuteResult(completedResult, plan);
+    if (completed.kind === "stop")
+      expect(completed.row.detail?.mismatch_field).toBe("provider_call_id");
   });
 
   it("U33 the row comparator: converged, conflicts by kind with a repair after each, link mismatches", () => {
@@ -1315,7 +1748,10 @@ describe("writer Pass-1 plan, admission and mapping (unit)", () => {
     if (!w2 || !manifestArtifact || !pm) throw new Error("no t1 rows");
     const other = "00000000-0000-4000-8000-0000000000bb";
     const check = (planned: PlannedRow, over: Obj | undefined) =>
-      compareStored(planned, over === undefined ? [] : [asStored(planned, over)]);
+      compareStored(
+        planned,
+        over === undefined ? [] : [asStored(planned, over)],
+      );
     expect(check(w2, {})).toEqual({ kind: "equal" });
     expect(check(w2, undefined)).toEqual({ kind: "absent" });
     const kinds: [Obj, string][] = [
@@ -1329,12 +1765,24 @@ describe("writer Pass-1 plan, admission and mapping (unit)", () => {
       [{ supersedes_artifact_id: other }, "metadata_mismatch"],
     ];
     for (const [change, kind] of kinds) {
-      expect(check(w2, change)).toEqual({ kind: "conflict", conflict: { row: "artifacts", kind } });
+      expect(check(w2, change)).toEqual({
+        kind: "conflict",
+        conflict: { row: "artifacts", kind },
+      });
       expect(check(w2, {})).toEqual({ kind: "equal" }); // repair
     }
     // the same content under another id: the natural key matches, the id flag does not
     const elsewhere = { ...w2.row, artifact_id: other };
-    expect(compareStored(w2, [{ ...elsewhere, eq_artifact_id: false, eq_artifact_type: true, eq_content_hash: true }])).toEqual({
+    expect(
+      compareStored(w2, [
+        {
+          ...elsewhere,
+          eq_artifact_id: false,
+          eq_artifact_type: true,
+          eq_content_hash: true,
+        },
+      ]),
+    ).toEqual({
       kind: "conflict",
       conflict: { row: "artifacts", kind: "different_id_same_content" },
     });
@@ -1345,8 +1793,18 @@ describe("writer Pass-1 plan, admission and mapping (unit)", () => {
       conflict: { row: "prompt_manifests", kind: "metadata_mismatch" },
     });
     expect(
-      compareStored(pm, [{ ...pm.row, prompt_manifest_id: other, eq_prompt_manifest_id: false, eq_artifact_id: true }]),
-    ).toEqual({ kind: "conflict", conflict: { row: "prompt_manifests", kind: "different_id_same_content" } });
+      compareStored(pm, [
+        {
+          ...pm.row,
+          prompt_manifest_id: other,
+          eq_prompt_manifest_id: false,
+          eq_artifact_id: true,
+        },
+      ]),
+    ).toEqual({
+      kind: "conflict",
+      conflict: { row: "prompt_manifests", kind: "different_id_same_content" },
+    });
     expect(check(pm, {})).toEqual({ kind: "equal" });
     const turn = plan.t3.find((p) => p.spec.table === "turns");
     if (!turn) throw new Error("no turn");
@@ -1356,317 +1814,479 @@ describe("writer Pass-1 plan, admission and mapping (unit)", () => {
     });
     expect(check(turn, {})).toEqual({ kind: "equal" });
     // evidence is the native flag, not the decoded value: a stored row whose decoded value looks equal but whose flag is false conflicts
-    expect(compareStored(turn, [{ ...turn.row, eq_turn_id: true, eq_sequence: false }])).toEqual({
+    expect(
+      compareStored(turn, [
+        { ...turn.row, eq_turn_id: true, eq_sequence: false },
+      ]),
+    ).toEqual({
       kind: "conflict",
       conflict: { row: "turns", kind: "same_id_different_content" },
     });
   });
 
-  it("U34 finite stop-mapper subcases with real error instances; merge rule M; snapshot failures and witnesses", async () => {
-    const CORRELATION = "11111111-1111-4111-8111-111111111111";
-    const fresh: Context = { d: NONE4, w: true }; // a snapshot saw nothing; the call has begun writing
-    const held = (over: Partial<Durable>): Context => ({ d: { ...NONE4, ...over }, w: true });
-    const mapped = (error: unknown, from: "t1" | "t3" | "execute", ctx: Context): Pass1Stopped => {
-      const row = stopRowForThrown(error, from);
-      if (!row) throw new Error("not owned");
-      return stopFrom(ctx, row);
-    };
-    const ALLOWED = new Set([
-      "kind", "stage", "code", "writes_attempted", "durable", "cleanup", "input", "underlying", "rejection_code",
-      "conflict", "mismatch_field", "provider", "provider_error", "connection", "surface",
-    ]);
-    const closed = (stop: Pass1Stopped): void => {
-      for (const key of Object.keys(stop)) expect(ALLOWED.has(key), key).toBe(true);
-      expect(Object.keys(stop.durable).sort()).toEqual(["lineage", "outcome", "reservation", "t1"]);
-      expect(Object.keys(stop.cleanup).sort()).toEqual(["attached_errors", "complete"]);
-      for (const key of ["provider", "provider_error", "connection", "conflict", "input"] as const) {
-        const nested = stop[key];
-        if (nested) for (const inner of Object.keys(nested)) expect(typeof inner).toBe("string");
-      }
-      const text = JSON.stringify(stop);
-      for (const word of ["message", "cause", "stack", "SELECT", "postgres://", "Connection terminated", "release failed", "statement failed"])
-        expect(text).not.toContain(word);
-    };
-
-    // (a) fresh before_commit / not_attempted at T1 => unknown, NOT absent; the whole closed shape
-    const before = new CommandConnectionError(new Error("lost"), "before_commit");
-    const a = mapped(before, "t1", fresh);
-    const aExpected = {
-      kind: "stopped",
-      stage: "stage_inputs",
-      code: "pass1_command_connection",
-      writes_attempted: true,
-      durable: { ...NONE4, t1: "unknown" },
-      cleanup: { attached_errors: 0, complete: true },
-      connection: { phase: "before_commit", commit_outcome: "not_attempted" },
-    };
-    expect(a).toEqual(aExpected);
-    closed(a);
-    // (b) the same input with prior verified presence: T1 stays present, the local fields are unchanged
-    const b = mapped(before, "t1", held({ t1: "present" }));
-    expect(b).toEqual({ ...aExpected, durable: { ...NONE4, t1: "present" } });
-    closed(b);
-    // (c) concurrent / held-by-other uncertainty: unknown, never none_observed, for the stages it names
-    const heldResult = { status: "unfinished", reason: "held_by_other", reservation: { ...plan.reservation } } as unknown as ExecuteResult;
-    const c = classifyExecuteResult(heldResult, plan);
-    if (c.kind !== "stop") throw new Error("expected a stop");
-    const cStop = stopFrom(fresh, c.row);
-    expect(cStop).toEqual({
-      kind: "stopped",
-      stage: "execute",
-      code: "pass1_provider_unfinished",
-      writes_attempted: true,
-      durable: { ...NONE4, reservation: "unknown", outcome: "unknown" },
-      cleanup: { attached_errors: 0, complete: true },
-      provider: { status: "unfinished", reason: "held_by_other" },
-    });
-    // (d) commit / unknown with and without prior presence; the local commit_outcome stays unknown in both
-    const lost = new CommandConnectionError(new Error("ack lost"), "commit");
-    const dNone = mapped(lost, "t3", fresh);
-    const dHeld = mapped(lost, "t3", held({ lineage: "present" }));
-    const dExpected = {
-      kind: "stopped",
-      stage: "lineage",
-      code: "pass1_command_connection",
-      writes_attempted: true,
-      durable: { ...NONE4, lineage: "unknown" },
-      cleanup: { attached_errors: 0, complete: true },
-      connection: { phase: "commit", commit_outcome: "unknown" },
-    };
-    expect(dNone).toEqual(dExpected);
-    expect(dHeld).toEqual({ ...dExpected, durable: { ...NONE4, lineage: "present" } });
-    closed(dNone);
-    closed(dHeld);
-    // (e) keyed cleanup errors attached by runCommand to the actual throwable, via a scripted fake pool
-    const client = new FakeClient();
-    client.releaseThrows = new Error("release failed");
-    const keyed = (await runCommand(asPool(new FakePool(client)), () => {
-      client.emit("error", new Error("Connection terminated unexpectedly"));
-      return Promise.resolve({ kind: "created", record: 1 } as const);
-    }).catch((e: unknown) => e)) as CommandConnectionError;
-    expect(keyed).toBeInstanceOf(CommandConnectionError);
-    const e = mapped(keyed, "t1", fresh);
-    expect(e).toEqual({ ...aExpected, cleanup: { attached_errors: 1, complete: true } }); // the keyed cleanup count is the only difference from (a)
-    closed(e);
-    // (f) a real ProviderExecutionError, with and without prior presence; its fields stay verbatim
-    const unknownBoth = new ProviderExecutionError(CORRELATION, "record", undefined, "unknown", undefined, "unknown");
-    const fNone = mapped(unknownBoth, "execute", fresh);
-    const providerError = {
-      code: "provider_execution_failed",
-      stage: "record",
-      commit_state: "unknown",
-      reservation_commit_state: "unknown",
-      error_class: "unclassified",
-    };
-    const fExpected = {
-      kind: "stopped",
-      stage: "execute",
-      code: "pass1_provider_error",
-      writes_attempted: true,
-      durable: { ...NONE4, reservation: "unknown", outcome: "unknown" },
-      cleanup: { attached_errors: null, complete: false },
-      provider_error: providerError,
-    };
-    expect(fNone).toEqual(fExpected);
-    const fHeld = mapped(unknownBoth, "execute", held({ reservation: "present", outcome: "present" }));
-    expect(fHeld).toEqual({ ...fExpected, durable: { ...NONE4, reservation: "present", outcome: "present" } });
-    const recordFailed = new ProviderExecutionError(CORRELATION, "record", undefined, "unknown", undefined, "committed");
-    const f2 = mapped(recordFailed, "execute", fresh);
-    expect(f2).toEqual({
-      ...fExpected,
-      durable: { ...NONE4, reservation: "present", outcome: "unknown" },
-      provider_error: { ...providerError, reservation_commit_state: "committed" },
-    });
-    const reserveFailed = new ProviderExecutionError(CORRELATION, "reserve", undefined, "not_committed", undefined, "not_committed");
-    const f3 = mapped(reserveFailed, "execute", fresh);
-    // a local not_committed is not global absence: the facts stay unknown
-    expect(f3).toEqual({
-      ...fExpected,
-      provider_error: { ...providerError, stage: "reserve", commit_state: "not_committed", reservation_commit_state: "not_committed" },
-    });
-    for (const result of [fNone, fHeld, f2, f3]) closed(result);
-    // (g) a wrapped ProviderExecutionError never claims complete underlying cleanup evidence: through the actual boundary, with keyed
-    // cleanup present on the original command error and ignored on the wrapper
-    const wrappedClient = new FakeClient();
-    wrappedClient.releaseThrows = new Error("release failed");
-    let first = true;
-    wrappedClient.afterQuery = (text) => {
-      if (first && !text.startsWith("BEGIN") && !text.includes("transaction_isolation")) {
-        first = false;
-        wrappedClient.emit("error", new Error("Connection terminated unexpectedly"));
-      }
-    };
-    const wrappedPool = new FakePool(wrappedClient);
-    const wrapped = await executeWriterPass1Call(asPool(wrappedPool), plan, OBSERVER, CONTROLS);
-    expect(wrapped.kind).toBe("stopped");
-    if (wrapped.kind !== "stopped") throw new Error("expected a stop");
-    // This scripted loss occurs during reserve, before COMMIT. The command event reports not_committed;
-    // the standalone component still has no verified durable presence, and wrapper cleanup is incomplete.
-    expect(wrapped).toEqual({
-      kind: "stopped",
-      stage: "execute",
-      code: "pass1_provider_error",
-      writes_attempted: true,
-      durable: UNKNOWN4,
-      cleanup: { attached_errors: null, complete: false },
-      provider_error: {
-        code: "provider_execution_failed",
-        stage: "reserve",
-        commit_state: "not_committed",
-        reservation_commit_state: "not_committed",
-        error_class: "CommandConnectionError",
-      },
-    });
-    expect(wrappedClient.releases).toEqual([true]); // the original keyed throwable did carry a cleanup failure
-    expect(wrappedPool.connects).toBe(1); // no retry
-    closed(wrapped);
-    // (h) unrelated throwables are not owned and propagate unchanged at actual T1/T3/E boundaries, without a retry
-    const sentinel = new RangeError("unrelated");
-    for (const call of [
-      (p: Pool) => stageWriterPass1Inputs(p, plan),
-      (p: Pool) => recordWriterPass1Lineage(p, plan),
-    ]) {
-      const pool = new FakePool(new FakeClient());
-      pool.connectError = sentinel;
-      let caught: unknown;
-      try {
-        await call(asPool(pool));
-      } catch (error) {
-        caught = error;
-      }
-      expect(caught).toBe(sentinel);
-      expect(pool.connects).toBe(1);
-    }
-    expect(stopRowForThrown(sentinel, "t1")).toBeUndefined();
-    expect(stopRowForThrown(sentinel, "t3")).toBeUndefined();
-    expect(stopRowForThrown(sentinel, "execute")).toBeUndefined();
-    expect(stopRowForThrown(unknownBoth, "t3")).toBeUndefined();
-    // merge rule M itself
-    expect(mergeFact("present", "unknown")).toBe("present");
-    expect(mergeFact("none_observed", "unknown")).toBe("unknown");
-    expect(mergeFact("unknown", "none_observed")).toBe("unknown");
-    expect(mergeFact("none_observed", "none_observed")).toBe("none_observed");
-    expect(mergeFact("unknown", "present")).toBe("present");
-    expect(mergeFact("none_observed", undefined)).toBe("none_observed");
-    expect(mergeDurable(PRESENT4, { t1: "unknown" })).toEqual(PRESENT4);
-
-    // (i)-(k) snapshot failures, witnessed on the fake client: statements, release argument, listeners, discarded sentinel data
-    const SENTINEL = "SENTINEL-ROW-DATA";
-    interface Run {
-      readonly client: FakeClient;
-      readonly pool: FakePool;
-      readonly read: Awaited<ReturnType<typeof readPass1Snapshot>>;
-    }
-    const snapshot = async (setup: (c: FakeClient) => void): Promise<Run> => {
-      const c = new FakeClient();
-      c.rowsFor = (text) => (text.includes("FROM program_run_attempts") ? [{ attempt_id: SENTINEL }] : []);
-      setup(c);
-      const pool = new FakePool(c);
-      return { client: c, pool, read: await readPass1Snapshot(asPool(pool), plan) };
-    };
-    const BEGIN = "BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY";
-    const control = await snapshot(() => undefined);
-    expect(control.read.ok).toBe(true); // control: a successful snapshot carries the rows it read
-    if (control.read.ok) expect(control.read.raw.host?.attempt_id).toBe(SENTINEL);
-    expect(control.client.statements[0]).toBe(BEGIN);
-    expect(control.client.log.indexOf("query COMMIT")).toBeGreaterThan(0);
-    expect(control.client.log.indexOf("query COMMIT")).toBeLessThan(control.client.log.indexOf("release"));
-    expect(control.client.statements).not.toContain("ROLLBACK");
-    expect(control.client.releases).toEqual([true]); // single release, always the destroying one
-    expect(control.client.listeners("error")).toEqual([control.client.poolListener]); // the scoped listener is gone
-    const statement = await snapshot((cl) => { cl.failOn = (t) => t.includes("FROM program_run_attempts"); });
-    const commit = await snapshot((cl) => { cl.script.set("COMMIT", () => Promise.reject(new Error("commit failed"))); });
-    const release = await snapshot((cl) => { cl.releaseThrows = new Error("release failed"); });
-    for (const [name, run] of [["statement", statement], ["commit", commit], ["release", release]] as const) {
-      expect(run.read.ok, name).toBe(false);
-      expect(JSON.stringify(run.read), name).not.toContain(SENTINEL); // failed data is discarded
-      expect(run.client.releases, name).toEqual([true]); // exactly one release, never a second release of the same client
-      expect(run.client.listeners("error"), name).toEqual([run.client.poolListener]);
-      expect(run.pool.connects, name).toBe(1);
-    }
-    expect(statement.client.statements).toContain("ROLLBACK");
-    expect(statement.client.statements).not.toContain("COMMIT");
-    expect(commit.client.statements).toContain("ROLLBACK");
-    expect(release.client.statements).toContain("COMMIT"); // every read succeeded, the closing release failed: data still discarded
-    expect(release.client.statements).not.toContain("ROLLBACK");
-    expect(statement.read.ok ? -1 : statement.read.cleanup.attached_errors).toBe(0);
-    expect(commit.read.ok ? -1 : commit.read.cleanup.attached_errors).toBe(0);
-    expect(release.read.ok ? -1 : release.read.cleanup.attached_errors).toBe(1);
-    // INITIAL stop: nothing known, nothing written; FINAL stop: every earlier fact and the cumulative writes are kept; never `recorded`
-    const afterT3: Context = { d: PRESENT4, w: true };
-    for (const run of [statement, commit, release]) {
-      if (run.read.ok) throw new Error("expected a failed snapshot");
-      const cleanup = run.read.cleanup;
-      expect(stopFrom(initialContext(), snapshotFailureRow("preconditions", cleanup))).toEqual({
-        kind: "stopped",
-        stage: "preconditions",
-        code: "pass1_preflight_failed",
-        writes_attempted: false,
-        durable: UNKNOWN4,
-        cleanup,
+  it(
+    "U34 finite stop-mapper subcases with real error instances; merge rule M; snapshot failures and witnesses",
+    async () => {
+      const CORRELATION = "11111111-1111-4111-8111-111111111111";
+      const fresh: Context = { d: NONE4, w: true }; // a snapshot saw nothing; the call has begun writing
+      const held = (over: Partial<Durable>): Context => ({
+        d: { ...NONE4, ...over },
+        w: true,
       });
-      expect(stopFrom(afterT3, snapshotFailureRow("final_check", cleanup))).toEqual({
+      const mapped = (
+        error: unknown,
+        from: "t1" | "t3" | "execute",
+        ctx: Context,
+      ): Pass1Stopped => {
+        const row = stopRowForThrown(error, from);
+        if (!row) throw new Error("not owned");
+        return stopFrom(ctx, row);
+      };
+      const ALLOWED = new Set([
+        "kind",
+        "stage",
+        "code",
+        "writes_attempted",
+        "durable",
+        "cleanup",
+        "input",
+        "underlying",
+        "rejection_code",
+        "conflict",
+        "mismatch_field",
+        "provider",
+        "provider_error",
+        "connection",
+        "surface",
+      ]);
+      const closed = (stop: Pass1Stopped): void => {
+        for (const key of Object.keys(stop))
+          expect(ALLOWED.has(key), key).toBe(true);
+        expect(Object.keys(stop.durable).sort()).toEqual([
+          "lineage",
+          "outcome",
+          "reservation",
+          "t1",
+        ]);
+        expect(Object.keys(stop.cleanup).sort()).toEqual([
+          "attached_errors",
+          "complete",
+        ]);
+        for (const key of [
+          "provider",
+          "provider_error",
+          "connection",
+          "conflict",
+          "input",
+        ] as const) {
+          const nested = stop[key];
+          if (nested)
+            for (const inner of Object.keys(nested))
+              expect(typeof inner).toBe("string");
+        }
+        const text = JSON.stringify(stop);
+        for (const word of [
+          "message",
+          "cause",
+          "stack",
+          "SELECT",
+          "postgres://",
+          "Connection terminated",
+          "release failed",
+          "statement failed",
+        ])
+          expect(text).not.toContain(word);
+      };
+
+      // (a) fresh before_commit / not_attempted at T1 => unknown, NOT absent; the whole closed shape
+      const before = new CommandConnectionError(
+        new Error("lost"),
+        "before_commit",
+      );
+      const a = mapped(before, "t1", fresh);
+      const aExpected = {
         kind: "stopped",
-        stage: "final_check",
-        code: "pass1_preflight_failed",
+        stage: "stage_inputs",
+        code: "pass1_command_connection",
         writes_attempted: true,
-        durable: PRESENT4,
-        cleanup,
+        durable: { ...NONE4, t1: "unknown" },
+        cleanup: { attached_errors: 0, complete: true },
+        connection: { phase: "before_commit", commit_outcome: "not_attempted" },
+      };
+      expect(a).toEqual(aExpected);
+      closed(a);
+      // (b) the same input with prior verified presence: T1 stays present, the local fields are unchanged
+      const b = mapped(before, "t1", held({ t1: "present" }));
+      expect(b).toEqual({ ...aExpected, durable: { ...NONE4, t1: "present" } });
+      closed(b);
+      // (c) concurrent / held-by-other uncertainty: unknown, never none_observed, for the stages it names
+      const heldResult = {
+        status: "unfinished",
+        reason: "held_by_other",
+        reservation: { ...plan.reservation },
+      } as unknown as ExecuteResult;
+      const c = classifyExecuteResult(heldResult, plan);
+      if (c.kind !== "stop") throw new Error("expected a stop");
+      const cStop = stopFrom(fresh, c.row);
+      expect(cStop).toEqual({
+        kind: "stopped",
+        stage: "execute",
+        code: "pass1_provider_unfinished",
+        writes_attempted: true,
+        durable: { ...NONE4, reservation: "unknown", outcome: "unknown" },
+        cleanup: { attached_errors: 0, complete: true },
+        provider: { status: "unfinished", reason: "held_by_other" },
       });
-    }
-    // a fault hook is not a driver failure: after bounded cleanup it propagates with its identity (rollback, one destroying release)
-    const hookError = new RangeError("hook fault");
-    const hooked = new FakeClient();
-    hooked.rowsFor = (text) => (text.includes("FROM program_run_attempts") ? [{ attempt_id: SENTINEL }] : []);
-    let caught: unknown;
-    await withHook(
-      (point) => {
-        if (point === "writer_pass1_preflight_after_first_read") throw hookError;
-      },
-      async () => {
+      // (d) commit / unknown with and without prior presence; the local commit_outcome stays unknown in both
+      const lost = new CommandConnectionError(new Error("ack lost"), "commit");
+      const dNone = mapped(lost, "t3", fresh);
+      const dHeld = mapped(lost, "t3", held({ lineage: "present" }));
+      const dExpected = {
+        kind: "stopped",
+        stage: "lineage",
+        code: "pass1_command_connection",
+        writes_attempted: true,
+        durable: { ...NONE4, lineage: "unknown" },
+        cleanup: { attached_errors: 0, complete: true },
+        connection: { phase: "commit", commit_outcome: "unknown" },
+      };
+      expect(dNone).toEqual(dExpected);
+      expect(dHeld).toEqual({
+        ...dExpected,
+        durable: { ...NONE4, lineage: "present" },
+      });
+      closed(dNone);
+      closed(dHeld);
+      // (e) keyed cleanup errors attached by runCommand to the actual throwable, via a scripted fake pool
+      const client = new FakeClient();
+      client.releaseThrows = new Error("release failed");
+      const keyed = (await runCommand(asPool(new FakePool(client)), () => {
+        client.emit("error", new Error("Connection terminated unexpectedly"));
+        return Promise.resolve({ kind: "created", record: 1 } as const);
+      }).catch((e: unknown) => e)) as CommandConnectionError;
+      expect(keyed).toBeInstanceOf(CommandConnectionError);
+      const e = mapped(keyed, "t1", fresh);
+      expect(e).toEqual({
+        ...aExpected,
+        cleanup: { attached_errors: 1, complete: true },
+      }); // the keyed cleanup count is the only difference from (a)
+      closed(e);
+      // (f) a real ProviderExecutionError, with and without prior presence; its fields stay verbatim
+      const unknownBoth = new ProviderExecutionError(
+        CORRELATION,
+        "record",
+        undefined,
+        "unknown",
+        undefined,
+        "unknown",
+      );
+      const fNone = mapped(unknownBoth, "execute", fresh);
+      const providerError = {
+        code: "provider_execution_failed",
+        stage: "record",
+        commit_state: "unknown",
+        reservation_commit_state: "unknown",
+        error_class: "unclassified",
+      };
+      const fExpected = {
+        kind: "stopped",
+        stage: "execute",
+        code: "pass1_provider_error",
+        writes_attempted: true,
+        durable: { ...NONE4, reservation: "unknown", outcome: "unknown" },
+        cleanup: { attached_errors: null, complete: false },
+        provider_error: providerError,
+      };
+      expect(fNone).toEqual(fExpected);
+      const fHeld = mapped(
+        unknownBoth,
+        "execute",
+        held({ reservation: "present", outcome: "present" }),
+      );
+      expect(fHeld).toEqual({
+        ...fExpected,
+        durable: { ...NONE4, reservation: "present", outcome: "present" },
+      });
+      const recordFailed = new ProviderExecutionError(
+        CORRELATION,
+        "record",
+        undefined,
+        "unknown",
+        undefined,
+        "committed",
+      );
+      const f2 = mapped(recordFailed, "execute", fresh);
+      expect(f2).toEqual({
+        ...fExpected,
+        durable: { ...NONE4, reservation: "present", outcome: "unknown" },
+        provider_error: {
+          ...providerError,
+          reservation_commit_state: "committed",
+        },
+      });
+      const reserveFailed = new ProviderExecutionError(
+        CORRELATION,
+        "reserve",
+        undefined,
+        "not_committed",
+        undefined,
+        "not_committed",
+      );
+      const f3 = mapped(reserveFailed, "execute", fresh);
+      // a local not_committed is not global absence: the facts stay unknown
+      expect(f3).toEqual({
+        ...fExpected,
+        provider_error: {
+          ...providerError,
+          stage: "reserve",
+          commit_state: "not_committed",
+          reservation_commit_state: "not_committed",
+        },
+      });
+      for (const result of [fNone, fHeld, f2, f3]) closed(result);
+      // (g) a wrapped ProviderExecutionError never claims complete underlying cleanup evidence: through the actual boundary, with keyed
+      // cleanup present on the original command error and ignored on the wrapper
+      const wrappedClient = new FakeClient();
+      wrappedClient.releaseThrows = new Error("release failed");
+      let first = true;
+      wrappedClient.afterQuery = (text) => {
+        if (
+          first &&
+          !text.startsWith("BEGIN") &&
+          !text.includes("transaction_isolation")
+        ) {
+          first = false;
+          wrappedClient.emit(
+            "error",
+            new Error("Connection terminated unexpectedly"),
+          );
+        }
+      };
+      const wrappedPool = new FakePool(wrappedClient);
+      const wrapped = await executeWriterPass1Call(
+        asPool(wrappedPool),
+        plan,
+        OBSERVER,
+        CONTROLS,
+      );
+      expect(wrapped.kind).toBe("stopped");
+      if (wrapped.kind !== "stopped") throw new Error("expected a stop");
+      // This scripted loss occurs during reserve, before COMMIT. The command event reports not_committed;
+      // the standalone component still has no verified durable presence, and wrapper cleanup is incomplete.
+      expect(wrapped).toEqual({
+        kind: "stopped",
+        stage: "execute",
+        code: "pass1_provider_error",
+        writes_attempted: true,
+        durable: UNKNOWN4,
+        cleanup: { attached_errors: null, complete: false },
+        provider_error: {
+          code: "provider_execution_failed",
+          stage: "reserve",
+          commit_state: "not_committed",
+          reservation_commit_state: "not_committed",
+          error_class: "CommandConnectionError",
+        },
+      });
+      expect(wrappedClient.releases).toEqual([true]); // the original keyed throwable did carry a cleanup failure
+      expect(wrappedPool.connects).toBe(1); // no retry
+      closed(wrapped);
+      // (h) unrelated throwables are not owned and propagate unchanged at actual T1/T3/E boundaries, without a retry
+      const sentinel = new RangeError("unrelated");
+      for (const call of [
+        (p: Pool) => stageWriterPass1Inputs(p, plan),
+        (p: Pool) => recordWriterPass1Lineage(p, plan),
+      ]) {
+        const pool = new FakePool(new FakeClient());
+        pool.connectError = sentinel;
+        let caught: unknown;
         try {
-          await readPass1Snapshot(asPool(new FakePool(hooked)), plan);
+          await call(asPool(pool));
         } catch (error) {
           caught = error;
         }
-      },
-    );
-    expect(caught).toBe(hookError);
-    expect(hooked.statements).toContain("ROLLBACK");
-    expect(hooked.statements).not.toContain("COMMIT");
-    expect(hooked.releases).toEqual([true]);
-    expect(hooked.listeners("error")).toEqual([hooked.poolListener]);
-    // a pure processing fault is not a database failure either: before any checkout it throws unchanged; after COMMIT it throws unchanged
-    const processing = new TypeError("pure fault");
-    const early = new FakePool(new FakeClient());
-    const malformed = Object.create(plan, { claims: { value: 5 } }) as Pass1Plan;
-    await expect(readPass1Snapshot(asPool(early), malformed)).rejects.toBeInstanceOf(TypeError);
-    expect(early.connects).toBe(0);
-    let reads = 0;
-    const late = Object.create(plan, {
-      t3: {
-        get: () => {
-          reads += 1;
-          if (reads > 1) throw processing;
-          return plan.t3;
+        expect(caught).toBe(sentinel);
+        expect(pool.connects).toBe(1);
+      }
+      expect(stopRowForThrown(sentinel, "t1")).toBeUndefined();
+      expect(stopRowForThrown(sentinel, "t3")).toBeUndefined();
+      expect(stopRowForThrown(sentinel, "execute")).toBeUndefined();
+      expect(stopRowForThrown(unknownBoth, "t3")).toBeUndefined();
+      // merge rule M itself
+      expect(mergeFact("present", "unknown")).toBe("present");
+      expect(mergeFact("none_observed", "unknown")).toBe("unknown");
+      expect(mergeFact("unknown", "none_observed")).toBe("unknown");
+      expect(mergeFact("none_observed", "none_observed")).toBe("none_observed");
+      expect(mergeFact("unknown", "present")).toBe("present");
+      expect(mergeFact("none_observed", undefined)).toBe("none_observed");
+      expect(mergeDurable(PRESENT4, { t1: "unknown" })).toEqual(PRESENT4);
+
+      // (i)-(k) snapshot failures, witnessed on the fake client: statements, release argument, listeners, discarded sentinel data
+      const SENTINEL = "SENTINEL-ROW-DATA";
+      interface Run {
+        readonly client: FakeClient;
+        readonly pool: FakePool;
+        readonly read: Awaited<ReturnType<typeof readPass1Snapshot>>;
+      }
+      const snapshot = async (setup: (c: FakeClient) => void): Promise<Run> => {
+        const c = new FakeClient();
+        c.rowsFor = (text) =>
+          text.includes("FROM program_run_attempts")
+            ? [{ attempt_id: SENTINEL }]
+            : [];
+        setup(c);
+        const pool = new FakePool(c);
+        return {
+          client: c,
+          pool,
+          read: await readPass1Snapshot(asPool(pool), plan),
+        };
+      };
+      const BEGIN = "BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY";
+      const control = await snapshot(() => undefined);
+      expect(control.read.ok).toBe(true); // control: a successful snapshot carries the rows it read
+      if (control.read.ok)
+        expect(control.read.raw.host?.attempt_id).toBe(SENTINEL);
+      expect(control.client.statements[0]).toBe(BEGIN);
+      expect(control.client.log.indexOf("query COMMIT")).toBeGreaterThan(0);
+      expect(control.client.log.indexOf("query COMMIT")).toBeLessThan(
+        control.client.log.indexOf("release"),
+      );
+      expect(control.client.statements).not.toContain("ROLLBACK");
+      expect(control.client.releases).toEqual([true]); // single release, always the destroying one
+      expect(control.client.listeners("error")).toEqual([
+        control.client.poolListener,
+      ]); // the scoped listener is gone
+      const statement = await snapshot((cl) => {
+        cl.failOn = (t) => t.includes("FROM program_run_attempts");
+      });
+      const commit = await snapshot((cl) => {
+        cl.script.set("COMMIT", () =>
+          Promise.reject(new Error("commit failed")),
+        );
+      });
+      const release = await snapshot((cl) => {
+        cl.releaseThrows = new Error("release failed");
+      });
+      for (const [name, run] of [
+        ["statement", statement],
+        ["commit", commit],
+        ["release", release],
+      ] as const) {
+        expect(run.read.ok, name).toBe(false);
+        expect(JSON.stringify(run.read), name).not.toContain(SENTINEL); // failed data is discarded
+        expect(run.client.releases, name).toEqual([true]); // exactly one release, never a second release of the same client
+        expect(run.client.listeners("error"), name).toEqual([
+          run.client.poolListener,
+        ]);
+        expect(run.pool.connects, name).toBe(1);
+      }
+      expect(statement.client.statements).toContain("ROLLBACK");
+      expect(statement.client.statements).not.toContain("COMMIT");
+      expect(commit.client.statements).toContain("ROLLBACK");
+      expect(release.client.statements).toContain("COMMIT"); // every read succeeded, the closing release failed: data still discarded
+      expect(release.client.statements).not.toContain("ROLLBACK");
+      expect(
+        statement.read.ok ? -1 : statement.read.cleanup.attached_errors,
+      ).toBe(0);
+      expect(commit.read.ok ? -1 : commit.read.cleanup.attached_errors).toBe(0);
+      expect(release.read.ok ? -1 : release.read.cleanup.attached_errors).toBe(
+        1,
+      );
+      // INITIAL stop: nothing known, nothing written; FINAL stop: every earlier fact and the cumulative writes are kept; never `recorded`
+      const afterT3: Context = { d: PRESENT4, w: true };
+      for (const run of [statement, commit, release]) {
+        if (run.read.ok) throw new Error("expected a failed snapshot");
+        const cleanup = run.read.cleanup;
+        expect(
+          stopFrom(
+            initialContext(),
+            snapshotFailureRow("preconditions", cleanup),
+          ),
+        ).toEqual({
+          kind: "stopped",
+          stage: "preconditions",
+          code: "pass1_preflight_failed",
+          writes_attempted: false,
+          durable: UNKNOWN4,
+          cleanup,
+        });
+        expect(
+          stopFrom(afterT3, snapshotFailureRow("final_check", cleanup)),
+        ).toEqual({
+          kind: "stopped",
+          stage: "final_check",
+          code: "pass1_preflight_failed",
+          writes_attempted: true,
+          durable: PRESENT4,
+          cleanup,
+        });
+      }
+      // a fault hook is not a driver failure: after bounded cleanup it propagates with its identity (rollback, one destroying release)
+      const hookError = new RangeError("hook fault");
+      const hooked = new FakeClient();
+      hooked.rowsFor = (text) =>
+        text.includes("FROM program_run_attempts")
+          ? [{ attempt_id: SENTINEL }]
+          : [];
+      let caught: unknown;
+      await withHook(
+        (point) => {
+          if (point === "writer_pass1_preflight_after_first_read")
+            throw hookError;
         },
-      },
-    }) as Pass1Plan;
-    const lateClient = new FakeClient();
-    let thrown: unknown;
-    try {
-      await readPass1Snapshot(asPool(new FakePool(lateClient)), late);
-    } catch (error) {
-      thrown = error;
-    }
-    expect(thrown).toBe(processing);
-    expect(lateClient.statements).toContain("COMMIT");
-    expect(lateClient.releases).toEqual([true]);
-  }, T);
+        async () => {
+          try {
+            await readPass1Snapshot(asPool(new FakePool(hooked)), plan);
+          } catch (error) {
+            caught = error;
+          }
+        },
+      );
+      expect(caught).toBe(hookError);
+      expect(hooked.statements).toContain("ROLLBACK");
+      expect(hooked.statements).not.toContain("COMMIT");
+      expect(hooked.releases).toEqual([true]);
+      expect(hooked.listeners("error")).toEqual([hooked.poolListener]);
+      // a pure processing fault is not a database failure either: before any checkout it throws unchanged; after COMMIT it throws unchanged
+      const processing = new TypeError("pure fault");
+      const early = new FakePool(new FakeClient());
+      const malformed = Object.create(plan, {
+        claims: { value: 5 },
+      }) as Pass1Plan;
+      await expect(
+        readPass1Snapshot(asPool(early), malformed),
+      ).rejects.toBeInstanceOf(TypeError);
+      expect(early.connects).toBe(0);
+      let reads = 0;
+      const late = Object.create(plan, {
+        t3: {
+          get: () => {
+            reads += 1;
+            if (reads > 1) throw processing;
+            return plan.t3;
+          },
+        },
+      }) as Pass1Plan;
+      const lateClient = new FakeClient();
+      let thrown: unknown;
+      try {
+        await readPass1Snapshot(asPool(new FakePool(lateClient)), late);
+      } catch (error) {
+        thrown = error;
+      }
+      expect(thrown).toBe(processing);
+      expect(lateClient.statements).toContain("COMMIT");
+      expect(lateClient.releases).toEqual([true]);
+    },
+    T,
+  );
 
   it("U35 the partial-state classifier: all 16 stage vectors, run-field and host changes, foreign rows, mixed snapshots", () => {
-    const classify = (raw: RawSnapshot, mode: "preflight" | "final" = "preflight") =>
-      classifyPass1Snapshot(raw, plan, mode);
+    const classify = (
+      raw: RawSnapshot,
+      mode: "preflight" | "final" = "preflight",
+    ) => classifyPass1Snapshot(raw, plan, mode);
     const factsFor = (state: number): Durable => ({
       t1: state >= 1 ? "present" : "none_observed",
       reservation: state >= 2 ? "present" : "none_observed",
@@ -1678,8 +2298,15 @@ describe("writer Pass-1 plan, admission and mapping (unit)", () => {
     let accepted = 0;
     let refused = 0;
     for (let n = 0; n < 16; n += 1) {
-      const bits: Bits = { t1: (n & 8) !== 0, call: (n & 4) !== 0, event: (n & 2) !== 0, t3: (n & 1) !== 0 };
-      const vector = [bits.t1, bits.call, bits.event, bits.t3].map((on) => (on ? "1" : "0")).join("");
+      const bits: Bits = {
+        t1: (n & 8) !== 0,
+        call: (n & 4) !== 0,
+        event: (n & 2) !== 0,
+        t3: (n & 1) !== 0,
+      };
+      const vector = [bits.t1, bits.call, bits.event, bits.t3]
+        .map((on) => (on ? "1" : "0"))
+        .join("");
       const result = classify(rawFor(bits));
       if (monotone.has(vector)) {
         accepted += 1;
@@ -1695,16 +2322,22 @@ describe("writer Pass-1 plan, admission and mapping (unit)", () => {
         expect(result.row.stage).toBe("preconditions");
         expect(result.row.writes).toBe(false);
         // the untrusted own rows give no facts: initial context + the row => every fact unknown, nothing written
-        expect(stopFrom(initialContext(), { ...result.row, facts: result.row.facts }).durable).toEqual(UNKNOWN4);
+        expect(
+          stopFrom(initialContext(), { ...result.row, facts: result.row.facts })
+            .durable,
+        ).toEqual(UNKNOWN4);
       }
     }
     expect([accepted, refused]).toEqual([5, 11]);
     expect(showrunnerBriefHash(brief)).toBe(plan.script_payload.brief_hash);
-    expect(evidencePackageHash(packagePayload)).toBe(plan.script_payload.package_hash);
+    expect(evidencePackageHash(packagePayload)).toBe(
+      plan.script_payload.package_hash,
+    );
     const unexpected = (raw: RawSnapshot): void => {
       const result = classify(raw);
       expect(result.kind).toBe("stop");
-      if (result.kind === "stop") expect(result.row.code).toBe("pass1_unexpected_state");
+      if (result.kind === "stop")
+        expect(result.row.code).toBe("pass1_unexpected_state");
     };
     // foreign additive row, a changed stop-boundary table, mixed-snapshot counts
     unexpected(rawFor(bitsOf(2), { count: { artifacts: 1 } }));
@@ -1717,7 +2350,13 @@ describe("writer Pass-1 plan, admission and mapping (unit)", () => {
     const artifacts = good.own.artifacts ?? [];
     const damaged: RawSnapshot = {
       ...good,
-      own: { ...good.own, artifacts: [{ ...artifacts[0], eq_content_hash: false }, ...artifacts.slice(1)] },
+      own: {
+        ...good.own,
+        artifacts: [
+          { ...artifacts[0], eq_content_hash: false },
+          ...artifacts.slice(1),
+        ],
+      },
     };
     unexpected(damaged);
     expect(classify(good).kind).toBe("state"); // the original is untouched
@@ -1741,14 +2380,24 @@ describe("writer Pass-1 plan, admission and mapping (unit)", () => {
       { repair_plan_id: PASS1_PIN.host.attempt_id },
     ] as Obj[]) {
       const pre = code(rawFor(bitsOf(4), { host }), "preflight");
-      expect(pre?.row.code, JSON.stringify(host)).toBe("pass1_attempt_unavailable");
+      expect(pre?.row.code, JSON.stringify(host)).toBe(
+        "pass1_attempt_unavailable",
+      );
       expect(pre?.row.facts).toEqual(factsFor(4)); // the snapshot supports all four facts
-      expect(code(rawFor(bitsOf(4), { host }), "final")?.row.code).toBe("pass1_host_changed");
+      expect(code(rawFor(bitsOf(4), { host }), "final")?.row.code).toBe(
+        "pass1_host_changed",
+      );
     }
-    expect(code({ ...rawFor(bitsOf(0)), host: undefined }, "preflight")?.row.code).toBe("pass1_attempt_unavailable");
+    expect(
+      code({ ...rawFor(bitsOf(0)), host: undefined }, "preflight")?.row.code,
+    ).toBe("pass1_attempt_unavailable");
     expect(classify(rawFor(bitsOf(4))).kind).toBe("state"); // repair: the unchanged host is accepted again
-    const badBrief = rawFor(bitsOf(0), { brief: { payload: { ...brief, central_question: "changed" } } });
-    expect(code(badBrief, "preflight")?.row.code).toBe("pass1_input_identity_mismatch");
+    const badBrief = rawFor(bitsOf(0), {
+      brief: { payload: { ...brief, central_question: "changed" } },
+    });
+    expect(code(badBrief, "preflight")?.row.code).toBe(
+      "pass1_input_identity_mismatch",
+    );
     expect(code(badBrief, "final")?.row.code).toBe("pass1_host_changed");
     // the final mode accepts only the complete state
     expect(classify(rawFor(bitsOf(4)), "final").kind).toBe("state");
@@ -1758,11 +2407,33 @@ describe("writer Pass-1 plan, admission and mapping (unit)", () => {
     // the nine touched fixture counts of the design
     expect(
       Object.fromEntries(
-        ["artifacts", "prompt_manifests", "provider_calls", "provider_call_events", "model_runs", "script_versions", "turns", "turn_claim_uses", "turn_evidence_uses"].map((t) => [t, plan.fixture_counts[t]]),
+        [
+          "artifacts",
+          "prompt_manifests",
+          "provider_calls",
+          "provider_call_events",
+          "model_runs",
+          "script_versions",
+          "turns",
+          "turn_claim_uses",
+          "turn_evidence_uses",
+        ].map((t) => [t, plan.fixture_counts[t]]),
       ),
-    ).toEqual({ artifacts: 36, prompt_manifests: 5, provider_calls: 15, provider_call_events: 15, model_runs: 5, script_versions: 3, turns: 51, turn_claim_uses: 36, turn_evidence_uses: 9 });
+    ).toEqual({
+      artifacts: 36,
+      prompt_manifests: 5,
+      provider_calls: 15,
+      provider_call_events: 15,
+      model_runs: 5,
+      script_versions: 3,
+      turns: 51,
+      turn_claim_uses: 36,
+      turn_evidence_uses: 9,
+    });
     expect(isAdmittedPlan(plan)).toBe(true);
     expect(isAdmittedPlan({ ...plan })).toBe(false);
-    expect(bareStop("admission", "pass1_specimen_invalid").writes_attempted).toBe(false);
+    expect(
+      bareStop("admission", "pass1_specimen_invalid").writes_attempted,
+    ).toBe(false);
   });
 });

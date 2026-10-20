@@ -34,21 +34,21 @@ correctly refuse them).
 
 ## 3. Chain
 
-* Rendered request (recipe `writer-pass1-request/1`): compact canonical JSON of exactly six keys, 678 bytes, raw SHA-256
+- Rendered request (recipe `writer-pass1-request/1`): compact canonical JSON of exactly six keys, 678 bytes, raw SHA-256
   `443ebf6b…752b`; it carries artifact refs/hashes and one fixed instruction only. Request bytes are reconstructable, not retained.
-* Complete prompt manifest (sixteen fields) bound to addendum 0.2; artifact type `prompt_manifest_2`, schema `prompt-manifest/1`, hash
+- Complete prompt manifest (sixteen fields) bound to addendum 0.2; artifact type `prompt_manifest_2`, schema `prompt-manifest/1`, hash
   `0331df55…683f`; typed `prompt_manifests` row (`component_versions`, `rendered_request_hash`, `policy_source_hashes`, `artifact_id`);
   `model-semantic-input-v1` `f1ff636a…7f73`. Its retention text states the truthful raw-response relation: the raw response is the pinned
   `writer-pass1-specimen/1` constant identified by its canonical-JSON SHA-256 in the provider event `response_reference`; it is not stored
   verbatim; the stored script is the canonical carrier deterministically mapped from it.
-* Reservation (twelve authored immutable columns): provider `fixture_stub`, operation `writer`, model `fixture_stub/writer-pass1-v2`,
+- Reservation (twelve authored immutable columns): provider `fixture_stub`, operation `writer`, model `fixture_stub/writer-pass1-v2`,
   `request_fingerprint` = request hash, `logical_request_key` `fixture_stub:writer:<hash>`, try 1, take/retry/reroll NULL, `started_at` =
   invocation start. Terminal event: `succeeded`, `ended_at` = invocation end, usage `{external_provider_contacted:false,
-  fixture_execution:true}`, cost `0.0000` USD, `response_artifact_id` NULL, `response_reference`
+fixture_execution:true}`, cost `0.0000` USD, `response_artifact_id` NULL, `response_reference`
   `writer-pass1-specimen/1:<specimen canonical sha>:<script hash>`.
-* Adapter: pure; `perform` asserts the request against the plan, then returns the deep-frozen semantic specimen itself; there is no
+- Adapter: pure; `perform` asserts the request against the plan, then returns the deep-frozen semantic specimen itself; there is no
   `lookup`. `finish` requires the response's canonical SHA-256 to be the pinned `bff8461a…5682`.
-* 41 additive rows: T1 four (`artifacts` ×3, `prompt_manifests`), reservation + event two, T3 thirty-five (`artifacts` script, `script_versions`,
+- 41 additive rows: T1 four (`artifacts` ×3, `prompt_manifests`), reservation + event two, T3 thirty-five (`artifacts` script, `script_versions`,
   17 `turns`, 12 `turn_claim_uses`, 3 `turn_evidence_uses`, `model_runs`). The 398 historical rows are untouched; host attempt and run stay
   `PENDING`.
 
@@ -79,38 +79,38 @@ field by field and the object rebuilt from the stored rows must hash to both the
 
 ## 5. Persistence protocol
 
-* Session (a caller-side setup-boundary precondition): a trusted, exclusively owned disposable fixture session; independent lifecycle writers
+- Session (a caller-side setup-boundary precondition): a trusted, exclusively owned disposable fixture session; independent lifecycle writers
   and non-participating writers to the touched tables are outside the proof. The caller runs the strict `verifyCompletePinnedFixture` (Q0)
   exactly once before the first call and retains the authored invocation record (`attempt_id`, `started_at`, `ended_at`, `created_at`, RFC 3339
   timestamps with `Z` or a numeric UTC offset and 0–6 fractional digits, compared as exact UTC microsecond instants and never through a
   millisecond-truncating `Date` round trip (the public input stays four-digit; stored UTC text may render a five-digit year across the 9999/10000 rollover and is compared internally as the same instant), `ended_at` not before `started_at`); the strict checkpoint fails from T1 onward by design and is never re-run or weakened.
-* Coherent snapshot: every fact the preflight uses together is read inside ONE checked-out `REPEATABLE READ READ ONLY` transaction (SELECT
+- Coherent snapshot: every fact the preflight uses together is read inside ONE checked-out `REPEATABLE READ READ ONLY` transaction (SELECT
   privilege only), closed by COMMIT and released before T1; never held across a write or provider execution. Only driver operations
   (connect, BEGIN, each statement, COMMIT) are caught: a failure there triggers one ROLLBACK, discards the data and stops
   `pass1_preflight_failed`; faults raised by the pure code or a test hook keep their identity. Every acquired-client path ends in at most
   one destructive `release(true)`: no snapshot data is used after a driver, COMMIT or release failure, a release that throws is counted as
   an observed cleanup failure with destruction unconfirmed, and there is no second release, reconnect, retry or stronger claim. Previously
   established durable facts and cumulative writes stay governed by merge rule M and E1. The final recheck uses a fresh snapshot.
-* Equality: every authored column is compared by the database itself (`IS NOT DISTINCT FROM $n::type`, null-safe, `jsonb` included) in
+- Equality: every authored column is compared by the database itself (`IS NOT DISTINCT FROM $n::type`, null-safe, `jsonb` included) in
   the probes and in snapshot classification, so JSON precision or key-order differences are never decided by JavaScript.
-* Preflight (initial entry and re-entry): the pinned host attempt/run (`PENDING`, evaluation, publication disabled, show-config bound, no
+- Preflight (initial entry and re-entry): the pinned host attempt/run (`PENDING`, evaluation, publication disabled, show-config bound, no
   parent/repair), the Brief and evidence package hashes, selected claim/evidence content hashes, the paraphrase-only rights row R005
   (`pass1_rights_provider_exposure`), the exact own rows of five monotone states (∅ → T1 → +reservation → +event → +T3), per-table counts
   equal to the fixture counts plus this seam's own present rows (foreign additive row ⇒ `pass1_unexpected_state`), and the stop-boundary
   tables unchanged.
-* T1 `stageWriterPass1Inputs(pool, plan)`: one `runCommand` (READ COMMITTED), ordinary SELECTs and savepoint-wrapped INSERTs under
+- T1 `stageWriterPass1Inputs(pool, plan)`: one `runCommand` (READ COMMITTED), ordinary SELECTs and savepoint-wrapped INSERTs under
   `pg_advisory_xact_lock(182736481, hashtext(provider_call_id))`. Every column except database-generated `created_at` is compared; the same
   content under another id or schema is a named conflict, never adopted. No `FOR SHARE` (the runtime role has SELECT and INSERT only).
-* E `executeWriterPass1Call(pool, plan, observerContext, controls)`: `executeProviderCall`; only an exact `performed` (outcome
+- E `executeWriterPass1Call(pool, plan, observerContext, controls)`: `executeProviderCall`; only an exact `performed` (outcome
   created/converged) or an exact `completed` of THIS authored id proceeds, then the durable call (twelve fields, `started_at`, six NULL
   admission columns) and exactly one exact event are verified. `unfinished`, `ambiguous`, `conflict`, `rejected` and a `completed` for another
   authored id stop. Only the caller whose own committed reservation returned `created` may perform; no takeover, lease or retry.
-* T3 `recordWriterPass1Lineage(pool, plan)`: verifies the exact T1 rows and the exact call + event itself, inserts the 35 rows in order (script
+- T3 `recordWriterPass1Lineage(pool, plan)`: verifies the exact T1 rows and the exact call + event itself, inserts the 35 rows in order (script
   artifact, `script_versions`, turns, claim uses, evidence uses, `model_runs`) and reconciles them.
-* `runWriterPass1(pool, invocation, observerContext, controls)` is the only composition: plan → snapshot preflight → T1 → E → T3 → fresh
+- `runWriterPass1(pool, invocation, observerContext, controls)` is the only composition: plan → snapshot preflight → T1 → E → T3 → fresh
   snapshot final recheck (`pass1_host_changed` on change) → `recorded`. The components accept only an admitted plan minted by
   `planWriterPass1`; none bypasses the preflight and the orchestrator never skips it.
-* Fault points (inert unless `DESK_TEST_FAULTS=1` with an installed hook): `writer_pass1_preflight_after_first_read`,
+- Fault points (inert unless `DESK_TEST_FAULTS=1` with an installed hook): `writer_pass1_preflight_after_first_read`,
   `writer_pass1_after_preflight`, `writer_pass1_perform`, `writer_pass1_before_final_check`, plus the existing provider/command points.
 
 ### Crash and lost-return recovery (names accurate)
@@ -161,28 +161,28 @@ Stop codes (closed): `pass1_input_refused`, `pass1_input_fault`, `pass1_invocati
 `pass1_provider_ambiguous`, `pass1_provider_conflict`, `pass1_provider_rejected`, `pass1_provider_error`, `pass1_provider_outcome_failed`,
 `pass1_provider_mismatch`, `pass1_provider_completed_mismatch`, `pass1_host_changed`.
 
-| Source | Code | Row default facts (merged with the cumulative context) |
-|---|---|---|
-| factory refusal / fault | `pass1_input_refused` / `pass1_input_fault` | nothing read: all `unknown`, no writes |
-| invalid invocation | `pass1_invocation_invalid` (`rejection_code`) | all `unknown`, no writes |
-| admission refusals | their own codes | all `unknown`, no writes |
-| initial snapshot failure | `pass1_preflight_failed` | all `unknown`, no writes |
-| preflight classification | `pass1_attempt_unavailable`, `pass1_input_identity_mismatch`, `pass1_rights_provider_exposure`, `pass1_unexpected_state` | the snapshot's facts (all `unknown` if its own rows cannot be trusted), no writes |
-| T1/T3 `conflict` | `pass1_stage_conflict` | that stage `unknown` |
-| T1/T3 `rejected` | `pass1_stage_rejected` | that stage `unknown` |
-| T1/T3 `CommandConnectionError` | `pass1_command_connection` | that stage `unknown` for both `commit_outcome` values (R-F) |
-| E `performed`, outcome created/converged, exact | proceeds | reservation, outcome `present` |
-| E `performed`, outcome conflict/rejected | `pass1_provider_outcome_failed` | reservation `present`, outcome `unknown` |
-| E `completed` exact | proceeds | reservation, outcome `present` |
-| E `completed`, other authored id | `pass1_provider_completed_mismatch` | reservation, outcome `unknown` |
-| E `unfinished` | `pass1_provider_unfinished` | `converged_without_outcome`: reservation `present`, outcome `none_observed`; other reasons `unknown` |
-| E `ambiguous` | `pass1_provider_ambiguous` | reservation `present`, outcome `unknown` |
-| E `conflict` / `rejected` | `pass1_provider_conflict` / `pass1_provider_rejected` | reservation, outcome `unknown` |
-| E `ProviderExecutionError` | `pass1_provider_error` | reservation `present` iff `reservation_commit_state` is `committed`; outcome `present` iff `stage` is `record` and `commit_state` is `committed`; else `unknown` |
-| durable provider verification mismatch | `pass1_provider_mismatch` (`mismatch_field`) | facts acknowledged so far |
-| final snapshot failure | `pass1_preflight_failed` at `final_check` | none named: cumulative facts kept, `writes_attempted:true` |
-| final recheck change | `pass1_host_changed` | cumulative facts kept |
-| any other thrown value (including an unowned database error rethrown by `runCommand`) | not caught | the caller treats every fact as unknown and re-enters identically |
+| Source                                                                                | Code                                                                                                                     | Row default facts (merged with the cumulative context)                                                                                                           |
+| ------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| factory refusal / fault                                                               | `pass1_input_refused` / `pass1_input_fault`                                                                              | nothing read: all `unknown`, no writes                                                                                                                           |
+| invalid invocation                                                                    | `pass1_invocation_invalid` (`rejection_code`)                                                                            | all `unknown`, no writes                                                                                                                                         |
+| admission refusals                                                                    | their own codes                                                                                                          | all `unknown`, no writes                                                                                                                                         |
+| initial snapshot failure                                                              | `pass1_preflight_failed`                                                                                                 | all `unknown`, no writes                                                                                                                                         |
+| preflight classification                                                              | `pass1_attempt_unavailable`, `pass1_input_identity_mismatch`, `pass1_rights_provider_exposure`, `pass1_unexpected_state` | the snapshot's facts (all `unknown` if its own rows cannot be trusted), no writes                                                                                |
+| T1/T3 `conflict`                                                                      | `pass1_stage_conflict`                                                                                                   | that stage `unknown`                                                                                                                                             |
+| T1/T3 `rejected`                                                                      | `pass1_stage_rejected`                                                                                                   | that stage `unknown`                                                                                                                                             |
+| T1/T3 `CommandConnectionError`                                                        | `pass1_command_connection`                                                                                               | that stage `unknown` for both `commit_outcome` values (R-F)                                                                                                      |
+| E `performed`, outcome created/converged, exact                                       | proceeds                                                                                                                 | reservation, outcome `present`                                                                                                                                   |
+| E `performed`, outcome conflict/rejected                                              | `pass1_provider_outcome_failed`                                                                                          | reservation `present`, outcome `unknown`                                                                                                                         |
+| E `completed` exact                                                                   | proceeds                                                                                                                 | reservation, outcome `present`                                                                                                                                   |
+| E `completed`, other authored id                                                      | `pass1_provider_completed_mismatch`                                                                                      | reservation, outcome `unknown`                                                                                                                                   |
+| E `unfinished`                                                                        | `pass1_provider_unfinished`                                                                                              | `converged_without_outcome`: reservation `present`, outcome `none_observed`; other reasons `unknown`                                                             |
+| E `ambiguous`                                                                         | `pass1_provider_ambiguous`                                                                                               | reservation `present`, outcome `unknown`                                                                                                                         |
+| E `conflict` / `rejected`                                                             | `pass1_provider_conflict` / `pass1_provider_rejected`                                                                    | reservation, outcome `unknown`                                                                                                                                   |
+| E `ProviderExecutionError`                                                            | `pass1_provider_error`                                                                                                   | reservation `present` iff `reservation_commit_state` is `committed`; outcome `present` iff `stage` is `record` and `commit_state` is `committed`; else `unknown` |
+| durable provider verification mismatch                                                | `pass1_provider_mismatch` (`mismatch_field`)                                                                             | facts acknowledged so far                                                                                                                                        |
+| final snapshot failure                                                                | `pass1_preflight_failed` at `final_check`                                                                                | none named: cumulative facts kept, `writes_attempted:true`                                                                                                       |
+| final recheck change                                                                  | `pass1_host_changed`                                                                                                     | cumulative facts kept                                                                                                                                            |
+| any other thrown value (including an unowned database error rethrown by `runCommand`) | not caught                                                                                                               | the caller treats every fact as unknown and re-enters identically                                                                                                |
 
 ## 7. The stop
 
