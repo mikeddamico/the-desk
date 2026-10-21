@@ -1067,13 +1067,13 @@ describe("craft revision plan, admission, reconciliation, classification and sto
         request_fingerprint: rplan.reservation.request_fingerprint,
         logical_request_key: rplan.reservation.logical_request_key,
       };
-      const performed = await adapter.perform(request as never);
+      const performed = await adapter.perform(request);
       expect(performed).toBe(REVISION_SPECIMEN);
       expect(Object.isFrozen(performed)).toBe(true);
       expect("lookup" in adapter).toBe(false);
       for (const field of Object.keys(request))
         await expect(
-          adapter.perform({ ...request, [field]: "x" } as never),
+          adapter.perform({ ...request, [field]: "x" }),
           field,
         ).rejects.toBeInstanceOf(TypeError);
       // finish: the pinned raw-response identity is checked before anything is authored
@@ -2937,8 +2937,7 @@ describe("craft revision plan, admission, reconciliation, classification and sto
         reader_code: null,
         parser_code: null,
       } as unknown as FixtureWriterInputResult;
-      const plan = (upstream: Obj) =>
-        planCraftRevision(INV, { upstream } as never);
+      const plan = (upstream: Obj) => planCraftRevision(INV, { upstream });
       const a = stopOf(plan({ upstream: { build: () => refused } }));
       expect(a.code).toBe("revision_upstream_plan_stopped");
       expect(a.stage).toBe("input");

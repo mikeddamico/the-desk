@@ -747,7 +747,7 @@ export function admitRevisionStructure(raw: unknown): RevisionSpecimen {
     invalid("program_block_refs");
   if (!isArr(s.turns) || s.turns.length !== 17) invalid("turns");
   const anchors = new Set<string>();
-  for (const item of s.turns as unknown[]) {
+  for (const item of s.turns) {
     const turn = shape(item, TURN_KEYS, "turn");
     const anchor = turn.semantic_turn_id;
     if (!isStr(anchor) || !TURN_ANCHORS.includes(anchor) || anchors.has(anchor))
@@ -786,7 +786,7 @@ export function admitRevisionStructure(raw: unknown): RevisionSpecimen {
     const list = s[check.key];
     if (!isArr(list) || list.length !== check.count)
       invalid(check.key as RevisionField);
-    for (const item of list as unknown[]) {
+    for (const item of list) {
       const use = shape(item, check.keys, check.label);
       if (
         !isStr(use.semantic_turn_id) ||
@@ -806,7 +806,7 @@ export function admitRevisionStructure(raw: unknown): RevisionSpecimen {
   }
   if (!isArr(s.prediction_candidates) || s.prediction_candidates.length !== 2)
     invalid("prediction_candidates");
-  for (const item of s.prediction_candidates as unknown[]) {
+  for (const item of s.prediction_candidates) {
     const candidate = shape(item, PREDICTION_KEYS, "prediction");
     if (
       !nonBlank(candidate.prediction_candidate_id) ||
@@ -908,8 +908,9 @@ export function admitRevisionAgainst(
     });
   spec.turns.forEach((turn, index) => {
     const parentTurn = pTurns[index];
+    if (parentTurn === undefined)
+      refuse("revision_protected_content_changed", { field: "turn_structure" });
     if (
-      parentTurn === undefined ||
       turn.semantic_turn_id !== parentTurn.semantic_turn_id ||
       turn.sequence !== parentTurn.sequence ||
       turn.program_block_id !== parentTurn.program_block_id ||
@@ -931,8 +932,9 @@ export function admitRevisionAgainst(
   );
   spec.turn_claim_uses.forEach((use, index) => {
     const parentUse = pClaims[index];
+    if (parentUse === undefined)
+      refuse("revision_protected_content_changed", { field: "claim_use" });
     if (
-      parentUse === undefined ||
       use.semantic_turn_id !== parentUse.semantic_turn_id ||
       use.claim_id !== parentUse.claim_id ||
       use.use_mode !== parentUse.use_mode ||
@@ -942,8 +944,9 @@ export function admitRevisionAgainst(
   });
   spec.turn_evidence_uses.forEach((use, index) => {
     const parentUse = pEvidence[index];
+    if (parentUse === undefined)
+      refuse("revision_protected_content_changed", { field: "evidence_use" });
     if (
-      parentUse === undefined ||
       use.semantic_turn_id !== parentUse.semantic_turn_id ||
       use.evidence_unit_id !== parentUse.evidence_unit_id ||
       use.use_mode !== parentUse.use_mode ||
@@ -2055,8 +2058,8 @@ export function reconcileRevisionRowsStep(
   }
   // the model-run binding
   const run = fetched.model_run;
+  if (run === undefined) return "model_run";
   if (
-    run === undefined ||
     run.model_run_id !== plan.ids.model_run_id ||
     run.provider_call_id !== plan.ids.provider_call_id ||
     run.prompt_manifest_id !== plan.ids.prompt_manifest_id ||
