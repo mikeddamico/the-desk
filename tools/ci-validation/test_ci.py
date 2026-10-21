@@ -11,7 +11,7 @@ reach the probe replaces subprocess.run (and shutil.which) with a mock, so Node 
 the repository tree. Tests that need a checkout build a
 synthetic one under a temporary directory and patch ci.ROOT / ci.tracked_files only inside mock contexts.
 
-Pinned fail-closed rules: aggregate 68 files / 8,294 tests and all 24 integration files, each selected file exactly once
+Pinned fail-closed rules: aggregate 70 files / 8,349 tests and all 25 integration files, each selected file exactly once
 with no failed/skipped/todo test, a changed tracked-test inventory, a missing or foreign TEST_DATABASE_URL, a database
 that is not PostgreSQL 17 / the_desk_test / superuser, skipped integration files, root dist output accepted only when it
 is the unchanged build output (added, modified, empty, absent, symlinked or pre-existing dist and any tracked drift,
@@ -38,14 +38,14 @@ import ci  # noqa: E402
 TRACKED = sorted(
     ['package.json', 'src/index.ts', 'vitest.config.ts', '.github/workflows/ci.yml']
     + ['test/root%02d.test.ts' % i for i in range(35)]
-    + ['test/unit/unit%02d.test.ts' % i for i in range(9)] + [ci.HARNESS_TEST]
-    + ['test/integration/int%02d.test.ts' % i for i in range(24)])
+    + ['test/unit/unit%02d.test.ts' % i for i in range(10)] + [ci.HARNESS_TEST]
+    + ['test/integration/int%02d.test.ts' % i for i in range(25)])
 TESTS, SELECTED = ci.expected_all_files(TRACKED)
 INTEGRATION = [n for n in SELECTED if n.startswith('test/integration/')]
 URL = 'postgresql://postgres:postgres@localhost:5432/the_desk_test'
 NONCES = {'focused': ('a' * 48, 'b' * 48), 'all': ('c' * 48,)}
 ATTEMPTS = {'prerequisite': 'attempt-p', 'focused': 'attempt-f', 'all': 'attempt-3'}
-PER_FILE = {n: 8294 // 68 + (1 if i < 8294 % 68 else 0) for i, n in enumerate(SELECTED)}
+PER_FILE = {n: 8349 // 70 + (1 if i < 8349 % 70 else 0) for i, n in enumerate(SELECTED)}
 
 
 def file_lines(counts=None, extra=''):
@@ -55,7 +55,7 @@ def file_lines(counts=None, extra=''):
 
 SUMMARY = {
     'focused': ' Test Files  1 passed (1)\n      Tests  2 passed (2)\n',
-    'all': ' Test Files  68 passed (68)\n      Tests  8294 passed (8294)\n',
+    'all': ' Test Files  70 passed (70)\n      Tests  8349 passed (8349)\n',
 }
 
 
@@ -213,7 +213,7 @@ class SummaryAndFileLines(unittest.TestCase):
 
 class AggregateSelection(unittest.TestCase):
     def test_synthetic_inventory_matches_the_fixed_expectations(self):
-        self.assertEqual((len(TESTS), len(SELECTED), len(INTEGRATION)), (69, 68, 24))
+        self.assertEqual((len(TESTS), len(SELECTED), len(INTEGRATION)), (71, 70, 25))
         self.assertEqual(sum(PER_FILE.values()), ci.EXPECTED_ALL_TESTS)
         self.assertNotIn(ci.HARNESS_TEST, SELECTED)
 
@@ -257,7 +257,7 @@ class AggregateSelection(unittest.TestCase):
     def test_count_drift_and_duplicates(self):
         counts = dict(PER_FILE)
         counts[SELECTED[0]] -= 1
-        self.assertTrue(any('sum to 8293' in e for e in self.check(file_lines(counts))[0]))
+        self.assertTrue(any('sum to 8348' in e for e in self.check(file_lines(counts))[0]))
         dup = file_lines() + ' ✓ %s (1 tests) 1ms\n' % SELECTED[0]
         self.assertTrue(any('2 result lines' in e for e in self.check(dup)[0]))
 
@@ -269,20 +269,20 @@ class AggregateSelection(unittest.TestCase):
 
     def test_changed_tracked_inventory_is_hold_not_a_relaxed_count(self):
         grown = sorted(TRACKED + ['test/unit/extra.test.ts'])
-        self.assertTrue(any('inventory is 70' in e for e in self.check(file_lines(), grown)[0]))
+        self.assertTrue(any('inventory is 72' in e for e in self.check(file_lines(), grown)[0]))
         moved = [n for n in TRACKED if n != INTEGRATION[0]] + ['test/unit/moved.test.ts']
-        self.assertTrue(any('integration file count 23' in e for e in self.check(file_lines(), sorted(moved))[0]))
+        self.assertTrue(any('integration file count 24' in e for e in self.check(file_lines(), sorted(moved))[0]))
         shrunk = [n for n in TRACKED if n != ci.HARNESS_TEST]
         self.assertTrue(self.check(file_lines(), shrunk)[0])
 
     def test_summary_count_mismatch_with_correct_files(self):
         def change(stage_dir, attempt):
-            write(stage_dir / 'stdout', file_lines() + ' Test Files  68 passed (68)\n      Tests  8293 passed (8293)\n')
+            write(stage_dir / 'stdout', file_lines() + ' Test Files  70 passed (70)\n      Tests  8348 passed (8348)\n')
         self.assertTrue(any('Tests counts' in e for e in evaluate('all', change)))
 
     def test_skipped_summary_with_exit_zero_is_not_accepted(self):
         def change(stage_dir, attempt):
-            write(stage_dir / 'stdout', file_lines() + ' Test Files  68 passed (68)\n      Tests  8208 passed | 86 skipped (8294)\n')
+            write(stage_dir / 'stdout', file_lines() + ' Test Files  70 passed (70)\n      Tests  8263 passed | 86 skipped (8349)\n')
         self.assertTrue(any('Tests counts' in e for e in evaluate('all', change)))
 
 

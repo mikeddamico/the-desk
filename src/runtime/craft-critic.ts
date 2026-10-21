@@ -2095,14 +2095,14 @@ export const criticOwned = (state: CriticState): Record<string, number> => ({
   provider_call_events: state >= 3 ? 1 : 0,
   model_runs: state >= 4 ? 1 : 0,
 });
-const rowsById = (
+export const rowsById = (
   rows: readonly Row[] | undefined,
   key: string,
   id: unknown,
 ): Row[] => (rows ?? []).filter((row) => row[key] === id);
 
 /** The five monotone critic states (empty, T1c, +reservation, +event, +T3c), or `null` for anything else. */
-function criticOwnState(
+export function criticOwnState(
   raw: CriticRawSnapshot,
   plan: CriticPlan,
 ): CriticState | null {
@@ -2143,7 +2143,10 @@ function criticOwnState(
  * The C4 review reconciliation (E1.1): it rehashes the stored review against its stored subject, so it runs only after the
  * upstream classification (native equality and subject reconciliation) has completed.
  */
-function reviewReconciles(raw: CriticRawSnapshot, plan: CriticPlan): boolean {
+export function reviewReconciles(
+  raw: CriticRawSnapshot,
+  plan: CriticPlan,
+): boolean {
   const subject = rowsById(
     raw.upstream.own.artifacts,
     "artifact_id",
@@ -2167,7 +2170,10 @@ function reviewReconciles(raw: CriticRawSnapshot, plan: CriticPlan): boolean {
 }
 type UpstreamStatus = "complete" | "incomplete" | "mismatch";
 /** U1-U6 as row-level evidence over the snapshot (the Pass-1 classifier minus its global count equation). */
-function upstreamStatus(raw: RawSnapshot, plan: Pass1Plan): UpstreamStatus {
+export function upstreamStatus(
+  raw: RawSnapshot,
+  plan: Pass1Plan,
+): UpstreamStatus {
   const group = (
     rows: readonly PlannedRow[],
   ): "conflict" | "none" | "all" | "partial" => {
