@@ -785,12 +785,12 @@ const flagList = (spec: TableSpec): string =>
         `(${c.name} IS NOT DISTINCT FROM $${String(i + 1)}::${typeOf(c)}) AS ${eqName(c.name)}`,
     )
     .join(", ");
-const paramIndex = (spec: TableSpec, name: string): string =>
+export const paramIndex = (spec: TableSpec, name: string): string =>
   String(spec.cols.findIndex((c) => c.name === name) + 1);
 /** SELECT of the decoded columns plus the native equality flags against `planned`'s expected values. */
-const rowSql = (spec: TableSpec, where: string): string =>
+export const rowSql = (spec: TableSpec, where: string): string =>
   `SELECT ${selectList(spec)}, ${flagList(spec)} FROM ${spec.table} WHERE ${where}`;
-const rowParams = (planned: PlannedRow): unknown[] =>
+export const rowParams = (planned: PlannedRow): unknown[] =>
   planned.spec.cols.map((c) => paramOf(c, planned.row[c.name]));
 const paramOf = (c: Col, value: unknown): unknown =>
   c.cast === "jsonb" ? canonicalJson(value) : value;
@@ -803,7 +803,7 @@ export interface ConflictDetail {
   readonly row: ConflictRow;
   readonly kind: ConflictKind;
 }
-type Probe =
+export type Probe =
   | { readonly kind: "absent" }
   | { readonly kind: "equal" }
   | { readonly kind: "conflict"; readonly conflict: ConflictDetail };
@@ -837,7 +837,7 @@ export function compareStored(
 export interface Queryable {
   query(text: string, values?: unknown[]): Promise<{ rows: Row[] }>;
 }
-async function probe(q: Queryable, planned: PlannedRow): Promise<Probe> {
+export async function probe(q: Queryable, planned: PlannedRow): Promise<Probe> {
   const { spec } = planned;
   let where = `${spec.id} = $${paramIndex(spec, spec.id)}::uuid`;
   for (const key of spec.keys) {
@@ -873,7 +873,7 @@ const UNIQUE_CONSTRAINTS: Readonly<Record<string, readonly string[]>> = {
  * Insert-or-compare one planned row inside a command. A unique violation on a NAMED constraint (a participating or foreign writer won
  * the race) re-reads and compares; any other database error is rethrown unchanged (never a catch-all).
  */
-async function ensureRow(
+export async function ensureRow(
   tx: Tx,
   planned: PlannedRow,
 ): Promise<
@@ -1997,18 +1997,18 @@ export function stopRowForThrown(
 }
 
 // ---- the provider boundary: expected call/event, the E -> T3 allowlist -----------------------------------------------------------
-const FIXTURE_USAGE = deepFreeze({
+export const FIXTURE_USAGE = deepFreeze({
   external_provider_contacted: false,
   fixture_execution: true,
 });
-const CALL_SQL = `SELECT provider_call_id::text AS provider_call_id, attempt_id::text AS attempt_id, provider, operation, model_identifier,
+export const CALL_SQL = `SELECT provider_call_id::text AS provider_call_id, attempt_id::text AS attempt_id, provider, operation, model_identifier,
   request_fingerprint, logical_request_key, operational_try_number, intentional_take_index,
   retry_of_provider_call_id::text AS retry_of_provider_call_id, reroll_of_provider_call_id::text AS reroll_of_provider_call_id,
   reroll_trigger_id::text AS reroll_trigger_id, ${utcText("started_at")} AS started_at, admitted_at::text AS admitted_at,
   reserved_cost_upper_bound::text AS reserved_cost_upper_bound, admission_currency, admission_policy_hash,
   admission_certificate::text AS admission_certificate, admission_certificate_hash
   FROM provider_calls WHERE provider_call_id = $1::uuid`;
-const EVENT_SQL = `SELECT event_type, ${utcText("ended_at")} AS ended_at, (usage IS NOT DISTINCT FROM $2::jsonb) AS usage_eq,
+export const EVENT_SQL = `SELECT event_type, ${utcText("ended_at")} AS ended_at, (usage IS NOT DISTINCT FROM $2::jsonb) AS usage_eq,
   (actual_cost IS NOT DISTINCT FROM 0::numeric) AS actual_cost_zero, currency,
   response_artifact_id::text AS response_artifact_id, response_reference, recorded_at::text AS recorded_at,
   admission_settlement::text AS admission_settlement FROM provider_call_events WHERE provider_call_id = $1::uuid`;
@@ -2027,7 +2027,7 @@ async function fetchProvider(
   ]);
   return { call: call.rows[0], events: events.rows };
 }
-const RESERVATION_FIELDS = [
+export const RESERVATION_FIELDS = [
   "provider_call_id",
   "attempt_id",
   "provider",
@@ -2254,7 +2254,8 @@ type Step<T> =
   | { readonly ok: true; readonly value: T; readonly facts: Partial<Durable> }
   | { readonly ok: false; readonly row: StopRow };
 type Staged = "created" | "converged";
-const LOCK_SQL = "SELECT pg_advisory_xact_lock($1::int, hashtext($2::text))";
+export const LOCK_SQL =
+  "SELECT pg_advisory_xact_lock($1::int, hashtext($2::text))";
 const isConflictDetail = (value: unknown): value is ConflictDetail =>
   isObj(value) && isStr(value.row) && isStr(value.kind);
 
@@ -2537,7 +2538,7 @@ const EXTRA_EMPTY_TABLES = [
   "repair_plan_decisions",
 ] as const;
 const TABLE_NAME = /^[a-z_]+$/;
-const countTables = (plan: Pass1Plan): string[] =>
+export const countTables = (plan: Pass1Plan): string[] =>
   [
     ...new Set([...Object.keys(plan.fixture_counts), ...EXTRA_EMPTY_TABLES]),
   ].filter((name) => TABLE_NAME.test(name));
@@ -2558,13 +2559,13 @@ export interface RawSnapshot {
   readonly events: readonly Row[];
   readonly counts: readonly Row[];
 }
-interface Statement {
+export interface Statement {
   readonly text: string;
   readonly values: unknown[];
 }
 const BOUND_STATEMENTS = 6; // host, brief, package, claims, evidence, rights
 /** The fixed, ordered statements of one snapshot: pure, built before any connection is checked out. */
-function snapshotStatements(plan: Pass1Plan): Statement[] {
+export function snapshotStatements(plan: Pass1Plan): Statement[] {
   const pins = PASS1_PIN.host;
   const statements: Statement[] = [
     { text: HOST_SQL, values: [plan.invocation.attempt_id] },
@@ -2602,7 +2603,7 @@ function snapshotStatements(plan: Pass1Plan): Statement[] {
   return statements;
 }
 /** Interpretation of a COMMITTED snapshot's rows: pure, and it runs outside every catch. */
-function assembleRaw(
+export function assembleRaw(
   plan: Pass1Plan,
   results: readonly (readonly Row[])[],
 ): RawSnapshot {
@@ -2803,7 +2804,7 @@ function ownState(raw: RawSnapshot, plan: Pass1Plan): 0 | 1 | 2 | 3 | 4 | null {
   return state as 0 | 1 | 2 | 3 | 4;
 }
 
-function hostMatches(host: Row | undefined, plan: Pass1Plan): boolean {
+export function hostMatches(host: Row | undefined, plan: Pass1Plan): boolean {
   const pins = PASS1_PIN.host;
   return (
     host?.attempt_id === pins.attempt_id &&
@@ -2821,7 +2822,7 @@ function hostMatches(host: Row | undefined, plan: Pass1Plan): boolean {
     host.run_show_config_version_id === pins.show_config_version_id
   );
 }
-function bindingsMatch(raw: RawSnapshot, plan: Pass1Plan): boolean {
+export function bindingsMatch(raw: RawSnapshot, plan: Pass1Plan): boolean {
   const pins = PASS1_PIN.host;
   try {
     const { brief, pkg } = raw;
