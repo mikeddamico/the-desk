@@ -744,7 +744,7 @@ const matching = async (db: DbEnv, rows: readonly Obj[]): Promise<number> => {
 };
 const states = async (db: DbEnv): Promise<Obj> =>
   (
-    await db.owner.query(
+    await db.owner.query<Obj>(
       `SELECT a.state::text AS attempt_state, a.publication_enabled AS attempt_publication, r.state::text AS run_state, r.publication_enabled AS run_publication
        FROM program_run_attempts a JOIN program_runs r ON r.program_run_id = a.program_run_id WHERE a.attempt_id = $1::uuid`,
       [ATTEMPT],

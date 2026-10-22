@@ -78,7 +78,6 @@ import {
   type GatePlan,
   type GatePlanInputs,
   type GateRawSnapshot,
-  type GateSurface,
   type OwnedEvaluation,
 } from "../../src/runtime/claims-writing-gate.js";
 import { PASS1_OWNED, criticOwned } from "../../src/runtime/craft-critic.js";
@@ -431,7 +430,7 @@ const INPUTS: ComponentInputs = {
 
 // ---- the witness protocol ------------------------------------------------------------------------------------------------------------------------
 /** A mutable deep copy of the component inputs (the only thing a witness ever edits). */
-type Work = {
+interface Work {
   C: Obj;
   K: Obj;
   rows: { version: Obj; turns: Obj[]; claim_uses: Obj[]; evidence_uses: Obj[] };
@@ -454,7 +453,7 @@ type Work = {
   originals: string[];
   rewrites: Obj[];
   parent_artifact_hash: string;
-};
+}
 const fresh = (): Work => structuredClone(INPUTS) as unknown as Work;
 const evaluate = (work: Work): ComponentEvaluation =>
   evaluateGateComponent(work as unknown as ComponentInputs);
@@ -785,7 +784,7 @@ class GateDb {
       {
         gate_name: pin.gate_name,
         version: pin.version,
-        definition: structuredClone(pin.definition) as Obj,
+        definition: structuredClone(pin.definition),
       },
     ]),
   );
@@ -1405,7 +1404,7 @@ describe("claims/writing gate seam: plan, evaluators, scripted writer and orches
           name === "config/block_types.json"
             ? Buffer.from("{}")
             : PACK.member(name),
-      } as typeof PACK;
+      };
       expect(
         planG("seamed", GATE_INV, {
           texturePlan: PLAN.texture,
@@ -1538,7 +1537,7 @@ describe("claims/writing gate seam: plan, evaluators, scripted writer and orches
       expect(() => buildGateProjection(missing as never)).toThrow(TypeError);
       const seen = new Set<string>([FINGERPRINT]);
       for (const [key, value] of Object.entries(owners)) {
-        const changed = /_hash$/u.test(key) ? flip(value) : `${value}x`;
+        const changed = key.endsWith("_hash") ? flip(value) : `${value}x`;
         seen.add(gateFingerprint({ ...owners, [key]: changed }));
       }
       expect(seen.size).toBe(7); // the current fingerprint and six distinct single-source variants
@@ -1724,7 +1723,7 @@ describe("claims/writing gate seam: plan, evaluators, scripted writer and orches
         if (alsoPrediction) {
           const candidate = defined(
             records(work.C.prediction_candidates).find((item) =>
-              String(item.prediction_text).match(/\bten\b/u),
+              /\bten\b/u.exec(String(item.prediction_text)),
             ),
           );
           candidate.prediction_text = ten(String(candidate.prediction_text));
@@ -4637,39 +4636,22 @@ describe("claims/writing gate seam: plan, evaluators, scripted writer and orches
       for (const surface of GATE_SURFACES) {
         expect(
           scanGateSurfaces(
-            { [surface]: { note: [`x ${run} y`] } } as Partial<
-              Record<GateSurface, unknown>
-            >,
+            { [surface]: { note: [`x ${run} y`] } },
             UP.originals,
           ),
           surface,
         ).toBe(surface);
         expect(
-          scanGateSurfaces(
-            { [surface]: { [run]: 1 } } as Partial<
-              Record<GateSurface, unknown>
-            >,
-            UP.originals,
-          ),
+          scanGateSurfaces({ [surface]: { [run]: 1 } }, UP.originals),
           `${surface} key`,
         ).toBe(surface);
         expect(
-          scanGateSurfaces(
-            { [surface]: { note: shorter } } as Partial<
-              Record<GateSurface, unknown>
-            >,
-            UP.originals,
-          ),
+          scanGateSurfaces({ [surface]: { note: shorter } }, UP.originals),
           `${surface} short`,
         ).toBeNull();
       }
       expect(
-        scanGateSurfaces(
-          { summary: run, warnings: run } as Partial<
-            Record<GateSurface, unknown>
-          >,
-          UP.originals,
-        ),
+        scanGateSurfaces({ summary: run, warnings: run }, UP.originals),
       ).toBe("warnings");
       expect(scanGateSurfaces({}, UP.originals)).toBeNull();
       // the real surfaces of the pinned chain carry no run: rows, warnings, coverage and the summary

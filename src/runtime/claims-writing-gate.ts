@@ -732,8 +732,7 @@ export function supportProof(inp: ComponentInputs, support: Obj): boolean {
       return (
         evidenceId === null &&
         external === null &&
-        run !== undefined &&
-        run.derivation_run_id === runId &&
+        run?.derivation_run_id === runId &&
         hash === derivationOutputHash(run.output) &&
         hash === run.output_hash
       );
@@ -858,12 +857,7 @@ function countRole(text: string, token: NumeralToken): CountRole | undefined {
     for (let m = re.exec(text); m !== null; m = re.exec(text))
       for (const [slot, role] of frame.roles.entries()) {
         const at = m.indices?.[slot + 1];
-        if (
-          at !== undefined &&
-          at[0] === token.start16 &&
-          at[1] === token.end16
-        )
-          return role;
+        if (at?.[0] === token.start16 && at[1] === token.end16) return role;
       }
   }
   return undefined;
@@ -1394,7 +1388,7 @@ export function checkUsePermission(inp: ComponentInputs): DefinitionResult {
     const entry = claimEntry(inp, ref.use.claim_id);
     if (entry === undefined) continue;
     const allowed = ALLOWED_MODES[strOf(entry.effective_usage_class)];
-    if (allowed === undefined || !allowed.includes(mode))
+    if (!allowed?.includes(mode))
       findings.push(finding("mode_illegal_for_class", where));
   }
   return defResult(
@@ -1616,11 +1610,7 @@ export function quoteDefects(
   const rights = factRights(inp, ref.use.rights_policy_version);
   const policy =
     rights !== undefined && isObj(rights.policy) ? rights.policy : {};
-  if (
-    entry === undefined ||
-    entry.quote_permission !== true ||
-    policy.quotation_permission !== true
-  )
+  if (entry?.quote_permission !== true || policy.quotation_permission !== true)
     defects.push("quote_not_permitted");
   const locator =
     entry !== undefined && isObj(entry.locator) ? entry.locator : undefined;
@@ -1735,8 +1725,7 @@ export function checkParaphrasePermission(
     const policy =
       rights !== undefined && isObj(rights.policy) ? rights.policy : {};
     if (
-      entry === undefined ||
-      entry.paraphrase_permission !== true ||
+      entry?.paraphrase_permission !== true ||
       policy.paraphrase_permission !== true
     )
       findings.push(finding("paraphrase_not_permitted", where));
@@ -2094,7 +2083,7 @@ export function rewriteShift(
   for (const row of rewrites) {
     if (row.anchor !== anchor) continue;
     const at = parentText.indexOf(row.old);
-    if (at < 0 || parentText.indexOf(row.old, at + 1) >= 0) continue;
+    if (at < 0 || parentText.includes(row.old, at + 1)) continue;
     if (cpIndex(parentText, at + row.old.length) <= bound)
       shift += codePointLength(row.new) - codePointLength(row.old);
   }
@@ -3468,6 +3457,7 @@ function buildGatePlan(
     if (
       row === undefined ||
       row.gate_name !== GATE_DEFINITION_KEYS[index] ||
+      !isStr(row.gate_name) ||
       !isStr(row.version) ||
       !isObj(row.definition)
     )
@@ -4400,9 +4390,7 @@ const FLAG_COLUMNS: readonly string[] = [
   "eq_created_at",
 ];
 const allEqual = (row: Row | undefined): boolean =>
-  row !== undefined &&
-  row.present === true &&
-  FLAG_COLUMNS.every((name) => row[name] === true);
+  row?.present === true && FLAG_COLUMNS.every((name) => row[name] === true);
 const flagAt = (
   raw: Pick<GateRawSnapshot, "flags">,
   position: number,
@@ -4413,8 +4401,7 @@ function definitionsComplete(raw: GateRawSnapshot, plan: GatePlan): boolean {
       (item) => item.gate_definition_id === pin.gate_definition_id,
     );
     return (
-      row !== undefined &&
-      row.present === true &&
+      row?.present === true &&
       row.eq_gate_name === true &&
       row.eq_version === true &&
       row.eq_definition === true
@@ -4436,11 +4423,7 @@ function partitionOf(
   const owned = plan.result_ids.map((_, index) =>
     flagAt(raw, plan.historical.length + index + 1),
   );
-  if (
-    owned.some(
-      (row) => row !== undefined && row.present === true && !allEqual(row),
-    )
-  )
+  if (owned.some((row) => row?.present === true && !allEqual(row)))
     return {
       kind: "defect",
       code: "gate_result_conflict",
@@ -4740,8 +4723,7 @@ export async function recordClaimsWritingGate(
         return rejectedAs("gate_history_mismatch", "");
       const child = witness.rows[0];
       if (
-        child === undefined ||
-        child.artifact_id !== GATE_PIN.child_script_artifact_id ||
+        child?.artifact_id !== GATE_PIN.child_script_artifact_id ||
         child.revision_parent_id !== GATE_PIN.parent_script_version_id ||
         child.revision_parent_content_identity !==
           GATE_PIN.parent_script_hash ||
