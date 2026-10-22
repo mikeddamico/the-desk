@@ -3328,6 +3328,9 @@ describe("speech texture plan, admission, reconciliation, classification and sto
       const p11 = defined(PARENT_TEXT.t11);
       const p01 = defined(PARENT_TEXT.t01);
       const p08 = defined(PARENT_TEXT.t08);
+      expect(p08.split("ten minutes")).toHaveLength(2);
+      const numberWordChanged = p08.replace("ten minutes", "nine minutes");
+      expect(numberWordChanged).not.toBe(p08);
       const direct: [string, string, string, string | null][] = [
         [
           "quote removed (t11 'the long ten')",
@@ -3351,7 +3354,7 @@ describe("speech texture plan, admission, reconciliation, classification and sto
         [
           "a number word changed",
           p08,
-          p08.replace("ten", "nine"),
+          numberWordChanged,
           "numeric_token",
         ],
         [
