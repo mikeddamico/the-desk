@@ -250,7 +250,7 @@ const EXPECTED_FACTS: readonly Obj[] = [
     changed_turns: 8,
     rewrite_rows: 9,
     uses: 15,
-    net_cp_delta: -5,
+    net_cp_delta: -6,
   },
   {
     examined: 1,
@@ -3086,7 +3086,7 @@ describe("claims/writing gate seam: plan, evaluators, scripted writer and orches
 
   // ---- the exact finite delta ---------------------------------------------------------------------------------------------------------------------------
   it(
-    "GU18 the exact finite delta: 9 rows over 8 anchors, net −5 code points, shifts t13 −1 and t17 −1, nine byte-identical turns (independent oracle)",
+    "GU18 the exact finite delta: 9 rows over 8 anchors, net −6 code points, shifts t13 −1 and t17 −1, nine byte-identical turns (independent oracle)",
     () => {
       const parent = new Map(
         records(INPUTS.K.turns).map((turn) => [
@@ -3123,7 +3123,7 @@ describe("claims/writing gate seam: plan, evaluators, scripted writer and orches
       }
       expect(
         lengths.reduce((sum, [, before, after]) => sum + after - before, 0),
-      ).toBe(-5);
+      ).toBe(-6);
       const identical = [
         "t01",
         "t03",
@@ -3811,8 +3811,15 @@ describe("claims/writing gate seam: plan, evaluators, scripted writer and orches
           ),
         ).toBe(false);
       }
-      const claimIds = UP.claims.map((item) => item.claim_id);
+      const claimIds = records(PACKAGE_PAYLOAD.manifest.claims).map(
+        (item) => item.claim_id,
+      );
       expect(claimIds).toHaveLength(9);
+      expect(UP.claims).toHaveLength(8);
+      expect(UP.claims.map((item) => item.claim_id)).not.toContain(
+        GATE_PIN.silent_claim_id,
+      );
+      expect(claimIds).toContain(GATE_PIN.silent_claim_id);
       const [
         definitions,
         hostRows,

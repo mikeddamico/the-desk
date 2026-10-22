@@ -4019,10 +4019,24 @@ export function definitionsStatement(plan: GatePlan): Statement {
     ],
   };
 }
+/** The gate's own claim universe: every claim of the admitted, member-hash-bound full evidence package (nine), not the writer's selected eight. */
+function gateClaimIds(plan: GatePlan): string[] {
+  const manifest = plan.package_payload.manifest;
+  if (
+    !isObj(manifest) ||
+    !isArr(manifest.claims) ||
+    manifest.claims.length === 0
+  )
+    throw new GateShapeError();
+  return manifest.claims.map((entry) => {
+    if (!isObj(entry) || !isStr(entry.claim_id)) throw new GateShapeError();
+    return entry.claim_id;
+  });
+}
 /** The 145 fixed, ordered statements: the 134 unchanged texture SELECTs, definitions, host ids and the nine factual SELECTs. Pure. */
 export function gateSnapshotStatements(plan: GatePlan): Statement[] {
   const upstream = plan.texture.revision.critic.upstream;
-  const claimIds = upstream.claims.map((item) => item.claim_id);
+  const claimIds = gateClaimIds(plan);
   return [
     ...textureSnapshotStatements(plan.texture),
     definitionsStatement(plan),
@@ -4103,7 +4117,7 @@ export function parseGateFacts(
     derivation: derivation[0],
     carriers: listOf(results[3], 2),
     events: listOf(results[4], undefined),
-    claims: listOf(results[5], upstream.claims.length),
+    claims: listOf(results[5], gateClaimIds(plan).length),
     pronunciations,
     renderings,
     evidence: listOf(results[8], upstream.evidence.length),

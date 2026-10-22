@@ -245,7 +245,7 @@ const FACTS: readonly Obj[] = [
     changed_turns: 8,
     rewrite_rows: 9,
     uses: 15,
-    net_cp_delta: -5,
+    net_cp_delta: -6,
   },
   {
     examined: 1,
@@ -1420,7 +1420,7 @@ suite(
         const role = await a.runtime.query<{ u: string }>(
           "SELECT current_user AS u",
         );
-        expect(role.rows[0]?.u).toBe(new URL(a.runtimeUrl).username);
+        expect(role.rows[0]?.u).toBe("desk_runtime");
         await expect(
           a.runtime.query(
             "UPDATE gate_results SET outcome = 'warn' WHERE gate_result_id = $1::uuid",

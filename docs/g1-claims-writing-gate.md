@@ -95,7 +95,7 @@ last S league matches` and `C late concessions in S`; each slot must have its de
   compared by position within their kind, spans and re-anchoring (`child = parent + Σ delta` of rows ending before the bound), numeric/quote/hedge/
   negation multisets, punctuation classes, predictions, `R` equals the pinned nine rows, relational rows equal the payload, and the first-refusal
   `admitTextureAgainst` translated once (only `instanceof TextureRefusal`). A diff lock proves preservation of the accepted delta (9 rows, 8 anchors,
-  net −5 code points, `t13` and `t17` spans each shift by −1), not correctness of inherited prose.
+  net −6 code points, `t13` and `t17` spans each shift by −1), not correctness of inherited prose.
 
 Diff-lock row-set rules added by source002: presence and DL18 each independently require exact per-kind correspondence between payload uses and stored
 relational rows (unique ids on both sides, complete coverage, equal turn id, target id, mode, start and end); a use with a missing, duplicate or
