@@ -1003,8 +1003,9 @@ export function admitTextureAgainst(
     refuse("texture_protected_content_changed", { field: "turn_structure" });
   spec.turns.forEach((turn, index) => {
     const parentTurn = pTurns[index];
+    if (parentTurn === undefined)
+      refuse("texture_protected_content_changed", { field: "turn_structure" });
     if (
-      parentTurn === undefined ||
       turn.semantic_turn_id !== parentTurn.semantic_turn_id ||
       turn.sequence !== parentTurn.sequence ||
       turn.program_block_id !== parentTurn.program_block_id ||
@@ -1028,8 +1029,9 @@ export function admitTextureAgainst(
     refuse("texture_protected_content_changed", { field: "claim_use" });
   spec.turn_claim_uses.forEach((use, index) => {
     const parentUse = pClaims[index];
+    if (parentUse === undefined)
+      refuse("texture_protected_content_changed", { field: "claim_use" });
     if (
-      parentUse === undefined ||
       use.semantic_turn_id !== parentUse.semantic_turn_id ||
       use.claim_id !== parentUse.claim_id ||
       use.use_mode !== parentUse.use_mode ||
@@ -1041,8 +1043,9 @@ export function admitTextureAgainst(
     refuse("texture_protected_content_changed", { field: "evidence_use" });
   spec.turn_evidence_uses.forEach((use, index) => {
     const parentUse = pEvidence[index];
+    if (parentUse === undefined)
+      refuse("texture_protected_content_changed", { field: "evidence_use" });
     if (
-      parentUse === undefined ||
       use.semantic_turn_id !== parentUse.semantic_turn_id ||
       use.evidence_unit_id !== parentUse.evidence_unit_id ||
       use.use_mode !== parentUse.use_mode ||

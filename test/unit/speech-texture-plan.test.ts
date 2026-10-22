@@ -473,13 +473,13 @@ const setKey = (target: Obj, key: string, value: unknown): Undo => {
   target[key] = value;
   return () => {
     if (had) target[key] = previous;
-    else delete target[key];
+    else Reflect.deleteProperty(target, key);
   };
 };
 const dropKey = (target: Obj, key: string): Undo => {
   const had = Object.hasOwn(target, key);
   const previous = target[key];
-  delete target[key];
+  Reflect.deleteProperty(target, key);
   return () => {
     if (had) target[key] = previous;
   };
@@ -507,11 +507,14 @@ const relocate = (spec: MSpec): Undo => {
     const protectedText = Array.from(parentText)
       .slice(Number(parentUse.span_start), Number(parentUse.span_end))
       .join("");
-    const childText = String(
-      spec.turns.find((t) => t.semantic_turn_id === use.semantic_turn_id)
-        ?.spoken_text ?? "",
-    );
-    if (protectedText === "" || childText.split(protectedText).length !== 2)
+    const childText = spec.turns.find(
+      (t) => t.semantic_turn_id === use.semantic_turn_id,
+    )?.spoken_text;
+    if (
+      typeof childText !== "string" ||
+      protectedText === "" ||
+      childText.split(protectedText).length !== 2
+    )
       return;
     const start = textLength(
       childText.slice(0, childText.indexOf(protectedText)),
@@ -2566,7 +2569,8 @@ describe("speech texture plan, admission, reconciliation, classification and sto
         canonicalJson(TEXTURE_SPECIMEN),
       );
       // an object KEY is also a leaf of the checker (grammar would refuse an unknown key first, so this is the direct checker boundary)
-      expect(checkTextureNfc({ [`ke${"y"}é`]: "x" })).toBe(false);
+      const decomposedKey = "keye\u0301";
+      expect(checkTextureNfc({ [decomposedKey]: "x" })).toBe(false);
       expect(checkTextureNfc(["a", { b: "cé" }])).toBe(false);
       expect(checkTextureNfc(["a", { b: "cé" }])).toBe(true);
       // decomposed text in EVERY kind of string leaf of the specimen: the grammar accepts it, NFC refuses it (no field label)
@@ -2596,7 +2600,7 @@ describe("speech texture plan, admission, reconciliation, classification and sto
         [
           "program_block_refs[0]",
           (s) => {
-            const o = s.program_block_refs[0] as string;
+            const o = defined(s.program_block_refs[0]);
             s.program_block_refs[0] = `${o}${dec}`;
             return () => {
               s.program_block_refs[0] = o;
@@ -2922,9 +2926,9 @@ describe("speech texture plan, admission, reconciliation, classification and sto
         expect(admitStop(work)).toBeUndefined();
       }
       // the pure step function fires on exactly its own condition: direct call over the cached bindings
-      expect(() =>
-        admitTextureAgainst(clone() as unknown as TextureSpecimen, bind),
-      ).not.toThrow();
+      expect(() => {
+        admitTextureAgainst(clone() as unknown as TextureSpecimen, bind);
+      }).not.toThrow();
       expect(bind.originals).toHaveLength(2);
     },
     T,
@@ -4537,7 +4541,7 @@ describe("speech texture plan, admission, reconciliation, classification and sto
       // missing / malformed / mis-ordered records are `texture_invocation_invalid` at the input stage with a closed rejection code
       const without = (key: string): Obj => {
         const copy: Obj = { ...INV };
-        delete copy[key];
+        Reflect.deleteProperty(copy, key);
         return copy;
       };
       const bad: [string, unknown, string][] = [
@@ -5380,22 +5384,22 @@ describe("speech texture plan, admission, reconciliation, classification and sto
         ],
         [
           "a conflicting stored manifest column",
-          rawFor(FULL, 4, 4, 1, (d) =>
+          rawFor(FULL, 4, 4, 1, (d) => {
             editStored(d.tex, plannedOf(tplan.t1, "prompt_manifests"), {
               rendered_request_hash: changed(X.request_hash),
-            }),
-          ),
+            });
+          }),
         ],
         [
           "a conflicting stored script artifact payload",
-          rawFor(FULL, 4, 4, 4, (d) =>
+          rawFor(FULL, 4, 4, 4, (d) => {
             editStored(d.tex, plannedOf(tplan.t3, "artifacts"), {
               canonical_payload: {
                 ...tplan.script_payload,
                 created_at: "2026-10-21T12:00:10Z",
               },
-            }),
-          ),
+            });
+          }),
         ],
         [
           "a reservation with a wrong operation",
@@ -5465,11 +5469,11 @@ describe("speech texture plan, admission, reconciliation, classification and sto
         ).toBe("texture_unexpected_state");
       // T4 that does not reconcile (a stored turn differs) is an unexpected state, never `recorded`
       {
-        const raw = rawFor(FULL, 4, 4, 4, (d) =>
+        const raw = rawFor(FULL, 4, 4, 4, (d) => {
           editStored(d.tex, plannedOf(tplan.t3, "turns", 3), {
             spoken_text: "different",
-          }),
-        );
+          });
+        });
         expect(textureOwnState(raw, tplan)).toBeNull();
         expect(textureStateReconciles(rawFor(FULL, 4, 4, 4), tplan)).toBe(true);
         expect(textureStateReconciles(raw, tplan)).toBe(false);
@@ -5811,11 +5815,11 @@ describe("speech texture plan, admission, reconciliation, classification and sto
         ],
         [
           "a conflicting Critic row at C1",
-          rawFor(FULL, 1, 0, 0, (d) =>
+          rawFor(FULL, 1, 0, 0, (d) => {
             editStored(d.own, plannedOf(cplan.t1, "prompt_manifests"), {
               rendered_request_hash: changed(cplan.request_hash),
-            }),
-          ),
+            });
+          }),
           { pass1: true },
         ],
         [
@@ -5827,32 +5831,32 @@ describe("speech texture plan, admission, reconciliation, classification and sto
         ],
         [
           "a conflicting revision row at R1",
-          rawFor(FULL, 4, 1, 0, (d) =>
+          rawFor(FULL, 4, 1, 0, (d) => {
             editStored(d.rev, plannedOf(rplan.t1, "prompt_manifests"), {
               rendered_request_hash: changed(rplan.request_hash),
-            }),
-          ),
+            });
+          }),
           { pass1: true, critic: true },
         ],
         [
           "a tampered revision script payload at R4",
-          rawFor(FULL, 4, 4, 0, (d) =>
+          rawFor(FULL, 4, 4, 0, (d) => {
             editStored(d.rev, plannedOf(rplan.t3, "artifacts"), {
               canonical_payload: {
                 ...rplan.script_payload,
                 created_at: "2026-10-21T12:00:10Z",
               },
-            }),
-          ),
+            });
+          }),
           { pass1: true, critic: true },
         ],
         [
           "a tampered revision stored turn at R4",
-          rawFor(FULL, 4, 4, 0, (d) =>
+          rawFor(FULL, 4, 4, 0, (d) => {
             editStored(d.rev, plannedOf(rplan.t3, "turns", 2), {
               spoken_text: "different",
-            }),
-          ),
+            });
+          }),
           { pass1: true, critic: true },
         ],
       ];
