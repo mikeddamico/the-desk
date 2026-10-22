@@ -1,0 +1,102 @@
+name: pr32-tu11-diagnostic
+
+# PROPOSED (proposal003), NOT RUN, NOT PARSED. DIAGNOSTIC-ONLY control workflow for the single branch diagnostic/pr32-tu11-001. It never merges into the
+# product branch and does not alter .github/workflows/ci.yml. Trigger: a push to that exact branch ONLY (no pull_request, schedule,
+# workflow_dispatch, repository_dispatch, tags or wildcard). GITHUB_SHA is the CONTROL commit; the tested SOURCE commit is pinned literally below.
+# Order: pre -> test -> post -> validate (verdict written) -> collect -> upload -> outcome-only gate. validate and collect run even after an earlier
+# failure whenever the pre step ran. The upload runs only when `collect` has published the fixed output upload_ready=true, which it does only after
+# verifying ownership of the capture root and exclusively creating the fresh upload directory; a collection failure after that point still uploads the
+# partial snapshot, but the final gate requires every step (collect included) to succeed. `always()` does NOT override cancellation or the job
+# deadline: a cancelled run or a lost runner may leave the evidence incomplete, which is HOLD.
+
+on:
+  push:
+    branches: [diagnostic/pr32-tu11-001]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pr32-tu11-diagnostic
+  cancel-in-progress: false
+
+jobs:
+  tu11:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Check out the CONTROL commit (GITHUB_SHA), no persisted credentials
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        timeout-minutes: 2
+        with:
+          path: pr32-tu11-control
+          persist-credentials: false
+          fetch-depth: 1
+      - name: Check out the tested SOURCE commit by literal SHA, no persisted credentials
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        timeout-minutes: 2
+        with:
+          ref: 510f832cfea0eb3333f1b6beba65d0a1e3624eaf
+          path: pr32-tu11-target
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        timeout-minutes: 2
+        with:
+          node-version: 24.21.0
+          package-manager-cache: false
+      - run: npm install --global npm@11.19.0 --ignore-scripts
+        timeout-minutes: 3
+      - name: Install the exact locked dependencies in the target checkout (no lifecycle scripts)
+        run: npm ci --ignore-scripts
+        working-directory: pr32-tu11-target
+        timeout-minutes: 5
+      - name: Bind source, control, tools and identities before anything runs
+        id: pre
+        run: /usr/bin/python3 -I -B pr32-tu11-control/diagnostic/pr32-tu11/tu11_bind.py pre
+        timeout-minutes: 3
+      - name: Run the real TU11 under the derived containment guard
+        id: test
+        run: /bin/bash pr32-tu11-control/diagnostic/pr32-tu11/run-tu11.sh
+        timeout-minutes: 8
+      - name: Re-bind source, control and tools after the test (also after a failing test)
+        id: post
+        if: ${{ always() && steps.pre.outcome == 'success' }}
+        run: /usr/bin/python3 -I -B pr32-tu11-control/diagnostic/pr32-tu11/tu11_bind.py post
+        timeout-minutes: 3
+      - name: Validate and write the diagnostic verdict before collection
+        id: validate
+        if: ${{ always() && steps.pre.outcome != 'skipped' }}
+        run: /usr/bin/python3 -I -B pr32-tu11-control/diagnostic/pr32-tu11/tu11_bind.py validate
+        timeout-minutes: 2
+      - name: Collect the verdict and the exact raw records into the upload snapshot
+        id: collect
+        if: ${{ always() && steps.pre.outcome != 'skipped' }}
+        run: /usr/bin/python3 -I -B pr32-tu11-control/diagnostic/pr32-tu11/tu11_bind.py collect
+        timeout-minutes: 3
+      - name: Retain the diagnostic evidence (complete or partial)
+        id: upload
+        if: ${{ always() && steps.collect.outputs.upload_ready == 'true' }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        timeout-minutes: 2
+        with:
+          name: pr32-tu11-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/t11/u
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 30
+      - name: Outcome-only job gate (one selected TU11 case only)
+        if: ${{ always() }}
+        shell: bash
+        timeout-minutes: 1
+        env:
+          PRE: ${{ steps.pre.outcome }}
+          TEST: ${{ steps.test.outcome }}
+          POST: ${{ steps.post.outcome }}
+          VALIDATE: ${{ steps.validate.outcome }}
+          COLLECT: ${{ steps.collect.outcome }}
+          UPLOAD: ${{ steps.upload.outcome }}
+        run: |
+          echo "pre=$PRE test=$TEST post=$POST validate=$VALIDATE collect=$COLLECT upload=$UPLOAD"
+          [ "$PRE" = success ] && [ "$TEST" = success ] && [ "$POST" = success ] && [ "$VALIDATE" = success ] && [ "$COLLECT" = success ] && [ "$UPLOAD" = success ] || { echo "HOLD: not every stage succeeded"; exit 1; }
+          echo "all stages succeeded: the recorded verdict is passing, evidence collected and uploaded (one TU11 case only; not a 28-case or full-CI pass)"
