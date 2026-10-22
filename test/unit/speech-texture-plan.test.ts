@@ -3351,12 +3351,7 @@ describe("speech texture plan, admission, reconciliation, classification and sto
           p08.replace("ten minutes", "minutes"),
           "numeric_token",
         ],
-        [
-          "a number word changed",
-          p08,
-          numberWordChanged,
-          "numeric_token",
-        ],
+        ["a number word changed", p08, numberWordChanged, "numeric_token"],
         [
           "a digit run removed (t04 `2-1`)",
           defined(PARENT_TEXT.t04),
