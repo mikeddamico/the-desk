@@ -3101,7 +3101,7 @@ describe("performance direction seam, Scope A: candidate grammar, owned reader a
         gate_results: [],
       };
       const withRows = (
-        patch: Partial<Record<keyof DirectionRows, Obj[]>>,
+        patch: Partial<Record<keyof DirectionRows, readonly Obj[]>>,
       ): DirectionRows => ({ ...empty, ...patch });
       const full = structuredClone(expected);
       const histRows = historicalRows.map((item) => ({ ...item }));

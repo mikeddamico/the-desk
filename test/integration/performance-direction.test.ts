@@ -530,6 +530,11 @@ suite(
         if (recorded.kind !== "recorded")
           throw new Error(`gate setup did not record: ${recorded.code}`);
         const afterGate = await tableCounts(db.owner);
+        if (
+          afterGate.gate_results === undefined ||
+          db.baseline.gate_results === undefined
+        )
+          throw new Error("expected gate_results counts");
         expect(afterGate.gate_results - db.baseline.gate_results).toBe(18);
         expect(afterGate.gate_results).toBe(49); // 31 historical + the 18 current rows
         await mark(db);
