@@ -843,17 +843,17 @@ function factsFor(
     sensitivities: opts.sensitivities ?? [{ state: "none" }],
   });
 }
-const where = (item: Obj): string =>
-  [
-    item.intent_index !== undefined
-      ? `#${String(item.intent_index as number)}`
-      : "",
+const where = (item: Obj): string => {
+  const intentIndex = item.intent_index as number | undefined;
+  return [
+    intentIndex !== undefined ? `#${String(intentIndex)}` : "",
     typeof item.side === "string" ? `:${item.side}` : "",
     typeof item.use_kind === "string"
       ? `:${item.use_kind}${String(item.use_index)}`
       : "",
     typeof item.reference === "string" ? `~${item.reference}` : "",
   ].join("");
+};
 const row = (facts: Facts, position: number) =>
   evaluatePerformanceGate(facts, position);
 const found = (facts: Facts, position: number): string[] =>
@@ -912,10 +912,10 @@ const CLEAN = [...TURN_OF.entries()]
   .map(([anchor]) => anchor);
 const cpLength = (turnId: unknown): number =>
   Array.from(
-    String(
+    (
       (turnFacts({ script: SCRIPT_E } as unknown as Facts).find(
         (turn) => turn.turn_id === turnId,
-      )?.text as string | undefined) ?? "",
+      )?.text as string | undefined) ?? ""
     ).normalize("NFC"),
   ).length;
 
