@@ -4033,9 +4033,23 @@ function gateClaimIds(plan: GatePlan): string[] {
     return entry.claim_id;
   });
 }
+/** The gate's own evidence-metadata universe: every evidence unit of the admitted, member-hash-bound full evidence package (sixteen), not the writer's selected three. */
+function gateEvidenceIds(plan: GatePlan): string[] {
+  const manifest = plan.package_payload.manifest;
+  if (
+    !isObj(manifest) ||
+    !isArr(manifest.evidence) ||
+    manifest.evidence.length === 0
+  )
+    throw new GateShapeError();
+  return manifest.evidence.map((entry) => {
+    if (!isObj(entry) || !isStr(entry.evidence_unit_id))
+      throw new GateShapeError();
+    return entry.evidence_unit_id;
+  });
+}
 /** The 145 fixed, ordered statements: the 134 unchanged texture SELECTs, definitions, host ids and the nine factual SELECTs. Pure. */
 export function gateSnapshotStatements(plan: GatePlan): Statement[] {
-  const upstream = plan.texture.revision.critic.upstream;
   const claimIds = gateClaimIds(plan);
   return [
     ...textureSnapshotStatements(plan.texture),
@@ -4057,7 +4071,7 @@ export function gateSnapshotStatements(plan: GatePlan): Statement[] {
     { text: RENDERINGS_SQL, values: [] },
     {
       text: EVIDENCE_SQL,
-      values: [upstream.evidence.map((item) => item.evidence_unit_id)],
+      values: [gateEvidenceIds(plan)],
     },
   ];
 }
@@ -4104,7 +4118,6 @@ export function parseGateFacts(
   plan: GatePlan,
 ): GateFacts {
   if (results.length !== FACT_STATEMENTS) throw new GateShapeError();
-  const upstream = plan.texture.revision.critic.upstream;
   const derivation = listOf(results[2], undefined);
   if (derivation.length > 1) throw new GateShapeError();
   const renderings = listOf(results[7], undefined);
@@ -4120,7 +4133,7 @@ export function parseGateFacts(
     claims: listOf(results[5], gateClaimIds(plan).length),
     pronunciations,
     renderings,
-    evidence: listOf(results[8], upstream.evidence.length),
+    evidence: listOf(results[8], gateEvidenceIds(plan).length),
   };
 }
 

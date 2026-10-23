@@ -3853,10 +3853,13 @@ describe("claims/writing gate seam: plan, evaluators, scripted writer and orches
       expect(claims).toEqual([claimIds]);
       expect(pronunciations).toEqual([]);
       expect(renderings).toEqual([]);
-      expect(evidence).toEqual([
-        UP.evidence.map((item) => item.evidence_unit_id),
-      ]);
-      expect(UP.evidence).toHaveLength(16);
+      // the gate's evidence metadata universe is the full admitted package (sixteen), derived here independently of the production helper; the writer's selected three are unchanged
+      const evidenceIds = records(PACKAGE_PAYLOAD.manifest.evidence).map(
+        (item) => item.evidence_unit_id,
+      );
+      expect(evidenceIds).toHaveLength(16);
+      expect(UP.evidence).toHaveLength(3);
+      expect(evidence).toEqual([evidenceIds]);
       // the native comparison: 31 historical + 18 owned expected rows (49) or the 31 alone; eight parallel arrays, every column, jsonb as text
       const rows = ownedRowsOf(PLAN, evaluateGateComponent(INPUTS).rows);
       const full = expectedComparisonStatement([...PLAN.historical, ...rows]);
@@ -3908,6 +3911,17 @@ describe("claims/writing gate seam: plan, evaluators, scripted writer and orches
           [...results.slice(136, 141), [], ...results.slice(142)],
           PLAN,
         ),
+      ).toThrow();
+      // the writer-selected three metadata rows (no query, no mutation) are not the gate's evidence universe: a reduced final slot is a shape error
+      const selectedEvidenceIds = UP.evidence.map(
+        (item) => item.evidence_unit_id,
+      );
+      const reducedEvidence = facts.evidence.filter((row) =>
+        selectedEvidenceIds.some((id) => id === row.evidence_unit_id),
+      );
+      expect(reducedEvidence).toHaveLength(3);
+      expect(() =>
+        parseGateFacts([...results.slice(136, 144), reducedEvidence], PLAN),
       ).toThrow();
     },
     T,
