@@ -364,7 +364,7 @@ const PENDING = {
   run_state: "PENDING",
   run_publication: false,
 };
-/** The Performance-owned gate_results rows currently stored (the historical seven; nothing in this scope ever adds one). */
+/** All 14 historical Performance gate_results rows (seven per fixture attempt); this scope adds none. */
 const performanceRows = async (db: DbEnv): Promise<string[]> =>
   (
     await db.owner.query<{ v: string }>(
@@ -476,10 +476,10 @@ suite(
         await mark(db);
         HISTORICAL_PERFORMANCE = await performanceRows(db);
         HISTORICAL_TABLES = await performanceTables(db);
-        // the historical Performance rows (the seven already inside the 31 gate_results rows) are the only ones; entry: texture still at T0
-        expect(HISTORICAL_PERFORMANCE).toHaveLength(7);
-        // an independent oracle: the 31 historical gate_results rows only (Pass 1, Critic, Revision and the texture add none); not 62
-        expect(db.baseline.gate_results).toBe(31);
+        // Both historical fixture attempts contribute seven Performance rows; entry: texture still at T0.
+        expect(HISTORICAL_PERFORMANCE).toHaveLength(14);
+        // The frozen 398-row fixture has 31 gate rows per attempt, 62 globally; W/C/R/Texture add none.
+        expect(db.baseline.gate_results).toBe(62);
         expect(await states(db)).toEqual(PENDING);
         const refusal = await refuse(db.runtime);
         expect(refusal.code).toBe("perf_upstream_stopped");
@@ -501,7 +501,7 @@ suite(
         const db = await scenario();
         await toT4(db);
         await mark(db); // the texture rows are the entry state of this case
-        expect(db.baseline.gate_results).toBe(31);
+        expect(db.baseline.gate_results).toBe(62);
         const refusal = await refuse(db.runtime);
         expect(refusal.code).toBe("perf_upstream_gate_absent");
         expect(refusal.upstream).toEqual({ class: "state", gate_state: 0 });
@@ -536,7 +536,7 @@ suite(
         )
           throw new Error("expected gate_results counts");
         expect(afterGate.gate_results - db.baseline.gate_results).toBe(18);
-        expect(afterGate.gate_results).toBe(49); // 31 historical + the 18 current rows
+        expect(afterGate.gate_results).toBe(80); // 62 historical + the 18 current rows
         await mark(db);
         // one query returns the 18 identities, their complete database-rendered JSON and outcomes (no extra SQL statement)
         const rows = await db.owner.query<{
@@ -594,7 +594,7 @@ suite(
         const db = await scenario();
         // no reader call here: this case only reads the stored rows after everything above
         expect(await performanceRows(db)).toEqual(HISTORICAL_PERFORMANCE);
-        expect(HISTORICAL_PERFORMANCE).toHaveLength(7);
+        expect(HISTORICAL_PERFORMANCE).toHaveLength(14);
         expect(await performanceTables(db)).toEqual(HISTORICAL_TABLES);
         const rows = await historical(db.owner);
         expect(db.history.size).toBe(398);

@@ -1601,15 +1601,19 @@ describe("performance direction seam, Scope A: candidate grammar, owned reader a
         expect(policy(literal.hash), name).toBe(literal.performance);
         expect(audit(literal.hash), name).toBe(literal.audit);
       }
-      // SYN-S2 is a CONDITIONAL specimen (overlap + non-verbal): hashed through the owned helper, never admitted by the candidate grammar
+      // SYN-S2 is a CONDITIONAL specimen (overlap + non-verbal): hashing does not admit it.
+      // Its overlap value is an object, so the whole-candidate type pass refuses before vocabulary.
       const conditional = candidateOf([
         overlap("t03", "t04"),
         mk("t12", "non_verbal_event", "breath", "light"),
       ]);
       expect(performanceDirectionHash(conditional, ANCHORS)).toBe(SYN.S2.hash);
-      expect(validateDirectionCandidate(conditional, SCRIPT_C)).toMatchObject({
-        code: "perf_vocabulary_unknown",
-        field: "intent_type",
+      expect(validateDirectionCandidate(conditional, SCRIPT_C)).toEqual({
+        kind: "refused",
+        stage: "candidate",
+        code: "perf_grammar_invalid",
+        writes_attempted: 0,
+        reason: "type",
       });
       // HIST: the historical corrected direction fingerprints equal the loaded vectors; they are conformance examples, not approvals of this script
       const frozen = PACK.json("gate_fingerprint_inputs.json") as Record<
