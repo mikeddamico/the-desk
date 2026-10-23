@@ -321,9 +321,9 @@ function anchorsOf(script: DirectionScript): Map<string, string> {
   try {
     return turnAnchorMap(script.turns);
   } catch (error) {
-    if (error instanceof TypeError) throw new TypeError(INVALID_SCRIPT);
-    throw error;
+    if (!(error instanceof TypeError)) throw error;
   }
+  throw new TypeError(INVALID_SCRIPT);
 }
 /**
  * The producer-supplied candidate against the bound final script. Order (first failure wins, each pass over the whole candidate before the next):
@@ -503,8 +503,7 @@ export function planPerformanceDirection(input: {
     const row = rows.find((item) => item.gate_definition_id === id);
     if (
       key === undefined ||
-      row === undefined ||
-      row.gate_name !== key ||
+      row?.gate_name !== key ||
       row.version !== "1" ||
       !isObj(row.definition) ||
       row.definition.gate_key !== key ||
@@ -1378,7 +1377,7 @@ function gate23(v: View): Outcome {
             (use_kind === "evidence"
               ? use.mode === "quoted"
               : use.mode !== "quoted");
-          if (!protectedUse || code === undefined) return;
+          if (!protectedUse) return;
           checked += 1;
           if (
             Number.isSafeInteger(use.start) &&
@@ -1574,9 +1573,9 @@ function gate25(v: View): Outcome {
     if (KEY_TABLE.has(key)) counter.governed += 1;
     else free.push({ text: key, location: envelope });
     if (key === "performance_intents" && Array.isArray(child))
-      child.forEach((item, index) =>
-        walk(item, key, { intent_index: index }, v.pins, free, counter),
-      );
+      child.forEach((item, index) => {
+        walk(item, key, { intent_index: index }, v.pins, free, counter);
+      });
     else walk(child, key, envelope, v.pins, free, counter);
   }
   v.rows.forEach((row, index) => {

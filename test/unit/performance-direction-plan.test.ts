@@ -210,7 +210,7 @@ const PACKAGE_PAYLOAD = PACK.json("evidence_package.json") as {
 };
 
 // ---- the final script facts shared by the doors ----------------------------------------------------------------------------------------------------
-const CHILD = PLAN.texture.script_payload as Obj;
+const CHILD = PLAN.texture.script_payload;
 const TURNS = records(CHILD.turns);
 const plannedRows = (rows: readonly PlannedRow[], name: string): Obj[] =>
   rows
@@ -845,7 +845,9 @@ function factsFor(
 }
 const where = (item: Obj): string =>
   [
-    item.intent_index !== undefined ? `#${String(item.intent_index)}` : "",
+    item.intent_index !== undefined
+      ? `#${String(item.intent_index as number)}`
+      : "",
     typeof item.side === "string" ? `:${item.side}` : "",
     typeof item.use_kind === "string"
       ? `:${item.use_kind}${String(item.use_index)}`
@@ -911,9 +913,9 @@ const CLEAN = [...TURN_OF.entries()]
 const cpLength = (turnId: unknown): number =>
   Array.from(
     String(
-      turnFacts({ script: SCRIPT_E } as unknown as Facts).find(
+      (turnFacts({ script: SCRIPT_E } as unknown as Facts).find(
         (turn) => turn.turn_id === turnId,
-      )?.text ?? "",
+      )?.text as string | undefined) ?? "",
     ).normalize("NFC"),
   ).length;
 
@@ -1205,7 +1207,7 @@ describe("performance direction seam, Scope A: candidate grammar, owned reader a
         writes_attempted: 0,
       });
       const noStrength = base();
-      delete (records(noStrength.performance_intents)[0] as Obj).strength;
+      delete defined(records(noStrength.performance_intents)[0]).strength;
       expect(refusal(noStrength)).toMatchObject({ reason: "missing_key" });
       // W-C15: director_note, rationale_code and text are unknown keys (three cases), at the direction and at the intent
       for (const key of ["director_note", "rationale_code", "text"]) {
@@ -1216,7 +1218,7 @@ describe("performance direction seam, Scope A: candidate grammar, owned reader a
           reason: "unknown_key",
         });
         const intent = base();
-        (records(intent.performance_intents)[0] as Obj)[key] = "x";
+        defined(records(intent.performance_intents)[0])[key] = "x";
         expect(refusal(intent), `${key} on an intent`).toMatchObject({
           reason: "unknown_key",
         });
@@ -1228,17 +1230,17 @@ describe("performance direction seam, Scope A: candidate grammar, owned reader a
         ["a non-record element", (c: Obj) => (c.performance_intents = [1])],
         [
           "a numeric value",
-          (c: Obj) => ((records(c.performance_intents)[0] as Obj).value = 3),
+          (c: Obj) => (defined(records(c.performance_intents)[0]).value = 3),
         ],
         [
           "a non-string strength",
           (c: Obj) =>
-            ((records(c.performance_intents)[0] as Obj).strength = null),
+            (defined(records(c.performance_intents)[0]).strength = null),
         ],
         [
           "a numeric timing anchor",
           (c: Obj) =>
-            ((records(c.performance_intents)[0] as Obj).timing_anchor = 4),
+            (defined(records(c.performance_intents)[0]).timing_anchor = 4),
         ],
       ] as [string, (c: Obj) => unknown][]) {
         const candidate = base();
@@ -1254,13 +1256,13 @@ describe("performance direction seam, Scope A: candidate grammar, owned reader a
         });
       // W-C17 corrected (E1): (a) a safe-integer value passes semantic JSON and keys and is a TYPE refusal; (b) a float and (c) a duplicate NFC key stop at the FIRST check
       const safeInteger = base();
-      (records(safeInteger.performance_intents)[1] as Obj).value = 3;
+      defined(records(safeInteger.performance_intents)[1]).value = 3;
       expect(refusal(safeInteger)).toMatchObject({ reason: "type" });
       const float = base();
-      (records(float.performance_intents)[1] as Obj).value = 0.5;
+      defined(records(float.performance_intents)[1]).value = 0.5;
       expect(refusal(float)).toMatchObject({ reason: "not_semantic_json" });
       const duplicate = base();
-      Object.assign(records(duplicate.performance_intents)[0] as Obj, {
+      Object.assign(defined(records(duplicate.performance_intents)[0]), {
         é: 1,
         é: 2,
       });
@@ -1271,10 +1273,10 @@ describe("performance direction seam, Scope A: candidate grammar, owned reader a
       early.diagnostic = 0.5;
       expect(refusal(early)).toMatchObject({ reason: "not_semantic_json" });
       const minusZero = base();
-      (records(minusZero.performance_intents)[0] as Obj).value = -0;
+      defined(records(minusZero.performance_intents)[0]).value = -0;
       expect(refusal(minusZero)).toMatchObject({ reason: "not_semantic_json" });
       const lone = base();
-      (records(lone.performance_intents)[0] as Obj).value = "\ud800";
+      defined(records(lone.performance_intents)[0]).value = "\ud800";
       expect(refusal(lone)).toMatchObject({ reason: "not_semantic_json" });
       const cycle = base();
       cycle.self = cycle;
@@ -1647,7 +1649,8 @@ describe("performance direction seam, Scope A: candidate grammar, owned reader a
         3,
       );
       // W-P5: a missing or extra key is a TypeError from the exact-key check; a non-hash value is refused
-      const { gate_set_version: _dropped, ...missing } = projection;
+      const missing: Obj = { ...projection };
+      delete missing.gate_set_version;
       expect(() => fingerprint("performance", missing)).toThrow(TypeError);
       expect(() =>
         fingerprint("performance", { ...projection, extra: "x" }),
@@ -1778,7 +1781,7 @@ describe("performance direction seam, Scope A: candidate grammar, owned reader a
         intents_payload: 2,
         intents_rows: 2,
       });
-      expect((clean.payload as Obj).direction_hash).toBe(SYN.S1.hash);
+      expect(clean.payload.direction_hash).toBe(SYN.S1.hash);
       // W-S1: the version row bound to the PARENT script version
       const parent = factsFor(B0);
       parent.version_rows[0] = {
@@ -2418,7 +2421,7 @@ describe("performance direction seam, Scope A: candidate grammar, owned reader a
         true,
       );
       const keyed = factsFor(B0);
-      (keyed.payload as Obj)["bad_key"] = 1;
+      keyed.payload.bad_key = 1;
       expect(
         found(keyed, 25).every(
           (item) => item === "provider_char_class~direction_envelope",
@@ -3101,9 +3104,7 @@ describe("performance direction seam, Scope A: candidate grammar, owned reader a
         patch: Partial<Record<keyof DirectionRows, Obj[]>>,
       ): DirectionRows => ({ ...empty, ...patch });
       const full = structuredClone(expected);
-      const histRows = historicalRows.map(
-        (item) => ({ ...item }) as unknown as Obj,
-      );
+      const histRows = historicalRows.map((item) => ({ ...item }));
       const histArtifacts = table("artifacts").filter((item) =>
         historicalArtifacts.includes(String(item.artifact_id)),
       );
@@ -3398,7 +3399,7 @@ describe("performance direction seam, Scope A: candidate grammar, owned reader a
           get: () => {
             throw unowned;
           },
-        }) as unknown as Obj[];
+        });
       };
       await expect(
         readPerformanceSnapshot(asPool(r10pool), PPLAN),
