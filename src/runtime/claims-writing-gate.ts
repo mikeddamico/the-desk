@@ -2390,8 +2390,8 @@ export function checkRequiredBlocks(inp: ComponentInputs): DefinitionResult {
 }
 
 // ---- Writing 16 (H11, H12): provider markup and pronunciation respelling lint ---------------------------------------------------------------
-const MARKUP_CHARS = new Set(Array.from('[]<>{}|="`~^\\_'));
-const KNOWN_TAGS: readonly RegExp[] = [
+export const MARKUP_CHARS = new Set(Array.from('[]<>{}|="`~^\\_'));
+export const KNOWN_TAGS: readonly RegExp[] = [
   /\bstyle=/giu,
   /\[[a-z]+\]/giu,
   /<[a-z]+>/giu,
