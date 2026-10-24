@@ -1,0 +1,99 @@
+name: pr34-lock-audit-diagnostic
+
+# PROPOSED (PR34 hosted lock-only npm audit; adapted from the accepted pr34-performance-diagnostic workflow and the accepted local launch-audit.sh method; this proposal is unrun), NOT RUN, NOT PARSED.
+# DIAGNOSTIC-ONLY control workflow for the single branch diagnostic/pr34-lock-audit-002. It never merges into the product branch and does not alter
+# .github/workflows/ci.yml. Trigger: a push to that exact branch ONLY (no pull_request, schedule, workflow_dispatch, repository_dispatch, tags or wildcard).
+# GITHUB_SHA is the CONTROL commit (sole parent: the source); the audited SOURCE commit 1a2ea5fe... (sole parent 568590e5...) is checked out separately by literal SHA.
+# The only registry traffic is the one lock-only `npm audit` lookup of the locked dependency names and versions under the normal provisioned TLS validation:
+# nothing is installed, no project script runs, there is no build, database, test or formatter, and no credential or source file is sent to the registry.
+# Order: pre -> audit -> post -> validate -> collect -> upload -> outcome-only gate. A pre failure prevents the audit; post, validate and collect still run
+# whenever pre ran, so the evidence stays collectable; the upload runs only when collect has published upload_ready=true (after verifying ownership of the
+# capture root and exclusively creating the fresh upload directory). An audit exit status other than 0 keeps the AUDIT step red and therefore the job red even
+# when valid advisory JSON was collected. `always()` does not override cancellation or the job deadline; a cancelled run or a lost runner may leave the evidence
+# incomplete, which is HOLD. The layers are separate: job 10 minutes, audit-wrapper step 4 minutes, inner npm TERM 60 s / KILL 5 s, request timeout 30 s.
+
+on:
+  push:
+    branches: [diagnostic/pr34-lock-audit-002]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pr34-lock-audit-diagnostic
+  cancel-in-progress: false
+
+jobs:
+  audit:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Check out the CONTROL commit (GITHUB_SHA), no persisted credentials
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        timeout-minutes: 2
+        with:
+          path: pr34-lock-audit-control
+          persist-credentials: false
+          fetch-depth: 1
+      - name: Check out the audited SOURCE commit by literal SHA, no persisted credentials
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        timeout-minutes: 2
+        with:
+          ref: 1a2ea5feba7c60ace55b6222d25fc946d55b0f52
+          path: pr34-lock-audit-target
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        timeout-minutes: 2
+        with:
+          node-version: 24.21.0
+          package-manager-cache: false
+      - name: Bind attempt, source, control and the provisioned tools before the audit
+        id: pre
+        run: /usr/bin/bash pr34-lock-audit-control/diagnostic/pr34-lock-audit/run-audit.sh pre
+        timeout-minutes: 3
+      - name: Run the one lock-only npm audit (a nonzero exit keeps this step red)
+        id: audit
+        run: /usr/bin/bash pr34-lock-audit-control/diagnostic/pr34-lock-audit/run-audit.sh audit
+        timeout-minutes: 4
+      - name: Re-bind source, control and tools after the audit (also after a failing audit)
+        id: post
+        if: ${{ always() && steps.pre.outcome == 'success' }}
+        run: /usr/bin/bash pr34-lock-audit-control/diagnostic/pr34-lock-audit/run-audit.sh post
+        timeout-minutes: 3
+      - name: Record the transparent audit-report facts, separate from the raw process result
+        id: validate
+        if: ${{ always() && steps.pre.outcome != 'skipped' }}
+        run: /usr/bin/bash pr34-lock-audit-control/diagnostic/pr34-lock-audit/run-audit.sh validate
+        timeout-minutes: 1
+      - name: Collect the raw records into the upload snapshot
+        id: collect
+        if: ${{ always() && steps.pre.outcome != 'skipped' }}
+        run: /usr/bin/bash pr34-lock-audit-control/diagnostic/pr34-lock-audit/run-audit.sh collect
+        timeout-minutes: 2
+      - name: Retain the audit evidence (complete or partial)
+        id: upload
+        if: ${{ always() && steps.collect.outputs.upload_ready == 'true' }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        timeout-minutes: 2
+        with:
+          name: pr34-lock-audit-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/a34/u
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 30
+      - name: Outcome-only job gate (lock-only audit, nothing else)
+        if: ${{ always() }}
+        shell: bash
+        timeout-minutes: 1
+        env:
+          PRE: ${{ steps.pre.outcome }}
+          AUDIT: ${{ steps.audit.outcome }}
+          POST: ${{ steps.post.outcome }}
+          VALIDATE: ${{ steps.validate.outcome }}
+          COLLECT: ${{ steps.collect.outcome }}
+          UPLOAD: ${{ steps.upload.outcome }}
+        run: |
+          echo "pre=$PRE audit=$AUDIT post=$POST validate=$VALIDATE collect=$COLLECT upload=$UPLOAD"
+          [ "$PRE" = success ] && [ "$AUDIT" = success ] && [ "$POST" = success ] && [ "$VALIDATE" = success ] && [ "$COLLECT" = success ] && [ "$UPLOAD" = success ] || { echo "HOLD: not every stage succeeded (an audit exit other than 0 keeps the audit stage, and so this job, failed)"; exit 1; }
+          echo "all stages succeeded: the audit process exited 0 and the evidence was collected and uploaded (a lock-only audit, not a full-CI or security pass until the report is independently reviewed)"
