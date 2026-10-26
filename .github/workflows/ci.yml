@@ -45,7 +45,7 @@ jobs:
       - name: Probe the disposable database (read-only)
         run: /usr/bin/python3 -I -B tools/ci-validation/ci.py dbprobe
         timeout-minutes: 1
-      - run: npm run format:check
+      - run: npm run format:check -- --cache-location "$RUNNER_TEMP/ci/tmp/prettier-format-check-unused.json"
         timeout-minutes: 3
       - run: npm run lint
         timeout-minutes: 5
