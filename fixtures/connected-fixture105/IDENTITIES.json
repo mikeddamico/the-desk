@@ -1,0 +1,39 @@
+{
+  "ids": {
+    "actor": "ef83ab5a-3d75-553c-924e-b18604e61e16",
+    "show": "7ef80c54-5645-5925-a5f1-d8b5b7ad2a30",
+    "config": "9e1252b5-f582-5aab-ad2a-e067fa571b04",
+    "run": "23e3766c-7d71-5c0a-801f-e06d50884988",
+    "attempt": "9ed84f2d-5081-5869-8800-bd53c75fa71d",
+    "rights": "0e7f75a6-e7f2-5414-8e6a-b35e9ded3444",
+    "package": "cca1c334-d3aa-509d-bbfb-f43f7bb8d645",
+    "package-artifact": "85f91a62-1170-5f7f-9e66-ef535d665910",
+    "brief": "a4979777-ea0e-5fba-88c2-c9e732acab50",
+    "brief-artifact": "38b63ede-f4f3-505f-854d-e69a7630f955",
+    "derivation": "3cfc6236-f202-5b18-9515-3d163b39580a"
+  },
+  "uuid_rule": "UUIDv5(namespace,label); namespace=7a459abb-7d38-47f1-9b43-b05bda3a4e71",
+  "authored_fiction_time": "2024-06-26T18:00:00Z",
+  "package_hash": "c60a91ac6383a791011f533d4b4d2dfd428b3dbe9e15b5113f4cd60ea03c539e",
+  "brief_hash": "e49eb2ff86990cd5a439c68b236f99ba34f1294be02c568b635091f5b0f11a71",
+  "config_hash": "18eec4ddf5be87cbfd6317bc067f152ec400394eda18454d9bbd9bd22a76ff2d",
+  "substantive_script_hash": "ced37e3db0c2511d4f1cfb8d913f66e223cd103adf9087ae809b30511de7a116",
+  "texture_script_hash": "699c4837646679b9470d272ecdd07590449dec21a4c6e708ddfdd792a01dcb6c",
+  "held_fields": [
+    "runtime construction observation",
+    "completed source ledger",
+    "fixed release digest",
+    "ROOT adoption pin",
+    "actual evaluated gate result digest",
+    "observed operation/audit identities"
+  ],
+  "no_execution": true,
+  "substantive-artifact": "74a11a88-6adc-53d7-92ea-6e559c367776",
+  "substantive-version": "5120be00-4908-5e55-8ea5-d28aab5947bf",
+  "texture-artifact": "c9854d47-7aac-50a6-9fac-f9f54ddfeee8",
+  "texture-version": "ca1c091b-4ee5-59fb-9547-2b92eb3938ad",
+  "direction-artifact": "3b7e4f9c-f2e2-53f9-8f13-5f035e90127a",
+  "direction-version": "ce776b01-9c98-53bb-8b30-a164949237cf",
+  "intent": "2129ab04-4208-5250-a37e-eef1b628d313",
+  "performance_direction_hash": "edd94e00ec1e07bbe0a2efde4c3ca67f39e5f25835f83aed2b29df09eaa5ee2e"
+}

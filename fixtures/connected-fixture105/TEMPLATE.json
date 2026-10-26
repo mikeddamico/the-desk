@@ -1,0 +1,73 @@
+{
+  "rundown_template_version_id": "connected-fixture105-post-event/1",
+  "mode": "normal_post_event",
+  "slots": [
+    {
+      "sequence": 1,
+      "slot_id": "fixture109-1",
+      "block_type": "cold_open",
+      "required": true,
+      "job": "Offer a plainly hypothetical football irritation without asserting match history."
+    },
+    {
+      "sequence": 2,
+      "slot_id": "fixture109-2",
+      "block_type": "host_cut_in",
+      "required": true,
+      "job": "Orient to this fictional evaluation."
+    },
+    {
+      "sequence": 3,
+      "slot_id": "fixture109-3",
+      "block_type": "orientation",
+      "required": true,
+      "job": "Give the result and bounded five-match count."
+    },
+    {
+      "sequence": 4,
+      "slot_id": "fixture109-4",
+      "block_type": "analysis",
+      "required": true,
+      "job": "Compare the instruction with excerpts R and S; distinguish observation from causal explanation."
+    },
+    {
+      "sequence": 5,
+      "slot_id": "fixture109-5",
+      "block_type": "recap_turn",
+      "required": true,
+      "job": "State a listener reaction without strengthening the causal claim."
+    },
+    {
+      "sequence": 6,
+      "slot_id": "fixture109-6",
+      "block_type": "feature_or_analysis",
+      "required": true,
+      "job": "Describe only the selected two responses and fictional lore."
+    },
+    {
+      "sequence": 7,
+      "slot_id": "fixture109-7",
+      "block_type": "wrap",
+      "required": true,
+      "job": "Conclude that the excerpts illustrate compliance and noncompliance, not cause or frequency."
+    },
+    {
+      "sequence": 8,
+      "slot_id": "fixture109-8",
+      "block_type": "predictions",
+      "required": true,
+      "job": "Three explicitly conditional wording-only forecasts, one per participant."
+    },
+    {
+      "sequence": 9,
+      "slot_id": "fixture109-9",
+      "block_type": "sign_off",
+      "required": true,
+      "job": "Close this fictional evaluation without a production or audio claim."
+    }
+  ],
+  "feature_rules": {
+    "character_ritual_max_per_episode": 0
+  },
+  "scope": "This disclosed fixture only; old template and cast untouched."
+}

@@ -51,6 +51,7 @@ fi
 
 # Gate: source/database binding and the predecessor verdict must already be recorded as passing.
 /usr/bin/python3 -I -B "$HERE/ci.py" precheck "$STAGE" || exit 72
+FIXTURE_BINDING=$(/usr/bin/python3 -I -B "$HERE/ci.py" fixture-binding "$STAGE") || exit 72
 mkdir -m 700 "$STAGE_DIR" || exit 73
 
 fail_prelaunch() {
@@ -111,7 +112,7 @@ cd "$ROOT" || fail_prelaunch "cd"
 if [ "$STAGE" = all ]; then DB_FEED=$TEST_DATABASE_URL; else DB_FEED=""; fi
 printf '%s\n' "$DB_FEED" | /usr/bin/env -i \
   PATH="$NODE_BIN:/usr/bin:/bin" HOME="$CI_DIR/home" TMPDIR="$CI_DIR/tmp" \
-  LANG=C.UTF-8 LC_ALL=C.UTF-8 TZ=UTC CI=true \
+  LANG=C.UTF-8 LC_ALL=C.UTF-8 TZ=UTC CI=true DESK_FIXTURE105_BINDING="$FIXTURE_BINDING" \
   "${RUNNER_ID_ARG[@]+"${RUNNER_ID_ARG[@]}"}" \
   /bin/bash -c "$CHILD" _ "$STAGE" "$CEILING" \
   > "$STAGE_DIR/stdout" 2> "$STAGE_DIR/stderr"

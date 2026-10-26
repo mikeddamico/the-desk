@@ -8,6 +8,7 @@
 // explicit cursor/prefix, frozen state and hash), each SELECTED support ref against its own claim_supports row and exact target hash (not against every current row of the claim). One
 // normalized payload representation is hashed, compared and stored. No selection, scoring, scope or eligibility policy is implemented.
 import type { Pool } from "pg";
+import { takeConnectedFixture105PackageBorrow } from "./connected-fixture105.js";
 
 import { canonicalJson, normalizeString } from "../identity/canonical-json.js";
 import { evidenceBodyHash } from "../identity/domains.js";
@@ -501,198 +502,223 @@ export async function persistEvidencePackage(
   const payloadJson = JSON.stringify(parsed.payload);
   return runCommand(
     pool,
-    async (tx) => {
-      const requestVerification = await validateReferences(tx, parsed, options);
-      // READ COMMITTED: every statement has a fresh snapshot, so an id that looked free (or occupied) at one read can change before the
-      // next. An "occupied by a different record" verdict is therefore only final after ONE full re-read of the semantic (hash) lookups:
-      // an identical governed winner committed across the boundary then converges, while an unrelated occupant (no package with this
-      // hash) is still a conflict. The re-read is taken at most once, so the loop stays bounded.
-      let occupiedRechecked = false;
-      const recheckOccupied = (): boolean => {
-        if (occupiedRechecked) return false;
-        occupiedRechecked = true;
-        return true;
-      };
-      for (let round = 0; round < 4; round += 1) {
-        // 1. an existing typed package with this governed hash: reuse after validating what is stored
-        const byHash = (
-          await tx.query(`${artifactSelect} WHERE p.package_hash = $1`, [
-            parsed.hash,
-          ])
-        ).rows[0] as ArtifactRow | undefined;
-        if (byHash) {
-          let validated;
-          try {
-            validated = await validateStored(tx, byHash);
-          } catch (error) {
-            if (error instanceof Rejection)
-              return {
-                kind: "conflict",
-                code: error.code,
-                stored: byHash.artifact_id,
-                detail: error.message,
-              };
-            throw error;
-          }
-          if (
-            canonicalJson(validated.parsed.manifest) !==
-            canonicalJson(parsed.manifest)
-          )
-            return {
-              kind: "conflict",
-              code: "manifest_differs_for_hash",
-              stored: byHash.artifact_id,
-              detail: "a package with this hash stores a different manifest",
-            };
-          return {
-            kind: "converged",
-            record: stored(
-              {
-                artifact_id: byHash.artifact_id,
-                evidence_package_id: String(byHash.evidence_package_id),
-                package_hash: parsed.hash,
-              },
-              validated.verification,
-              { reused: true },
-            ),
-          };
-        }
-        // 2. a preexisting artifact WITHOUT its typed row (another writer): completed only after its ACTUAL stored payload, schema
-        //    label and references validate and it carries the request's manifest and package id
-        const existing = (
-          await tx.query(
-            `${artifactSelect} WHERE a.artifact_type = 'evidence_package' AND a.content_hash = $1`,
-            [parsed.hash],
-          )
-        ).rows[0] as ArtifactRow | undefined;
-        if (existing) {
-          // the typed row may have been committed between the two reads (the winner writes both in one statement): re-read once more
-          if (existing.evidence_package_id !== null && round < 3) continue;
-          if (existing.evidence_package_id !== null)
-            return {
-              kind: "conflict",
-              code: "artifact_differs_for_hash",
-              stored: existing.artifact_id,
-              detail:
-                "the artifact carries a typed row for a different package hash",
-            };
-          let validated;
-          try {
-            validated = await validateStored(tx, existing);
-          } catch (error) {
-            if (error instanceof Rejection)
-              return {
-                kind: "conflict",
-                code: "stored_package_invalid",
-                stored: existing.artifact_id,
-                detail: error.message,
-              };
-            throw error;
-          }
-          if (
-            canonicalJson(validated.parsed.manifest) !==
-              canonicalJson(parsed.manifest) ||
-            validated.parsed.payload.id !== pkg.evidence_package_id
-          )
-            return {
-              kind: "conflict",
-              code: "artifact_differs_for_hash",
-              stored: existing.artifact_id,
-              detail: "stored manifest or package id differs from the request",
-            };
-          const occupied = await tx.query(
-            "SELECT 1 FROM evidence_packages WHERE evidence_package_id = $1::uuid",
-            [pkg.evidence_package_id],
-          );
-          if (occupied.rows.length > 0) {
-            // possibly the identical winner completing this very artifact between the two reads: re-read before judging
-            if (recheckOccupied()) continue;
-            return {
-              kind: "conflict",
-              code: "evidence_package_id_occupied",
-              stored: null,
-              detail: "the authored package id belongs to a different record",
-            };
-          }
-          const done = await tx.attempt(
-            `INSERT INTO evidence_packages (evidence_package_id, artifact_id, package_hash) VALUES ($1::uuid, $2::uuid, $3)`,
-            [pkg.evidence_package_id, existing.artifact_id, parsed.hash],
-          );
-          if (done.ok)
-            return {
-              kind: "created",
-              record: stored(
-                {
-                  artifact_id: existing.artifact_id,
-                  evidence_package_id: pkg.evidence_package_id,
-                  package_hash: parsed.hash,
-                },
-                validated.verification,
-                { completed_existing_artifact: true },
-              ),
-            };
-          if (!isRace(done.error)) rethrow(done.error);
-          continue;
-        }
-        const occupiedArtifact = await tx.query(
-          "SELECT 1 FROM artifacts WHERE artifact_id = $1::uuid",
-          [pkg.artifact_id],
-        );
-        const occupiedPackage = await tx.query(
-          "SELECT 1 FROM evidence_packages WHERE evidence_package_id = $1::uuid",
-          [pkg.evidence_package_id],
-        );
-        if (
-          (occupiedArtifact.rows.length > 0 ||
-            occupiedPackage.rows.length > 0) &&
-          recheckOccupied()
-        )
-          continue;
-        if (occupiedArtifact.rows.length > 0 || occupiedPackage.rows.length > 0)
+    (tx) => persistPackageCore(tx, pkg, parsed, options, payloadJson),
+    trace,
+  );
+}
+
+/** Shared owner core; the Pool API remains the transaction/trace owner. */
+async function persistPackageCore(
+  tx: Tx,
+  pkg: AuthoredPackage,
+  parsed: ParsedPackage,
+  options: PersistPackageOptions,
+  payloadJson: string,
+): Promise<Outcome<StoredPackage>> {
+  const requestVerification = await validateReferences(tx, parsed, options);
+  // READ COMMITTED: every statement has a fresh snapshot, so an id that looked free (or occupied) at one read can change before the
+  // next. An "occupied by a different record" verdict is therefore only final after ONE full re-read of the semantic (hash) lookups:
+  // an identical governed winner committed across the boundary then converges, while an unrelated occupant (no package with this
+  // hash) is still a conflict. The re-read is taken at most once, so the loop stays bounded.
+  let occupiedRechecked = false;
+  const recheckOccupied = (): boolean => {
+    if (occupiedRechecked) return false;
+    occupiedRechecked = true;
+    return true;
+  };
+  for (let round = 0; round < 4; round += 1) {
+    // 1. an existing typed package with this governed hash: reuse after validating what is stored
+    const byHash = (
+      await tx.query(`${artifactSelect} WHERE p.package_hash = $1`, [
+        parsed.hash,
+      ])
+    ).rows[0] as ArtifactRow | undefined;
+    if (byHash) {
+      let validated;
+      try {
+        validated = await validateStored(tx, byHash);
+      } catch (error) {
+        if (error instanceof Rejection)
           return {
             kind: "conflict",
-            code:
-              occupiedArtifact.rows.length > 0
-                ? "artifact_id_occupied"
-                : "evidence_package_id_occupied",
-            stored: null,
-            detail: "an authored id belongs to a different record",
+            code: error.code,
+            stored: byHash.artifact_id,
+            detail: error.message,
           };
-        // ONE statement writes artifact and typed row, so a unique violation on either leaves neither (no orphan artifact).
-        const ins = await tx.attempt(
-          `WITH a AS (
+        throw error;
+      }
+      if (
+        canonicalJson(validated.parsed.manifest) !==
+        canonicalJson(parsed.manifest)
+      )
+        return {
+          kind: "conflict",
+          code: "manifest_differs_for_hash",
+          stored: byHash.artifact_id,
+          detail: "a package with this hash stores a different manifest",
+        };
+      return {
+        kind: "converged",
+        record: stored(
+          {
+            artifact_id: byHash.artifact_id,
+            evidence_package_id: String(byHash.evidence_package_id),
+            package_hash: parsed.hash,
+          },
+          validated.verification,
+          { reused: true },
+        ),
+      };
+    }
+    // 2. a preexisting artifact WITHOUT its typed row (another writer): completed only after its ACTUAL stored payload, schema
+    //    label and references validate and it carries the request's manifest and package id
+    const existing = (
+      await tx.query(
+        `${artifactSelect} WHERE a.artifact_type = 'evidence_package' AND a.content_hash = $1`,
+        [parsed.hash],
+      )
+    ).rows[0] as ArtifactRow | undefined;
+    if (existing) {
+      // the typed row may have been committed between the two reads (the winner writes both in one statement): re-read once more
+      if (existing.evidence_package_id !== null && round < 3) continue;
+      if (existing.evidence_package_id !== null)
+        return {
+          kind: "conflict",
+          code: "artifact_differs_for_hash",
+          stored: existing.artifact_id,
+          detail:
+            "the artifact carries a typed row for a different package hash",
+        };
+      let validated;
+      try {
+        validated = await validateStored(tx, existing);
+      } catch (error) {
+        if (error instanceof Rejection)
+          return {
+            kind: "conflict",
+            code: "stored_package_invalid",
+            stored: existing.artifact_id,
+            detail: error.message,
+          };
+        throw error;
+      }
+      if (
+        canonicalJson(validated.parsed.manifest) !==
+          canonicalJson(parsed.manifest) ||
+        validated.parsed.payload.id !== pkg.evidence_package_id
+      )
+        return {
+          kind: "conflict",
+          code: "artifact_differs_for_hash",
+          stored: existing.artifact_id,
+          detail: "stored manifest or package id differs from the request",
+        };
+      const occupied = await tx.query(
+        "SELECT 1 FROM evidence_packages WHERE evidence_package_id = $1::uuid",
+        [pkg.evidence_package_id],
+      );
+      if (occupied.rows.length > 0) {
+        // possibly the identical winner completing this very artifact between the two reads: re-read before judging
+        if (recheckOccupied()) continue;
+        return {
+          kind: "conflict",
+          code: "evidence_package_id_occupied",
+          stored: null,
+          detail: "the authored package id belongs to a different record",
+        };
+      }
+      const done = await tx.attempt(
+        `INSERT INTO evidence_packages (evidence_package_id, artifact_id, package_hash) VALUES ($1::uuid, $2::uuid, $3)`,
+        [pkg.evidence_package_id, existing.artifact_id, parsed.hash],
+      );
+      if (done.ok)
+        return {
+          kind: "created",
+          record: stored(
+            {
+              artifact_id: existing.artifact_id,
+              evidence_package_id: pkg.evidence_package_id,
+              package_hash: parsed.hash,
+            },
+            validated.verification,
+            { completed_existing_artifact: true },
+          ),
+        };
+      if (!isRace(done.error)) rethrow(done.error);
+      continue;
+    }
+    const occupiedArtifact = await tx.query(
+      "SELECT 1 FROM artifacts WHERE artifact_id = $1::uuid",
+      [pkg.artifact_id],
+    );
+    const occupiedPackage = await tx.query(
+      "SELECT 1 FROM evidence_packages WHERE evidence_package_id = $1::uuid",
+      [pkg.evidence_package_id],
+    );
+    if (
+      (occupiedArtifact.rows.length > 0 || occupiedPackage.rows.length > 0) &&
+      recheckOccupied()
+    )
+      continue;
+    if (occupiedArtifact.rows.length > 0 || occupiedPackage.rows.length > 0)
+      return {
+        kind: "conflict",
+        code:
+          occupiedArtifact.rows.length > 0
+            ? "artifact_id_occupied"
+            : "evidence_package_id_occupied",
+        stored: null,
+        detail: "an authored id belongs to a different record",
+      };
+    // ONE statement writes artifact and typed row, so a unique violation on either leaves neither (no orphan artifact).
+    const ins = await tx.attempt(
+      `WITH a AS (
            INSERT INTO artifacts (artifact_id, artifact_type, schema_version, content_hash, storage_uri, byte_size, canonical_payload, created_at)
            VALUES ($1::uuid, 'evidence_package', $2, $3, $4, $5::bigint, $6::jsonb, $7::timestamptz) RETURNING artifact_id)
          INSERT INTO evidence_packages (evidence_package_id, artifact_id, package_hash) SELECT $8::uuid, artifact_id, $3 FROM a`,
-          [
-            pkg.artifact_id,
-            pkg.schema_version,
-            parsed.hash,
-            pkg.storage_uri,
-            pkg.byte_size,
-            payloadJson,
-            pkg.created_at,
-            pkg.evidence_package_id,
-          ],
-        );
-        if (ins.ok)
-          return {
-            kind: "created",
-            record: stored(
-              {
-                artifact_id: pkg.artifact_id,
-                evidence_package_id: pkg.evidence_package_id,
-                package_hash: parsed.hash,
-              },
-              requestVerification,
-            ),
-          };
-        if (!isRace(ins.error)) rethrow(ins.error);
-        // Savepoint rolled back: re-read. A hash race converges on the winner; a UUID race is caught by the occupied checks above.
-      }
-      throw new Error("package persistence did not settle after re-reads");
-    },
-    trace,
+      [
+        pkg.artifact_id,
+        pkg.schema_version,
+        parsed.hash,
+        pkg.storage_uri,
+        pkg.byte_size,
+        payloadJson,
+        pkg.created_at,
+        pkg.evidence_package_id,
+      ],
+    );
+    if (ins.ok)
+      return {
+        kind: "created",
+        record: stored(
+          {
+            artifact_id: pkg.artifact_id,
+            evidence_package_id: pkg.evidence_package_id,
+            package_hash: parsed.hash,
+          },
+          requestVerification,
+        ),
+      };
+    if (!isRace(ins.error)) rethrow(ins.error);
+    // Savepoint rolled back: re-read. A hash race converges on the winner; a UUID race is caught by the occupied checks above.
+  }
+  throw new Error("package persistence did not settle after re-reads");
+}
+
+/** Provisional result only: the fixed construction host owns the outer transaction. */
+export async function persistConnectedFixture105Package(
+  capability: object,
+): Promise<Outcome<StoredPackage>> {
+  const borrowed = takeConnectedFixture105PackageBorrow(capability);
+  const parsed = parsePackage(borrowed.pkg);
+  for (const id of borrowed.options.expectedUnitIds ?? [])
+    requireUuid(id, "expected unit");
+  return persistPackageCore(
+    borrowed.tx,
+    borrowed.pkg,
+    parsed,
+    borrowed.options,
+    JSON.stringify(parsed.payload),
   );
 }
 

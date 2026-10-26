@@ -1,0 +1,38 @@
+{
+  "required_component_refs": [
+    "fixture109-Brief",
+    "fixture109-package",
+    "fixture109-roster",
+    "fixture109-template",
+    "fixture109-lore"
+  ],
+  "required_claim_refs": [
+    "a50f7424-47ba-559a-a0de-f011fe3784b1",
+    "9d40e3c5-e145-5bc1-ad1c-55ce09dd66c7",
+    "6cd06f82-a9ad-5e46-8e52-b16e7d44b998",
+    "acf27cee-53eb-5fbd-a67b-114f94ca795d",
+    "13280589-4ad9-5109-9f1f-d7d4d6079116",
+    "0ee3cc88-74c6-5815-8b18-b86772fee142",
+    "af00a068-d5ba-52e7-83bf-ebb583588b42",
+    "a5807836-8468-5b76-9467-4785cdf3b6c0"
+  ],
+  "required_context_selection_refs": ["0c0ab54e-4989-5998-9879-6aa0b4d8a31d"],
+  "required_character_refs": ["mara_ives", "jonah_reed", "nia_calder"],
+  "required_policy_refs": [
+    "writing-0.2.3",
+    "writing-fixture-profile-addendum-0.1",
+    "writing-craft-0.1",
+    "claims-0.1.2"
+  ],
+  "required_comprehension_target_refs": ["fixture109-comparison"],
+  "serialized_input_hash": "d4ba44aef818b12a4eb690075e17c9f2600f201223f833b73504b203d6e3935d",
+  "estimated_input_tokens": 14586,
+  "model_context_limit": 65536,
+  "reserved_output_tokens": 4096,
+  "completeness_check": {
+    "status": "pass",
+    "missing_refs": [],
+    "forbidden_refs_serialized_to_writer": false,
+    "exclusions_applied_count": 6
+  }
+}

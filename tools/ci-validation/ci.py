@@ -43,10 +43,10 @@ ROOT = HERE.parents[1]
 WORKFLOW_REL = '.github/workflows/ci.yml'
 HARNESS_TEST = 'test/unit/p33-parity-harness.test.ts'
 INTEGRATION_PREFIX = 'test/integration/'
-EXPECTED_TEST_FILES = 77          # tracked *.test.ts files under test/
-EXPECTED_ALL_FILES = 76           # 77 minus the focused harness the `all` profile excludes
-EXPECTED_ALL_TESTS = 8468
-EXPECTED_INTEGRATION_FILES = 28
+EXPECTED_TEST_FILES = 79          # tracked *.test.ts files under test/
+EXPECTED_ALL_FILES = 78           # 79 minus the focused harness the `all` profile excludes
+EXPECTED_ALL_TESTS = 8559
+EXPECTED_INTEGRATION_FILES = 29
 DB_NAME = 'the_desk_test'
 DB_URL = re.compile(r'postgresql://([^:@/\s]+):([^@/\s]+)@(localhost|127\.0\.0\.1):5432/' + DB_NAME)
 HEX40 = re.compile(r'[0-9a-f]{40}')
@@ -654,8 +654,13 @@ def check_all_files(stdout, tracked, errors, facts):
         else:
             row = rows[0]
             total += row['tests']
+            if name in FIXTURE_CONNECTED_COUNTS and row['tests'] != FIXTURE_CONNECTED_COUNTS[name]:
+                errors.append('connected per-file count drift: ' + name)
             if row['failed'] or row['skipped'] or row['todo'] or row['tests'] < 1:
                 errors.append('%s reported failed/skipped/todo or no tests: %r' % (name, row))
+    for name in FIXTURE_CONNECTED_COUNTS:
+        if name not in selected:
+            errors.append('required connected file absent: ' + name)
     unexpected = sorted(set(seen) - set(selected))
     if unexpected:
         errors.append('result lines for files outside the selection: %s' % unexpected[:5])
@@ -775,6 +780,633 @@ def evaluate_stage(stage, stage_dir, runtime_dir, tracked=None):
 
 
 
+# Fixed fixture105 preparation/retention owner. No application import or general loader.
+FIXTURE_NAME = 'desk-connected-fixture105'
+FIXTURE_BINDINGS = ('ADOPTION.json', 'RELEASE.json', 'SOURCE-INVENTORY.json', 'SOURCE-LEDGER.json', 'TOOLS-INVENTORY.json')
+FIXTURE_EFFECTS = ['construct_fixture_subject', 'evaluate_record_claims_writing', 'evaluate_record_performance', 'record_fixture_audit', 'readback_converge']
+FIXTURE_CONNECTED_COUNTS = {'test/unit/connected-fixture105.test.ts': 58, 'test/integration/connected-fixture105.test.ts': 33}
+FIXTURE_TEMP_NAME = re.compile(r'vitest\.config\.ts\.timestamp-[0-9]{1,16}-[0-9a-f]{0,32}\.mjs')
+FIXTURE_CACHE_HASH = 'da39a3ee5e6b4b0d3255bfef95601890afd80709'
+
+
+def fixture_bytes(value):
+    return (json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(',', ':'), allow_nan=False) + '\n').encode('utf-8')
+
+
+def fixture_hash(value):
+    return hashlib.sha256(value).hexdigest()
+
+
+def fixture_open(path, directory=False):
+    path = Path(path)
+    if not path.is_absolute() or str(path) != os.path.normpath(path) or '..' in path.parts:
+        raise RuntimeError('fixture absolute path required')
+    fd = os.open('/', os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    try:
+        for index, part in enumerate(path.parts[1:]):
+            flags = os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK
+            if directory or index < len(path.parts) - 2:
+                flags |= os.O_DIRECTORY
+            nxt = os.open(part, flags, dir_fd=fd)
+            os.close(fd)
+            fd = nxt
+        return fd
+    except BaseException:
+        os.close(fd)
+        raise
+
+
+def fixture_identity(path, private=True):
+    fd = fixture_open(path, True)
+    try:
+        info = os.fstat(fd)
+        if not stat.S_ISDIR(info.st_mode) or info.st_uid != os.getuid() or (private and stat.S_IMODE(info.st_mode) != 0o700):
+            raise RuntimeError('fixture directory ownership')
+        return {'path': str(path), 'dev': info.st_dev, 'ino': info.st_ino, 'uid': info.st_uid, 'mode': stat.S_IMODE(info.st_mode)}
+    finally:
+        os.close(fd)
+
+
+def fixture_read(path, limit, private=True):
+    fd = fixture_open(path)
+    try:
+        info = os.fstat(fd)
+        if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1 or info.st_uid != os.getuid() or (private and stat.S_IMODE(info.st_mode) != 0o600) or info.st_size > limit:
+            raise RuntimeError('fixture leaf bound/ownership')
+        data = bytearray()
+        while len(data) <= limit:
+            part = os.read(fd, min(65536, limit + 1 - len(data)))
+            if not part:
+                break
+            data.extend(part)
+        after = os.fstat(fd)
+        if len(data) != info.st_size or (info.st_dev, info.st_ino, info.st_mtime_ns, info.st_ctime_ns) != (after.st_dev, after.st_ino, after.st_mtime_ns, after.st_ctime_ns):
+            raise RuntimeError('fixture leaf changed')
+        return bytes(data)
+    finally:
+        os.close(fd)
+
+
+def fixture_write_raw(path, data, limit=SNAPSHOT_LIMIT):
+    if not isinstance(data, bytes) or len(data) > limit:
+        raise RuntimeError('fixture output bound')
+    parent = fixture_open(Path(path).parent, True)
+    try:
+        fd = os.open(Path(path).name, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600, dir_fd=parent)
+        try:
+            with os.fdopen(fd, 'wb', closefd=False) as stream:
+                stream.write(data)
+                stream.flush()
+                os.fsync(fd)
+        finally:
+            os.close(fd)
+        os.fsync(parent)
+    finally:
+        os.close(parent)
+    return {'bytes': len(data), 'sha256': fixture_hash(data)}
+
+
+def fixture_write(path, value):
+    return fixture_write_raw(path, fixture_bytes(value))
+
+
+def fixture_graph(base, kind):
+    base = Path(base)
+    result = {}
+    def visit(path, rel):
+        if len(result) > 20000:
+            raise RuntimeError('fixture graph bound')
+        info = path.lstat()
+        mode = stat.S_IMODE(info.st_mode)
+        if stat.S_ISLNK(info.st_mode):
+            target = os.readlink(path)
+            resolved = os.path.normpath(path.parent / target)
+            if kind != 'tools' or os.path.isabs(target) or not resolved.startswith(str(base) + '/'):
+                raise RuntimeError('fixture graph link')
+            result[rel] = {'type': 'symlink', 'mode': mode, 'target': target}
+        elif stat.S_ISDIR(info.st_mode):
+            fd = fixture_open(path, True)
+            try:
+                actual = os.fstat(fd)
+                if (actual.st_dev, actual.st_ino) != (info.st_dev, info.st_ino):
+                    raise RuntimeError('fixture graph directory changed')
+                result[rel] = {'type': 'directory', 'mode': mode}
+                for name in sorted(os.listdir(fd)):
+                    if not rel and name in (('.git', 'node_modules', 'dist') if kind == 'source' else ('.vite-temp',)):
+                        continue
+                    visit(path / name, rel + '/' + name if rel else name)
+            finally:
+                os.close(fd)
+        elif stat.S_ISREG(info.st_mode):
+            data = fixture_read(path, 64 * 1024 * 1024, False)
+            result[rel] = {'type': 'file', 'mode': mode, 'bytes': len(data), 'sha256': fixture_hash(data)}
+        else:
+            raise RuntimeError('fixture graph special file')
+    visit(base, '')
+    return result
+
+
+def fixture_temp(checkout, settled=False):
+    path = Path(checkout) / 'node_modules/.vite-temp'
+    if not os.path.lexists(path):
+        return {'absent': True}
+    identity = fixture_identity(path)
+    names = sorted(os.listdir(path))
+    if len(names) > (0 if settled else 1):
+        raise RuntimeError('fixture loader remains unsettled')
+    leaves = []
+    for name in names:
+        if not FIXTURE_TEMP_NAME.fullmatch(name):
+            raise RuntimeError('fixture loader name')
+        data = fixture_read(path / name, 262144, False)
+        if path.joinpath(name).lstat().st_mode & 0o022:
+            raise RuntimeError('fixture loader mode')
+        leaves.append({'name': name, 'bytes': len(data), 'sha256': fixture_hash(data), 'hex': data.hex()})
+    return {'identity': identity, 'leaves': leaves}
+
+
+def fixture_prepare(base, checkout):
+    """Only cmd_init invokes this after its existing identity/snapshot preconditions."""
+    base, checkout = Path(base), Path(checkout)
+    temp = base / 'tmp'
+    root = temp / FIXTURE_NAME
+    fixture_identity(temp)
+    if os.path.lexists(root) or os.path.lexists(base / 'evidence/fixture105-binding.json'):
+        raise RuntimeError('fixture root already exists')
+    if os.path.lexists(checkout / 'node_modules/.vite-temp'):
+        raise RuntimeError('fixture loader namespace already exists')
+    source = fixture_graph(checkout, 'source')
+    tools = fixture_graph(checkout / 'node_modules', 'tools')
+    # Complete graph plus finite owner ledger; never an invented future source hash.
+    root.mkdir(mode=0o700)
+    for name in ('bindings', 'expectations', 'receipts'):
+        (root / name).mkdir(mode=0o700)
+    fixture_write(root / 'bindings/SOURCE-INVENTORY.json', source)
+    fixture_write(root / 'bindings/TOOLS-INVENTORY.json', tools)
+    rows = []
+    for name in FIXTURE_OWNER_PATHS:
+        row = source.get(name)
+        if not row or row.get('type') != 'file':
+            raise RuntimeError('fixture owner source missing')
+        rows.append({'path': name, 'bytes': row['bytes'], 'sha256': row['sha256']})
+    ledger = {'schema': 'connected-fixture105-source-ledger/1', 'rows': rows}
+    ledger_pin = fixture_write(root / 'bindings/SOURCE-LEDGER.json', ledger)
+    schema = json.loads(fixture_read(checkout / 'fixtures/connected-fixture105/SCHEMA-construction-observation.json', 262144, False))
+    subject = {key: value['const'] for key, value in schema['properties']['subject']['properties'].items()}
+    resources = {name: source['fixtures/connected-fixture105/' + name]['sha256'] for name in FIXTURE_RESOURCE_NAMES}
+    # Host's resource identity uses canonical JSON without an LF; these strings are ASCII.
+    manifest_hash = fixture_hash(json.dumps(resources, sort_keys=True, separators=(',', ':')).encode())
+    release = {'release_id': 'connected-fixture105-test-release/1', 'profile': 'connected-evaluation-fixture105/1', 'purpose': 'evaluation', 'environment': 'test',
+               'contract_sha256': source['docs/connected-fixture105.md']['sha256'], 'fixture_manifest_sha256': manifest_hash,
+               'owner_source_ledger_sha256': ledger_pin['sha256'], 'subject_binding': subject, 'allowed_effects': FIXTURE_EFFECTS}
+    release_pin = fixture_write(root / 'bindings/RELEASE.json', release)
+    fixture_write(root / 'bindings/ADOPTION.json', {'release_id': release['release_id'], 'release_bytes': release_pin['bytes'], 'release_sha256': release_pin['sha256'], 'ledger_bytes': ledger_pin['bytes'], 'ledger_sha256': ledger_pin['sha256']})
+    marker = {'schema': 'fixture105-execution-root/1', 'purpose': 'test_fixture105', 'checkout': fixture_identity(checkout, False),
+              'tmp': fixture_identity(temp), 'root': fixture_identity(root), 'source_ledger_sha256': ledger_pin['sha256'], 'release_sha256': release_pin['sha256'],
+              'source_inventory_sha256': fixture_hash(fixture_bytes(source)), 'tools_inventory_sha256': fixture_hash(fixture_bytes(tools))}
+    marker_pin = fixture_write(root / 'ROOT.json', marker)
+    binding = {'root': str(root), 'root_sha256': marker_pin['sha256']}
+    fixture_write(base / 'evidence/fixture105-binding.json', binding)
+    return binding
+
+
+def fixture_validate(base, checkout, settled=False):
+    base, checkout = Path(base), Path(checkout)
+    binding = json.loads(fixture_read(base / 'evidence/fixture105-binding.json', 8192))
+    root = base / 'tmp' / FIXTURE_NAME
+    if set(binding) != {'root', 'root_sha256'} or binding['root'] != str(root):
+        raise RuntimeError('fixture independent binding')
+    marker_bytes = fixture_read(root / 'ROOT.json', 262144)
+    if fixture_hash(marker_bytes) != binding['root_sha256']:
+        raise RuntimeError('fixture marker hash')
+    marker = json.loads(marker_bytes)
+    if set(marker) != {'schema', 'purpose', 'checkout', 'tmp', 'root', 'source_ledger_sha256', 'release_sha256', 'source_inventory_sha256', 'tools_inventory_sha256'} or marker['schema'] != 'fixture105-execution-root/1' or marker['purpose'] != 'test_fixture105':
+        raise RuntimeError('fixture marker shape')
+    for key, path, private in (('root', root, True), ('tmp', base / 'tmp', True), ('checkout', checkout, False)):
+        if marker[key] != fixture_identity(path, private):
+            raise RuntimeError('fixture root identity')
+    for directory in ('bindings', 'expectations', 'receipts'):
+        fixture_identity(root / directory)
+    if sorted(os.listdir(root / 'bindings')) != list(FIXTURE_BINDINGS):
+        raise RuntimeError('fixture binding population')
+    for name, key in (('SOURCE-LEDGER.json', 'source_ledger_sha256'), ('RELEASE.json', 'release_sha256'), ('SOURCE-INVENTORY.json', 'source_inventory_sha256'), ('TOOLS-INVENTORY.json', 'tools_inventory_sha256')):
+        data = fixture_read(root / 'bindings' / name, SNAPSHOT_LIMIT if 'INVENTORY' in name else 262144)
+        if fixture_hash(data) != marker[key]:
+            raise RuntimeError('fixture binding changed')
+        if 'INVENTORY' in name:
+            kind = 'source' if name.startswith('SOURCE') else 'tools'
+            if json.loads(data) != fixture_graph(checkout if kind == 'source' else checkout / 'node_modules', kind):
+                raise RuntimeError('fixture immutable graph changed')
+    release_bytes = fixture_read(root / 'bindings/RELEASE.json', 262144)
+    ledger_bytes = fixture_read(root / 'bindings/SOURCE-LEDGER.json', 262144)
+    adoption = json.loads(fixture_read(root / 'bindings/ADOPTION.json', 262144))
+    expected_adoption = {'release_id': 'connected-fixture105-test-release/1', 'release_bytes': len(release_bytes), 'release_sha256': fixture_hash(release_bytes), 'ledger_bytes': len(ledger_bytes), 'ledger_sha256': fixture_hash(ledger_bytes)}
+    release = json.loads(release_bytes)
+    if adoption != expected_adoption or release.get('release_id') != adoption['release_id'] or release.get('owner_source_ledger_sha256') != adoption['ledger_sha256']:
+        raise RuntimeError('fixture adoption relation')
+    temp = fixture_temp(checkout, settled)
+    if not temp.get('absent'):
+        created = json.loads(fixture_read(base / 'evidence/fixture105-loader-created.json', 262144))
+        if temp['identity'] != created.get('identity'):
+            raise RuntimeError('fixture loader identity changed')
+    return binding, temp
+
+
+def cmd_fixture_binding(stage):
+    base = ci_dir()
+    binding, temp = fixture_validate(base, ROOT, True)
+    loader = ROOT / 'node_modules/.vite-temp'
+    if stage in ('focused', 'all') and temp.get('absent'):
+        loader.mkdir(mode=0o700)
+        temp = fixture_temp(ROOT, True)
+        fixture_write(base / 'evidence/fixture105-loader-created.json', temp)
+    if stage == 'all' and temp.get('absent'):
+        raise RuntimeError('fixture loader ownership missing')
+    fixture_write(base / ('evidence/fixture105-before-' + stage + '.json'), {'binding': binding, 'temp': temp})
+    print(json.dumps(binding, separators=(',', ':')))
+    return 0
+
+
+FIXTURE_CASE_EXPECTATIONS = [{'case_id': 'records actual18+7 results, one direction and a labelled audit with retained semantic gaps', 'expected': ['completed']}, {'case_id': 'keeps actual fixture output outside genuine admission and rejects render audit promotion', 'expected': ['completed']}, {'case_id': 'converges by exact readback without producing a second direction', 'expected': ['completed']}, {'case_id': 'refuses a preseeded source population without constructing an observation', 'expected': ['expected_refusal']}, {'case_id': 'rolls back the package when the later observation insert fails', 'expected': ['expected_refusal']}, {'case_id': 'refuses context change between settled acquisition and consumer', 'expected': ['expected_refusal']}, {'case_id': 'rolls back every Performance row after a late gate insert failure', 'expected': ['expected_refusal']}, {'case_id': 'retains durable direction if the separate audit transaction fails', 'expected': ['expected_refusal']}, {'case_id': 'refuses an extra governed intent during re-entry', 'expected': ['completed']}, {'case_id': 'preserves package preflight refusal without a connection checkout', 'expected': []}, {'case_id': 'preserves the old package creation and governed-hash reuse outcomes', 'expected': []}, {'case_id': 'preserves orphan completion as distinguishable from genuinely fresh creation', 'expected': []}, {'case_id': 'refuses unregistered structural objects including a caller transaction at the package borrower', 'expected': []}, {'case_id': 'associates a genuine package capability only with its owner transaction', 'expected': ['expected_refusal']}, {'case_id': 'refuses an appended event between settled acquisition and consumption', 'expected': ['expected_refusal']}, {'case_id': 'refuses production context before a database checkout', 'expected': ['pre_target_failure']}, {'case_id': 'rejects a second live borrow, a clone, and a stale genuine capability', 'expected': ['expected_refusal']}, {'case_id': 'rejects live capability consumption after originating context changes', 'expected': ['expected_refusal', 'expected_refusal', 'expected_refusal']}, {'case_id': 'holds a lost direction COMMIT acknowledgement and reconciles without replay', 'expected': ['expected_later_phase_unknown']}, {'case_id': 'rolls back package creation when a foreign observation identity wins late', 'expected': ['expected_refusal']}, {'case_id': 'refuses a stale extra gate fingerprint without changing durable rows', 'expected': ['completed']}, {'case_id': 'holds unknown construction commit without inventing its missing settlement receipt', 'expected': ['expected_construction_unknown', 'expected_construction_unknown', 'expected_construction_unknown', 'expected_later_phase_unknown']}, {'case_id': 'retains event-first reader identity across distinct query and rollback errors', 'expected': ['pre_target_failure']}, {'case_id': 'retains query-first reader identity across distinct later client and rollback errors', 'expected': ['pre_target_failure']}, {'case_id': 'retains reader listener when release throws before driver handoff without retry', 'expected': ['pre_target_failure']}, {'case_id': 'closes continuation when the acquisition-cut await throws before consumption', 'expected': ['expected_refusal', 'pre_target_failure']}, {'case_id': 'tracks and cleans a database allocation that fails before create returns', 'expected': []}, {'case_id': 'tracks a setup pool before roles SQL or migration can fail', 'expected': []}, {'case_id': 'tracks bootstrap role allocation before bootstrap returns', 'expected': []}, {'case_id': 'retains full actual failed Claims coverage and findings in a private failure receipt', 'expected': ['expected_refusal']}, {'case_id': 'memoizes a first setup pool-end failure without another end call', 'expected': []}, {'case_id': 'preserves the old package four-round reconciliation bound under named-conflict delivery', 'expected': []}, {'case_id': 'preserves an unrelated package failure object and releases its transaction', 'expected': []}]
+
+
+def fixture_journal(root, suite):
+    """Cross-check independent initiated targets, immutable intents, terminals and actual receipts."""
+    if set(suite) != {'schema', 'targets', 'pre_target_failures', 'tool_observations', 'suite_complete', 'cases'} or suite['suite_complete'] is not True:
+        raise RuntimeError('fixture suite incomplete')
+    release_bytes = fixture_read(root / 'bindings/RELEASE.json', 262144)
+    release = json.loads(release_bytes)
+    subject_hash = fixture_hash(json.dumps(release['subject_binding'], sort_keys=True, separators=(',', ':')).encode())
+    targets = suite.get('targets')
+    if suite.get('schema') != 'fixture105-suite/1' or not isinstance(targets, list) or len(targets) > 128 or not isinstance(suite.get('pre_target_failures'), list):
+        raise RuntimeError('fixture suite shape')
+    cases = suite.get('cases')
+    if not isinstance(cases, list) or len(cases) != len(FIXTURE_CASE_EXPECTATIONS):
+        raise RuntimeError('fixture harness case population')
+    expected_by_target, pretargets = {}, set()
+    for case, fixed in zip(cases, FIXTURE_CASE_EXPECTATIONS):
+        if set(case) != {'case_id', 'expected', 'completed', 'calls'} or case['case_id'] != fixed['case_id'] or case['expected'] != fixed['expected'] or case['completed'] is not True or not isinstance(case['calls'], list) or len(case['calls']) != len(fixed['expected']):
+            raise RuntimeError('fixture harness case incomplete or expectation changed')
+        for ordinal, (call, expected) in enumerate(zip(case['calls'], fixed['expected'])):
+            if set(call) != {'ordinal', 'expected', 'completed', 'returned', 'target_hash', 'pre_target_index'} or call['ordinal'] != ordinal or call['expected'] != expected or call['completed'] is not True or call['returned'] is not (expected == 'completed'):
+                raise RuntimeError('fixture harness invocation incomplete')
+            if expected == 'pre_target_failure':
+                index = call['pre_target_index']
+                if call['target_hash'] is not None or type(index) is not int or index < 0 or index >= len(suite['pre_target_failures']) or index in pretargets:
+                    raise RuntimeError('fixture harness pretarget correspondence')
+                pretargets.add(index)
+            else:
+                key = call['target_hash']
+                if call['pre_target_index'] is not None or not isinstance(key, str) or not SHA256.fullmatch(key) or key in expected_by_target:
+                    raise RuntimeError('fixture harness target correspondence')
+                expected_by_target[key] = expected
+    if pretargets != set(range(len(suite['pre_target_failures']))) or set(expected_by_target) != {row.get('target_hash') for row in targets}:
+        raise RuntimeError('fixture unaccounted host invocation')
+    expected_intents, expected_receipts = set(), set()
+    for target in targets:
+        if set(target) != {'target_hash', 'construction_state', 'later_phase', 'later_outcome'} or not SHA256.fullmatch(target.get('target_hash', '')):
+            raise RuntimeError('fixture target shape')
+        key = target['target_hash']
+        expected = expected_by_target[key]
+        if key + '.intent.json' in expected_intents:
+            raise RuntimeError('fixture duplicate target')
+        expected_intents.add(key + '.intent.json')
+        intent_bytes = fixture_read(root / 'expectations' / (key + '.intent.json'), 16384)
+        intent = json.loads(intent_bytes)
+        if set(intent) != {'schema', 'target_hash', 'release_sha256', 'subject_sha256', 'expected_names', 'state'} or intent['schema'] != 'fixture105-receipt-intent/1' or intent['target_hash'] != key or intent['expected_names'] != ['CONSTRUCTION.json'] or intent['state'] != 'intent':
+            raise RuntimeError('fixture intent shape')
+        if intent['release_sha256'] != fixture_hash(release_bytes) or intent['subject_sha256'] != subject_hash:
+            raise RuntimeError('fixture intent subject/release')
+        if target['later_phase'] not in ('construction', 'claims', 'direction', 'audit', 'readback') or target['later_outcome'] not in ('completed', 'refused', 'unknown') or expected not in ('completed', 'expected_refusal', 'expected_construction_unknown', 'expected_later_phase_unknown'):
+            raise RuntimeError('fixture target outcome')
+        if (expected == 'completed') != (target['later_outcome'] == 'completed') or (expected == 'expected_refusal') != (target['later_outcome'] == 'refused'):
+            raise RuntimeError('fixture target outcome correspondence')
+        terminal_path = root / 'expectations' / (key + '.terminal.json')
+        if target['construction_state'] == 'construction_unknown':
+            if expected != 'expected_construction_unknown' or os.path.lexists(terminal_path) or os.path.lexists(root / 'receipts' / key):
+                raise RuntimeError('fixture unknown construction mismatched')
+            continue
+        expected_intents.add(key + '.terminal.json')
+        terminal = json.loads(fixture_read(terminal_path, 16384))
+        keys = {'schema', 'target_hash', 'intent_sha256', 'state', 'receipts'}
+        if target['construction_state'] == 'refused_before_receipt':
+            keys.add('code')
+        if set(terminal) != keys or terminal['schema'] != 'fixture105-receipt-terminal/1' or terminal['target_hash'] != key or terminal['intent_sha256'] != fixture_hash(intent_bytes) or terminal['state'] != target['construction_state']:
+            raise RuntimeError('fixture terminal mismatch')
+        if target['construction_state'] == 'refused_before_receipt':
+            if terminal['receipts'] != [] or expected != 'expected_refusal' or not re.fullmatch(r'[A-Za-z0-9_.:-]{1,128}', terminal.get('code', '')):
+                raise RuntimeError('fixture refusal mismatch')
+            continue
+        if target['construction_state'] != 'construction_recorded':
+            raise RuntimeError('fixture unexpected incomplete target')
+        expected_receipts.add(key)
+        rows = terminal['receipts']
+        if not isinstance(rows, list) or len(rows) != 1 or rows[0].get('name') != 'CONSTRUCTION.json':
+            raise RuntimeError('fixture construction receipt required')
+        failure = root / 'expectations' / (key + '.claims-failure.json')
+        if os.path.lexists(failure):
+            expected_intents.add(failure.name)
+            failure_value = json.loads(fixture_read(failure, 16384))
+            if set(failure_value) != {'schema', 'target_hash', 'intent_sha256', 'state', 'receipts'} or failure_value['schema'] != terminal['schema'] or failure_value['target_hash'] != key or failure_value['intent_sha256'] != terminal['intent_sha256'] or failure_value['state'] != 'construction_recorded' or len(failure_value['receipts']) != 1 or failure_value['receipts'][0].get('name') != 'CLAIMS-FAILURE.json':
+                raise RuntimeError('fixture failure terminal')
+            rows += failure_value['receipts']
+        directory = root / 'receipts' / key
+        fixture_identity(directory)
+        if sorted(os.listdir(directory)) != sorted(row['name'] for row in rows):
+            raise RuntimeError('fixture receipt population')
+        for row in rows:
+            if set(row) != {'name', 'bytes', 'sha256'}:
+                raise RuntimeError('fixture receipt identity shape')
+            data = fixture_read(directory / row['name'], 16384 if row['name'] == 'CONSTRUCTION.json' else 262144)
+            if len(data) != row['bytes'] or fixture_hash(data) != row['sha256']:
+                raise RuntimeError('fixture receipt changed')
+    if set(os.listdir(root / 'expectations')) != expected_intents or set(os.listdir(root / 'receipts')) != expected_receipts:
+        raise RuntimeError('fixture missing or extra journal target')
+
+
+def fixture_cache_rows(data, known):
+    value = json.loads(data)
+    if set(value) != {'version', 'results'} or value['version'] != '4.1.12' or not isinstance(value['results'], list):
+        raise RuntimeError('fixture cache shape')
+    seen = set()
+    for row in value['results']:
+        if not isinstance(row, list) or len(row) != 2 or not isinstance(row[0], str) or not row[0].startswith(':') or row[0] in seen or row[0].split(':', 1)[-1] not in known or not isinstance(row[1], dict) or set(row[1]) != {'duration', 'failed'} or type(row[1]['failed']) is not bool or type(row[1]['duration']) not in (int, float) or not 0 <= row[1]['duration'] < float('inf'):
+            raise RuntimeError('fixture cache row')
+        seen.add(row[0])
+    return value
+
+
+def fixture_cache_snapshot(root, known, nonces, required):
+    cache = root / 'tool-cache'
+    expected = {'vitest/' + FIXTURE_CACHE_HASH + '/results.json': known}
+    if len(nonces) > 8 or len(set(nonces)) != len(nonces) or any(not NONCE.fullmatch(n) for n in nonces):
+        raise RuntimeError('fixture cache nonce population')
+    expected.update({'p33/' + nonce + '/vitest/' + FIXTURE_CACHE_HASH + '/results.json': {'test/support/p33-parity-child.case.ts'} for nonce in nonces})
+    found = {}
+    if os.path.lexists(cache):
+        fixture_identity(cache, False)
+        for current, dirs, files in os.walk(cache, followlinks=False):
+            for name in dirs + files:
+                path = Path(current) / name
+                rel = path.relative_to(cache).as_posix()
+                info = path.lstat()
+                if info.st_uid != os.getuid() or info.st_mode & 0o022 or stat.S_ISLNK(info.st_mode):
+                    raise RuntimeError('fixture cache ownership')
+                if stat.S_ISDIR(info.st_mode):
+                    if not any(key.startswith(rel + '/') for key in expected):
+                        raise RuntimeError('fixture extra cache directory')
+                elif stat.S_ISREG(info.st_mode) and rel in expected:
+                    data = fixture_read(path, SNAPSHOT_LIMIT, False)
+                    fixture_cache_rows(data, expected[rel])
+                    found[rel] = {'bytes': len(data), 'sha256': fixture_hash(data)}
+                else:
+                    raise RuntimeError('fixture extra cache leaf')
+    if required and set(found) != set(expected):
+        raise RuntimeError('fixture missing expected cache')
+    return found
+
+
+def fixture_mkdirs(base, relative):
+    current = Path(base)
+    for name in Path(relative).parts:
+        if name in ('', '.', '..') or '/' in name:
+            raise RuntimeError('fixture snapshot path')
+        current = current / name
+        if not os.path.lexists(current):
+            current.mkdir(mode=0o700)
+        fixture_identity(current)
+
+
+def fixture_capture_raw(base, label, checkout):
+    """Copy only bounded, named tooling bytes before interpreting their contents.
+
+    Unsafe paths are recorded, never followed. This does not certify settlement or
+    cache semantics. An interrupted capture remains exclusive partial evidence.
+    """
+    root = base / 'tmp' / FIXTURE_NAME
+    snapshot = base / ('evidence/fixture105-cache-' + label)
+    snapshot.mkdir(mode=0o700)
+    pins, errors = {}, []
+    def capture(path, rel, limit):
+        try:
+            if path.lstat().st_mode & 0o022:
+                raise RuntimeError('fixture unsafe generated leaf mode')
+            data = fixture_read(path, limit, False)
+            fixture_mkdirs(snapshot, Path(rel).parent)
+            pins[rel] = fixture_write_raw(snapshot / rel, data, limit)
+        except Exception as error:
+            errors.append(rel + ': ' + type(error).__name__)
+    # Enumeration is finite even for malformed caches; no arbitrary tree walk.
+    cache = root / 'tool-cache'
+    try:
+        if os.path.lexists(cache):
+            fixture_identity(cache, False)
+            if set(os.listdir(cache)) - {'vitest', 'p33'}:
+                errors.append('cache: extra root entry')
+            prefixes = ['']
+            nested = cache / 'p33'
+            if os.path.lexists(nested):
+                fixture_identity(nested, False)
+                nonces = sorted(os.listdir(nested))
+                if len(nonces) > 8:
+                    errors.append('cache: nonce bound')
+                for nonce in nonces[:8]:
+                    if NONCE.fullmatch(nonce):
+                        fixture_identity(nested / nonce, False)
+                        prefixes.append('p33/' + nonce + '/')
+                    else:
+                        errors.append('cache: invalid nonce name')
+            for prefix in prefixes:
+                rel = prefix + 'vitest/' + FIXTURE_CACHE_HASH + '/results.json'
+                if os.path.lexists(cache / rel):
+                    capture(cache / rel, rel, SNAPSHOT_LIMIT)
+    except Exception as error:
+        errors.append('cache enumeration: ' + type(error).__name__)
+    loader = checkout / 'node_modules/.vite-temp'
+    try:
+        if os.path.lexists(loader):
+            fixture_identity(loader)
+            names = sorted(os.listdir(loader))
+            if len(names) > 1:
+                errors.append('loader: population bound')
+            for name in names[:1]:
+                if re.fullmatch(r'vitest\.config\.ts\.timestamp-[0-9]{1,16}-[0-9a-f]{0,32}\.mjs', name):
+                    capture(loader / name, 'loader/' + name, 262144)
+                else:
+                    errors.append('loader: invalid name')
+    except Exception as error:
+        errors.append('loader enumeration: ' + type(error).__name__)
+    return {'snapshot': pins, 'errors': errors}
+
+
+def fixture_capture_stage(base, stage, facts, required):
+    record = {'stage': stage, **fixture_capture_raw(base, stage, ROOT)}
+    try:
+        binding, temp = fixture_validate(base, ROOT, True)
+        root = Path(binding['root'])
+        nonces = [row['nonce'] for row in facts.get('cases', []) if row.get('mode') == 'p33']
+        _, known = expected_all_files(tracked_files())
+        cache = fixture_cache_snapshot(root, set(known) | {HARNESS_TEST}, nonces, required and stage != 'prerequisite')
+        record.update(binding=binding, temp=temp, cache=cache)
+        if record['snapshot'] != cache:
+            raise RuntimeError('fixture captured cache or loader population changed')
+        if stage == 'all':
+            suite_bytes = fixture_read(base / 'evidence/fixture105-suite.json', SNAPSHOT_LIMIT)
+            fixture_journal(root, json.loads(suite_bytes))
+            record['suite_sha256'] = fixture_hash(suite_bytes)
+    except Exception as error:
+        record['errors'].append('fixture validation: ' + type(error).__name__)
+    record['complete'] = not record['errors']
+    fixture_write(base / ('evidence/fixture105-after-' + stage + '.json'), record)
+    return record
+
+
+def fixture_snapshot_population(snapshot, expected=None):
+    fixture_identity(snapshot)
+    leaf_pattern = re.compile(r'(?:(?:p33/[0-9a-f]{48}/)?vitest/' + FIXTURE_CACHE_HASH + r'/results\.json|loader/vitest\.config\.ts\.timestamp-[0-9]{1,16}-[0-9a-f]{0,32}\.mjs)')
+    directory_pattern = re.compile(r'(?:vitest(?:/' + FIXTURE_CACHE_HASH + r')?|p33(?:/[0-9a-f]{48}(?:/vitest(?:/' + FIXTURE_CACHE_HASH + r')?)?)?|loader)')
+    def ancestors(names):
+        return {str(parent) for name in names for parent in Path(name).parents if str(parent) != '.'}
+    allowed = None
+    if expected is not None:
+        if not isinstance(expected, dict) or len(expected) > 10 or any(not isinstance(name, str) or not leaf_pattern.fullmatch(name) for name in expected):
+            raise RuntimeError('fixture pinned snapshot shape')
+        allowed = ancestors(expected)
+    found, directories = {}, set()
+    pending = [(snapshot, '')]
+    while pending:
+        current, relative = pending.pop()
+        fixture_identity(current)
+        # Do not enumerate an unbounded directory before enforcing the bound.
+        entries = []
+        with os.scandir(current) as iterator:
+            for entry in iterator:
+                if len(entries) >= 10:
+                    raise RuntimeError('fixture snapshot entry bound')
+                entries.append(entry.name)
+        for name in sorted(entries):
+            path = current / name
+            rel = relative + '/' + name if relative else name
+            info = path.lstat()
+            if stat.S_ISDIR(info.st_mode):
+                if len(directories) >= 32 or not directory_pattern.fullmatch(rel) or (allowed is not None and rel not in allowed):
+                    raise RuntimeError('fixture snapshot directory population')
+                fixture_identity(path)
+                directories.add(rel)
+                pending.append((path, rel))
+            else:
+                if not leaf_pattern.fullmatch(rel) or len(found) >= 10:
+                    raise RuntimeError('fixture snapshot name/population')
+                data = fixture_read(path, 262144 if rel.startswith('loader/') else SNAPSHOT_LIMIT)
+                found[rel] = {'bytes': len(data), 'sha256': fixture_hash(data)}
+    if directories != ancestors(found) or (allowed is not None and directories != allowed):
+        raise RuntimeError('fixture snapshot empty/missing directory')
+    return found
+
+
+def fixture_collect(base, keep, scope, successful):
+    """Bounded safe partial retention; missing/extra/changed evidence never becomes a pass."""
+    root = base / 'tmp' / FIXTURE_NAME
+    total = 0
+    pins = []
+    def retain(src, rel, limit, required=True):
+        nonlocal total
+        try:
+            data = fixture_read(src, limit)
+            total += len(data)
+            if total > 64 * 1024 * 1024:
+                raise RuntimeError('fixture total retention bound')
+            raw_pin = {'bytes': len(data), 'sha256': fixture_hash(data)}
+            if not keep.copy(src, Path(rel), limit, required=required):
+                raise RuntimeError('fixture retention copy failed')
+            after = fixture_read(src, limit)
+            if after != data:
+                raise RuntimeError('fixture changed during copy')
+            retained = read_bounded(keep.upload / rel, limit)
+            pins.append({'path': rel, 'original': raw_pin, 'retained': {'bytes': len(retained), 'sha256': fixture_hash(retained)}, 'redacted': retained != data})
+        except FileNotFoundError:
+            if required:
+                keep.problems['missing'].append(rel)
+        except Exception as error:
+            keep.problems['errors'].append(rel + ': ' + type(error).__name__)
+    retain(root / 'ROOT.json', 'fixture105/ROOT.json', 262144)
+    for name in FIXTURE_BINDINGS:
+        retain(root / 'bindings' / name, 'fixture105/bindings/' + name, SNAPSHOT_LIMIT if 'INVENTORY' in name else 262144)
+    retain(base / 'evidence/fixture105-binding.json', 'fixture105/runner-binding.json', 8192)
+    if scope == 'full':
+        retain(base / 'evidence/fixture105-suite.json', 'fixture105/suite.json', SNAPSHOT_LIMIT)
+    try:
+        allowed = {'ROOT.json', 'bindings', 'expectations', 'receipts', 'tool-cache', 'RETENTION.json'}
+        if set(os.listdir(root)) - allowed:
+            raise RuntimeError('fixture extra root entry')
+        expectations = sorted(os.listdir(root / 'expectations'))
+        receipts = sorted(os.listdir(root / 'receipts'))
+        if len(expectations) > 384 or len(receipts) > 128:
+            raise RuntimeError('fixture target bound')
+        for name in expectations:
+            if not re.fullmatch(r'[0-9a-f]{64}\.(intent|terminal|claims-failure)\.json', name):
+                raise RuntimeError('fixture expectation name')
+            retain(root / 'expectations' / name, 'fixture105/expectations/' + name, 16384)
+        for target in receipts:
+            if not SHA256.fullmatch(target):
+                raise RuntimeError('fixture receipt target name')
+            directory = root / 'receipts' / target
+            fixture_identity(directory)
+            for name in sorted(os.listdir(directory)):
+                if name not in ('CONSTRUCTION.json', 'CLAIMS-FAILURE.json'):
+                    raise RuntimeError('fixture receipt name')
+                retain(directory / name, 'fixture105/receipts/' + target + '/' + name, 16384 if name == 'CONSTRUCTION.json' else 262144)
+        if scope == 'full' and 'all' in successful:
+            fixture_journal(root, json.loads(fixture_read(base / 'evidence/fixture105-suite.json', SNAPSHOT_LIMIT)))
+    except Exception as error:
+        keep.problems['errors'].append('fixture journal collection: ' + type(error).__name__)
+    for stage in SCOPES[scope]:
+        try:
+            after = base / ('evidence/fixture105-after-' + stage + '.json')
+            snapshot = base / ('evidence/fixture105-cache-' + stage)
+            # A skipped check cannot erase safe extant bytes from the failed stage.
+            attempted = (base / 'evidence' / stage).exists() or after.exists()
+            if stage not in successful and attempted:
+                salvage = fixture_capture_raw(base, 'salvage-' + scope + '-' + stage, ROOT)
+                fixture_write(base / ('evidence/fixture105-salvage-' + scope + '-' + stage + '.json'), salvage)
+                retain(base / ('evidence/fixture105-salvage-' + scope + '-' + stage + '.json'), 'tooling-fixture105/salvage-' + scope + '-' + stage + '.json', SNAPSHOT_LIMIT)
+                for rel in salvage['snapshot']:
+                    retain(base / ('evidence/fixture105-cache-salvage-' + scope + '-' + stage) / rel, 'tooling-fixture105/salvage-' + scope + '-' + stage + '/' + rel, SNAPSHOT_LIMIT)
+                if salvage['errors']:
+                    keep.problems['errors'].append('fixture partial salvage: ' + stage)
+            for prefix in ('before', 'after'):
+                retain(base / ('evidence/fixture105-' + prefix + '-' + stage + '.json'), 'tooling-fixture105/' + prefix + '-' + stage + '.json', SNAPSHOT_LIMIT, stage in successful)
+            try:
+                if stage in successful:
+                    record = json.loads(fixture_read(after, SNAPSHOT_LIMIT))
+                    pinned = successful[stage].get('facts', {}).get('fixture105')
+                    if record != pinned or record.get('complete') is not True or record.get('errors') != []:
+                        raise RuntimeError('fixture successful stage record changed')
+                    actual = fixture_snapshot_population(snapshot, record.get('snapshot'))
+                    if actual != record.get('snapshot') or actual != record.get('cache'):
+                        raise RuntimeError('fixture successful snapshot population/hash changed')
+                elif os.path.lexists(snapshot):
+                    actual = fixture_snapshot_population(snapshot)
+                else:
+                    actual = {}
+                for rel in actual:
+                    retain(snapshot / rel, 'tooling-fixture105/' + stage + '/' + rel, SNAPSHOT_LIMIT)
+            except Exception as error:
+                keep.problems['errors'].append('fixture stage ' + stage + ': ' + type(error).__name__)
+
+        except Exception as error:
+            keep.problems['errors'].append('fixture collection ' + stage + ': ' + type(error).__name__)
+    manifest = {'schema': 'fixture105-retention/1', 'scope': scope, 'files': pins, 'total_bytes': total, 'problems': keep.problems}
+    fixture_write(keep.upload / 'fixture105-retention.json', manifest)
+    if scope == 'full':
+        try:
+            fixture_write(root / 'RETENTION.json', manifest)
+        except Exception as error:
+            keep.problems['errors'].append('fixture terminal retention: ' + type(error).__name__)
+
+FIXTURE_OWNER_PATHS = ('docs/connected-fixture105.md', 'eslint.config.js', 'fixtures/connected-fixture105/AUTHORED-NORMALIZED-ROWS.json', 'fixtures/connected-fixture105/BRIEF.json', 'fixtures/connected-fixture105/CANONICAL-PREIMAGES.json', 'fixtures/connected-fixture105/CEILING-EXPECTATIONS.json', 'fixtures/connected-fixture105/CLAIM-ROWS.json', 'fixtures/connected-fixture105/CONFIG.json', 'fixtures/connected-fixture105/CONNECTED-REFUSAL-WITNESSES.json', 'fixtures/connected-fixture105/CONTEXT-EXPECTED.json', 'fixtures/connected-fixture105/CONTEXT-RESOLUTION.json', 'fixtures/connected-fixture105/DERIVATION-EXPECTED.json', 'fixtures/connected-fixture105/DIRECTION-EXPECTED.json', 'fixtures/connected-fixture105/EVENT-ROWS.json', 'fixtures/connected-fixture105/EVIDENCE-ROWS.json', 'fixtures/connected-fixture105/FIVE-MATCH-INPUTS.json', 'fixtures/connected-fixture105/IDENTITIES.json', 'fixtures/connected-fixture105/INNER-DIGEST-REFUSAL-WITNESSES.json', 'fixtures/connected-fixture105/INNER-DIGEST-RULES.md', 'fixtures/connected-fixture105/PACKAGE.json', 'fixtures/connected-fixture105/PURE-REFUSAL-WITNESSES.json', 'fixtures/connected-fixture105/RESULT-DIGEST-MAP.json', 'fixtures/connected-fixture105/RIGHTS.json', 'fixtures/connected-fixture105/ROSTER.json', 'fixtures/connected-fixture105/ROW-AND-BYTE-BOUNDS.json', 'fixtures/connected-fixture105/SCHEMA-HASH-MAPPING.json', 'fixtures/connected-fixture105/SCHEMA-audit.json', 'fixtures/connected-fixture105/SCHEMA-construction-observation.json', 'fixtures/connected-fixture105/SCHEMA-operation.json', 'fixtures/connected-fixture105/SPOKEN-TEXT.txt', 'fixtures/connected-fixture105/SQL-COLUMN-MAP.json', 'fixtures/connected-fixture105/SUBSTANTIVE-SCRIPT.json', 'fixtures/connected-fixture105/SUPPORT-ROWS.json', 'fixtures/connected-fixture105/TEMPLATE.json', 'fixtures/connected-fixture105/TEXTURE-CARRIER.json', 'fixtures/connected-fixture105/TEXTURE-OWNER-ADDENDUM.md', 'fixtures/connected-fixture105/TEXTURE-REWRITE.json', 'fixtures/connected-fixture105/TEXTURE-SCRIPT.json', 'fixtures/connected-fixture105/WRITER-VIEW-EXPECTED.json', 'package-lock.json', 'package.json', 'src/identity/artifacts.ts', 'src/identity/domains.ts', 'src/runtime/claims-writing-gate.ts', 'src/runtime/connected-fixture105.ts', 'src/runtime/package.ts', 'src/runtime/performance-direction-fixture105.ts', 'src/runtime/performance-direction.ts', 'src/runtime/speech-texture.ts', 'test/integration/connected-fixture105.test.ts', 'test/support/p33-parity-runner.ts', 'test/unit/connected-fixture105.test.ts', 'tools/ci-validation/ci.py', 'tools/ci-validation/run-stage.sh', 'tools/ci-validation/test_ci.py', 'tsconfig.build.json', 'tsconfig.json', 'vitest.config.ts')
+FIXTURE_RESOURCE_NAMES = ('SUBSTANTIVE-SCRIPT.json', 'TEXTURE-SCRIPT.json', 'TEXTURE-CARRIER.json', 'TEXTURE-REWRITE.json', 'BRIEF.json', 'PACKAGE.json', 'ROSTER.json', 'TEMPLATE.json', 'WRITER-VIEW-EXPECTED.json', 'CONTEXT-EXPECTED.json', 'AUTHORED-NORMALIZED-ROWS.json', 'CEILING-EXPECTATIONS.json', 'FIVE-MATCH-INPUTS.json', 'DIRECTION-EXPECTED.json', 'IDENTITIES.json', 'SQL-COLUMN-MAP.json', 'SCHEMA-construction-observation.json', 'SCHEMA-operation.json', 'SCHEMA-audit.json')
+
 # ---------------------------------------------------------------- subcommands
 
 def load_event():
@@ -869,6 +1501,12 @@ def cmd_init():
     bind['ok'] = not bind['errors']
     write_json_x(ev / 'bind-pre.json', bind)
     errors.extend(bind['errors'])
+    if not errors:
+        try:
+            fixture_prepare(base, ROOT)
+        except Exception as error:
+            errors.append('fixture preparation failed: ' + type(error).__name__)
+            write_json_x(ev / 'fixture105-init-failure.json', {'ok': False, 'error_class': type(error).__name__})
     print(json.dumps({'init': not errors, 'errors': errors[:8]}))
     return 0 if not errors else 1
 
@@ -1007,6 +1645,12 @@ def cmd_check(stage):
         errors.append('evaluation exception: %s: %s' % (type(error).__name__, error))
     if not record['ok']:
         errors.append('post-stage source binding failed')
+    try:
+        facts['fixture105'] = fixture_capture_stage(base, stage, facts, not errors)
+        if not facts['fixture105']['complete']:
+            errors.append('fixture preservation/retention incomplete')
+    except Exception as error:
+        errors.append('fixture preservation/retention failed: ' + type(error).__name__)
     verdict = {'stage': stage, 'ok': not errors, 'errors': errors, 'facts': facts}
     write_json_x(ev / ('verdict-%s.json' % stage), verdict)
     print(json.dumps({'check': stage, 'ok': verdict['ok'], 'errors': errors[:8]}))
@@ -1134,6 +1778,7 @@ def cmd_collect(scope):
                         keep.copy(case / name, Path('attempts') / attempt.name / case.name / name, limit, required=False)
         except Exception as error:
             problems['errors'].append('attempt collection: %s: %s' % (type(error).__name__, error))
+    fixture_collect(base, keep, scope, successful)
     warnings = []
     for stage, verdict in successful.items():
         warnings += ['%s: %s' % (stage, w) for w in (verdict.get('facts') or {}).get('warnings', [])]
@@ -1194,8 +1839,12 @@ def main(argv=None):
     c.add_argument('stage', choices=STAGES)
     k = sub.add_parser('collect')
     k.add_argument('--scope', choices=sorted(SCOPES), required=True)
+    f = sub.add_parser('fixture-binding')
+    f.add_argument('stage', choices=STAGES)
     sub.add_parser('final')
     args = parser.parse_args(argv)
+    if args.command == 'fixture-binding':
+        return cmd_fixture_binding(args.stage)
     if args.command == 'init':
         return cmd_init()
     if args.command == 'bind-build':

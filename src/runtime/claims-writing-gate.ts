@@ -13,6 +13,11 @@
 // to plan rows. An unowned throwable propagates with its identity; only the finite gate stop mapping below is returned as data.
 import type { Pool, PoolClient } from "pg";
 
+import {
+  connectedFixture105Data,
+  takeConnectedFixture105EvaluationBorrow,
+} from "./connected-fixture105.js";
+
 import { codePointLength } from "../fixture/code-points.js";
 import { GATE_SET_VERSION } from "../fixture/derive.js";
 import { openFixturePack, type Pack } from "../fixture/pack.js";
@@ -53,6 +58,7 @@ import {
   TEXTURE_STOP_CODES,
   TextureRefusal,
   admitTextureAgainst,
+  admitConnectedFixture105Texture,
   assembleTextureRaw,
   classifyTextureSnapshot,
   isAdmittedTexturePlan,
@@ -640,6 +646,11 @@ export interface ComponentInputs {
   readonly rewrites: readonly TextureRewriteRow[];
   readonly parent_artifact_hash: string;
 }
+// Only the explicitly named component sibling selects the new fixed predicate bindings.
+// This set is NOT an acquisition/admission capability and cannot authorize writes.
+const CONNECTED105_COMPONENTS = new WeakSet<object>();
+const connected105 = (inp: ComponentInputs): boolean =>
+  CONNECTED105_COMPONENTS.has(inp);
 const turnsOf = (payload: Obj): Obj[] => records(payload.turns);
 const claimUsesOf = (payload: Obj): Obj[] => records(payload.turn_claim_uses);
 const evidenceUsesOf = (payload: Obj): Obj[] =>
@@ -2014,9 +2025,13 @@ export function checkDeskDerivation(inp: ComponentInputs): DefinitionResult {
   const metadata = checkDerivationMetadata(inp);
   const findings: GateFinding[] = [
     ...metadata.findings,
-    finding("required_proof_not_established", {
-      ref: "derivation_count_reexecution",
-    }),
+    ...(connected105(inp) && reconstructConnected105Derivation(inp)
+      ? []
+      : [
+          finding("required_proof_not_established", {
+            ref: "derivation_count_reexecution",
+          }),
+        ]),
   ];
   const derived = (payload: Obj): string[] =>
     usedClaimIds(payload).filter(
@@ -2202,8 +2217,12 @@ export function checkPreconditions(inp: ComponentInputs): PreconditionResult {
         liveEvents: inp.facts.events.filter(
           (row) => row.claim_id === entry.claim_id,
         ),
-        frozenCeiling: { unavailable: true },
-        currentCeiling: "assertable",
+        frozenCeiling: connected105(inp)
+          ? connected105Ceiling(inp, entry.claim_id, "frozen_ceiling")
+          : { unavailable: true },
+        currentCeiling: connected105(inp)
+          ? connected105Ceiling(inp, entry.claim_id, "current_ceiling")
+          : "assertable",
       });
       if (result.materialDifference || result.liveEventsAfterCursor !== 0)
         return { ok: false, check: 13 };
@@ -2701,6 +2720,14 @@ function specimenOf(payload: Obj): TextureSpecimen {
 }
 export function checkDiffLock(inp: ComponentInputs): DefinitionResult {
   const findings: GateFinding[] = [];
+  const pin = connected105(inp)
+    ? {
+        child_script_hash: connectedFixture105Data().child.script_hash,
+        parent_script_hash: connectedFixture105Data().parent.script_hash,
+        parent_script_version_id:
+          connectedFixture105Data().parent.script_version_id,
+      }
+    : GATE_PIN;
   const C = inp.C;
   const K = inp.K;
   const childTurns = turnsOf(C);
@@ -2717,20 +2744,20 @@ export function checkDiffLock(inp: ComponentInputs): DefinitionResult {
   }
   if (
     recomputed !== undefined &&
-    (recomputed !== C.script_hash || recomputed !== GATE_PIN.child_script_hash)
+    (recomputed !== C.script_hash || recomputed !== pin.child_script_hash)
   )
     findings.push(finding("child_hash_mismatch"));
   if (
     C.revision_parent_content_identity !== K.script_hash ||
-    K.script_hash !== GATE_PIN.parent_script_hash
+    K.script_hash !== pin.parent_script_hash
   )
     findings.push(finding("parent_identity_mismatch"));
   // DL02 relational parent
   if (
-    inp.rows.version.revision_parent_id !== GATE_PIN.parent_script_version_id ||
+    inp.rows.version.revision_parent_id !== pin.parent_script_version_id ||
     inp.rows.version.revision_parent_content_identity !== K.script_hash ||
-    C.revision_parent_id !== GATE_PIN.parent_script_version_id ||
-    inp.parent_artifact_hash !== GATE_PIN.parent_script_hash
+    C.revision_parent_id !== pin.parent_script_version_id ||
+    inp.parent_artifact_hash !== pin.parent_script_hash
   )
     findings.push(finding("relational_parent_mismatch"));
   // DL03 bindings
@@ -2940,7 +2967,14 @@ export function checkDiffLock(inp: ComponentInputs): DefinitionResult {
         finding("prediction_changed", { anchor: strOf(item.semantic_turn_id) }),
       );
   // DL17 the pinned rewrite table, DL18 relational rows, DL19 the first-refusal admission boundary
-  if (!sameJson(inp.rewrites, TEXTURE_REWRITE_TABLE))
+  if (
+    !sameJson(
+      inp.rewrites,
+      connected105(inp)
+        ? connectedFixture105Data().rewrites
+        : TEXTURE_REWRITE_TABLE,
+    )
+  )
     findings.push(finding("rewrite_table_unpinned"));
   const rowsMatch =
     inp.rows.turns.length === childTurns.length &&
@@ -2962,7 +2996,10 @@ export function checkDiffLock(inp: ComponentInputs): DefinitionResult {
     });
   if (!rowsMatch) findings.push(finding("row_payload_mismatch"));
   try {
-    admitTextureAgainst(specimenOf(C), {
+    const admit = connected105(inp)
+      ? admitConnectedFixture105Texture
+      : admitTextureAgainst;
+    admit(specimenOf(C), {
       parent: K,
       parent_hash: strOf(K.script_hash),
       originals: inp.originals,
@@ -3072,8 +3109,15 @@ export function evaluateWritingChecks(inp: ComponentInputs): WritingEvaluation {
   const coverage: CoverageEntry[] = [
     {
       id: "H01",
-      status: "established_with_limits",
-      limits: ["show_roster_document_absent"],
+      status:
+        connected105(inp) &&
+        sameJson(inp.statics.profiles, connectedFixture105Data().roster)
+          ? "established"
+          : "established_with_limits",
+      ...(connected105(inp) &&
+      sameJson(inp.statics.profiles, connectedFixture105Data().roster)
+        ? {}
+        : { limits: ["show_roster_document_absent" as const] }),
     },
     {
       id: "H04",
@@ -5049,4 +5093,177 @@ export async function runClaimsWritingGate(
   const final = classifyGateAcquisition(last.acquisition, "final");
   if (final.kind === "stop") return guarded(stopFromRow(ctx, final.row), plan);
   return guarded(recordedOf(produced.evaluation, written.kind), plan);
+}
+
+// ---- Connected disclosed fixture component sibling; no old result/coverage changes ----
+function connected105Ceiling(
+  inp: ComponentInputs,
+  claimId: unknown,
+  field: "frozen_ceiling" | "current_ceiling",
+): "assertable" | "hedged_only" | "silent" {
+  const fixed = connectedFixture105Data();
+  const row = fixed.ceilings.find((c) => c.claim_id === claimId);
+  const rights = inp.facts.rights.find(
+    (r) => r.rights_version_id === row?.rights_version_id,
+  );
+  const expected = fixed.tables.rights_versions?.find(
+    (r) => r.rights_version_id === row?.rights_version_id,
+  );
+  const ceiling = row?.[field];
+  if (
+    row === undefined ||
+    rights === undefined ||
+    expected === undefined ||
+    !sameJson(rights.policy, expected.policy) ||
+    (ceiling !== "assertable" &&
+      ceiling !== "hedged_only" &&
+      ceiling !== "silent")
+  )
+    throw new ClaimStateError("fixture ceiling unavailable");
+  return ceiling;
+}
+function reconstructConnected105Derivation(inp: ComponentInputs): boolean {
+  const fixed = connectedFixture105Data();
+  const refs = records(inp.facts.derivation?.exact_input_refs);
+  if (refs.length !== 5) return false;
+  let count = 0;
+  for (const [index, ref] of refs.entries()) {
+    const unit = inp.facts.evidence.find(
+      (e) => e.evidence_unit_id === ref.evidence_unit_id,
+    );
+    if (typeof unit?.canonical_content !== "string") return false;
+    if (
+      sha256(Buffer.from(unit.canonical_content.normalize("NFC"), "utf8")) !==
+        unit.content_hash ||
+      unit.content_hash !== ref.content_hash
+    )
+      return false;
+    let body: unknown;
+    try {
+      body = JSON.parse(unit.canonical_content) as unknown;
+    } catch {
+      return false;
+    }
+    if (
+      !sameJson(body, fixed.matches[index]) ||
+      !isObj(body) ||
+      !Array.isArray(body.conceded_minutes) ||
+      !body.conceded_minutes.every(isInt)
+    )
+      return false;
+    if (body.conceded_minutes.some((minute) => minute > 80)) count += 1;
+  }
+  const output = inp.facts.derivation?.output;
+  return isObj(output) && output.count === count;
+}
+/** Pure proposed-profile evaluation only. Never accepted by the durable legacy writer. */
+const CONNECTED105_RESULTS = new WeakSet<object>();
+export function evaluateConnectedFixture105Component(
+  inp: ComponentInputs,
+): ComponentEvaluation {
+  if (CONNECTED105_COMPONENTS.has(inp))
+    throw new TypeError("recursive fixture evaluation");
+  CONNECTED105_COMPONENTS.add(inp);
+  try {
+    const result = evaluateGateComponent(inp);
+    CONNECTED105_RESULTS.add(result);
+    return result;
+  } finally {
+    CONNECTED105_COMPONENTS.delete(inp);
+  }
+}
+
+/** Full owner-produced component digest, not an admission or persistence receipt. */
+export function connectedFixture105ClaimsResultHash(
+  result: ComponentEvaluation,
+): string {
+  if (!CONNECTED105_RESULTS.has(result) || !isComponentEvaluation(result))
+    throw new TypeError("fixture_claims_result_provenance");
+  if (
+    result.rows.length !== GATE_DEFINITION_KEYS.length ||
+    result.rows.some((row, index) => row.key !== GATE_DEFINITION_KEYS[index]) ||
+    result.coverage.length !== COVERAGE_ORDER.length ||
+    result.coverage.some((entry, index) => entry.id !== COVERAGE_ORDER[index])
+  )
+    throw new TypeError("fixture_claims_result_order");
+  if (
+    result.aggregate !==
+    aggregateOf(
+      result.rows.flatMap((row) => row.findings),
+      result.coverage,
+    )
+  )
+    throw new TypeError("fixture_claims_result_aggregate");
+  const projection = {
+    rows: result.rows,
+    aggregate: result.aggregate,
+    warnings: result.warnings,
+    coverage: result.coverage,
+    preconditions: result.preconditions,
+  };
+  return sha256(Buffer.from(canonicalJson(projection), "utf8"));
+}
+/** Closed new identities, with the unchanged owner's fact/finding vocabulary. */
+export function isClosedConnectedFixture105ClaimsResult(
+  value: unknown,
+): boolean {
+  const fixed = connectedFixture105Data();
+  if (
+    !isObj(value) ||
+    value.actor_id !== (fixed.identities.ids as Obj).actor ||
+    value.actor_kind !== "policy" ||
+    value.schema !== "connected-fixture105-claims-result/1" ||
+    value.fingerprint_stage !== "claims_writing" ||
+    !sameJson(value.subject_refs, [fixed.identities["texture-version"]])
+  )
+    return false;
+  // This temporary projection reuses only the old shape validator. It is never
+  // returned, persisted, registered or passed to the historical admission path.
+  return isClosedResult({
+    ...value,
+    actor_id: GATE_PIN.actor_id,
+    schema: GATE_PIN.result_schema,
+    subject_refs: [GATE_PIN.child_script_version_id],
+  });
+}
+
+/** The fixed host's live borrowed write; never accepts a caller-built evaluation. */
+export async function recordConnectedFixture105Claims(
+  capability: object,
+): Promise<void> {
+  const borrow = takeConnectedFixture105EvaluationBorrow(capability, "claims");
+  const result = borrow.claims;
+  connectedFixture105ClaimsResultHash(result);
+  // Persist honest failed results too. Only the later settled reader may mint
+  // the separately typed fixture continuation; this writer does not admit it.
+  for (const row of result.rows) {
+    if (
+      !sameKeySet(Object.keys(row.facts), [
+        "examined",
+        "expected_examined",
+        ...FACT_KEYS[row.key],
+      ]) ||
+      !Object.values(row.facts).every(isInt)
+    )
+      throw new TypeError("fixture_claims_result_shape");
+  }
+  const rows = borrow.rows.gate_results;
+  if (rows?.length !== 18) throw new TypeError("fixture_claims_row_count");
+  if (rows.some((row) => !isClosedConnectedFixture105ClaimsResult(row.result)))
+    throw new TypeError("fixture_claims_result_shape");
+  const existing = await borrow.tx.query(
+    "SELECT gate_result_id FROM gate_results LIMIT 1",
+  );
+  if (existing.rows.length !== 0)
+    throw new TypeError("fixture_claims_foreign_rows");
+  for (const row of rows)
+    await borrow.tx.query(INSERT_SQL, [
+      row.gate_result_id,
+      row.gate_definition_id,
+      row.attempt_id,
+      row.input_fingerprint,
+      row.outcome,
+      canonicalJson(row.result),
+      row.created_at,
+    ]);
 }

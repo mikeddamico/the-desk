@@ -1,0 +1,948 @@
+{
+  "artifact_id": "85f91a62-1170-5f7f-9e66-ef535d665910",
+  "created_at": "2024-06-26T18:00:00Z",
+  "frozen_at": "2024-06-26T18:00:00Z",
+  "id": "cca1c334-d3aa-509d-bbfb-f43f7bb8d645",
+  "manifest": {
+    "schema": "evidence-package/2.0",
+    "scope": {
+      "competition_ids": [
+        "Fictional Estuary Cup109"
+      ],
+      "entity_ids": [
+        "Bellhaven Athletic",
+        "Quartz Vale"
+      ],
+      "event_ids": [
+        "bellhaven-quartz-20240625"
+      ],
+      "locale": "en-GB",
+      "scheduled_default_mode": "normal_post_event",
+      "scope_type": "event",
+      "show_id": "7ef80c54-5645-5925-a5f1-d8b5b7ad2a30",
+      "target_publication_slot_ref": "fixture109-evaluation-only-no-publication"
+    },
+    "availability": {
+      "claims_complete": true,
+      "authored_fiction": true
+    },
+    "selection_provenance": {
+      "match_window_proof": {
+        "competition_identity": "Fictional Estuary Cup109",
+        "entity_identity": "Bellhaven Athletic",
+        "as_of": "2024-06-26T18:00:00Z",
+        "window_identity": "fixture109-five-completed-cup-matches",
+        "selected_event_identities": [
+          "bellhaven-quartz-20240625",
+          "bellhaven-larch-quay-20240618",
+          "bellhaven-ternstead-20240611",
+          "bellhaven-mallow-heath-20240604",
+          "bellhaven-alder-fen-20240601"
+        ],
+        "ordered_prior_schedule": [
+          {
+            "event_identity": "bellhaven-quartz-20240625",
+            "completed_at": "2024-06-25T17:00:00Z"
+          },
+          {
+            "event_identity": "bellhaven-larch-quay-20240618",
+            "completed_at": "2024-06-18T17:00:00Z"
+          },
+          {
+            "event_identity": "bellhaven-ternstead-20240611",
+            "completed_at": "2024-06-11T17:00:00Z"
+          },
+          {
+            "event_identity": "bellhaven-mallow-heath-20240604",
+            "completed_at": "2024-06-04T17:00:00Z"
+          },
+          {
+            "event_identity": "bellhaven-alder-fen-20240601",
+            "completed_at": "2024-06-01T17:00:00Z"
+          }
+        ]
+      },
+      "selection_method": "fixed-newly-authored-fixture109"
+    },
+    "version_refs": {
+      "claims_policy": "claims-0.1.2",
+      "evidence_package": "evidence-package-0.2.2"
+    },
+    "claims": [
+      {
+        "claim_id": "a50f7424-47ba-559a-a0de-f011fe3784b1",
+        "claim_content_hash": "c846eba74cfa0a3b4fa36f3df1bd399da0a87a191eaefcec3fa3bc7e84925e50",
+        "kind": "event_fact",
+        "origin": "first_party",
+        "subject_domain": "football",
+        "subject_ref": "Bellhaven Athletic",
+        "predicate": "result",
+        "value": {
+          "home": "Bellhaven Athletic",
+          "away": "Quartz Vale",
+          "home_goals": 1,
+          "away_goals": 0
+        },
+        "value_type": "structured_text",
+        "initial_status": "confirmed",
+        "initial_usage_class": "assertable",
+        "frozen_state": "confirmed",
+        "reduced_usage_class": "assertable",
+        "effective_usage_class": "assertable",
+        "frozen_state_hash": "0830c994d42d989b180059ab410f0c4301408e8b6438969b29988df84f6fc127",
+        "state_event_cursor": {
+          "claim_state_event_id": "755a61e4-1dd9-5b50-95c3-019ad0af84a7",
+          "event_sequence": 1
+        },
+        "attribution_requirement": {
+          "required": true,
+          "approved_prefix": "The fictional ledger"
+        },
+        "approved_representation": "The fictional ledger records a Bellhaven win.",
+        "support_refs": [
+          {
+            "claim_support_id": "fe9c8b3e-1b6b-5810-91f7-2566ade2e410",
+            "support_kind": "evidence",
+            "support_role": "supports_value",
+            "evidence_unit_id": "da25102a-f352-5601-b3b5-f76b77dd8590",
+            "derivation_run_id": null,
+            "external_support_identity": null,
+            "support_hash": "132f8b7d572b4d23a8eac1704a3171c3f0adbba604188ed1a9c761c708d0fe3f"
+          }
+        ]
+      },
+      {
+        "claim_id": "9d40e3c5-e145-5bc1-ad1c-55ce09dd66c7",
+        "claim_content_hash": "98c86544eb1c76379c410da75011a1ae1bad69e37f9748087b23e2848d7f452d",
+        "kind": "reported_fact",
+        "origin": "first_party",
+        "subject_domain": "football",
+        "subject_ref": "Bellhaven Athletic",
+        "predicate": "instruction",
+        "value": "Leave the centre covered.",
+        "value_type": "text",
+        "initial_status": "confirmed",
+        "initial_usage_class": "assertable",
+        "frozen_state": "confirmed",
+        "reduced_usage_class": "assertable",
+        "effective_usage_class": "assertable",
+        "frozen_state_hash": "f43a4b9a4e1988d6fb4581211d0f4a1d38b8b5bd00a3d770000858b2ef5ba653",
+        "state_event_cursor": {
+          "claim_state_event_id": "8850824c-a2c0-52a3-86d0-3c0c04cc7aca",
+          "event_sequence": 1
+        },
+        "attribution_requirement": {
+          "required": true,
+          "approved_prefix": "The fictional training note"
+        },
+        "approved_representation": "The fictional training note asks the near midfielder to stay central during the second-ball contest.",
+        "support_refs": [
+          {
+            "claim_support_id": "4285a943-811f-5925-b904-0c8feecb0bac",
+            "support_kind": "evidence",
+            "support_role": "supports_value",
+            "evidence_unit_id": "9d8b96b4-5089-5d5e-9259-0d576551271b",
+            "derivation_run_id": null,
+            "external_support_identity": null,
+            "support_hash": "02efeea313a355375919acab8d5810e2543dc66943519a91f66dad058ea770ed"
+          }
+        ]
+      },
+      {
+        "claim_id": "6cd06f82-a9ad-5e46-8e52-b16e7d44b998",
+        "claim_content_hash": "b1bab70591a551c70fd7bc8fa278e7cf252ea0e8f44ac795a2aba709fb10e29e",
+        "kind": "analysis",
+        "origin": "first_party",
+        "subject_domain": "football",
+        "subject_ref": "Bellhaven Athletic",
+        "predicate": "possible_retreat_cause",
+        "value": "fatigue",
+        "value_type": "text",
+        "initial_status": "confirmed",
+        "initial_usage_class": "hedged_only",
+        "frozen_state": "confirmed",
+        "reduced_usage_class": "hedged_only",
+        "effective_usage_class": "hedged_only",
+        "frozen_state_hash": "23cc23380675247c56837f4ec9fa59c3713c191894407f1dcb8c7acd6c713789",
+        "state_event_cursor": {
+          "claim_state_event_id": "fcc76890-9088-5a5e-85d0-c188fdafca58",
+          "event_sequence": 1
+        },
+        "attribution_requirement": {
+          "required": true,
+          "approved_prefix": "The fictional Estuary Analyst"
+        },
+        "approved_representation": "The fictional Estuary Analyst suggests fatigue could explain a late retreat.",
+        "support_refs": [
+          {
+            "claim_support_id": "ef80e135-9119-5c36-861c-52ea7123b8c2",
+            "support_kind": "evidence",
+            "support_role": "supports_value",
+            "evidence_unit_id": "e82736cb-4702-56a5-9fb7-ac8c9629ab81",
+            "derivation_run_id": null,
+            "external_support_identity": null,
+            "support_hash": "d3e36ff5e91571e528b9272ba45887eb4a0b0f41381d3e20f7bc209a4b56cad0"
+          }
+        ]
+      },
+      {
+        "claim_id": "acf27cee-53eb-5fbd-a67b-114f94ca795d",
+        "claim_content_hash": "f4607c5697e58186d43d3ec0bc571e8c3177b57409f5f2d83fdfbbe4182e09c9",
+        "kind": "mood",
+        "origin": "first_party",
+        "subject_domain": "football",
+        "subject_ref": "Bellhaven Athletic",
+        "predicate": "selected_supporter_response",
+        "value": {
+          "selected_sources": 2,
+          "response": "relief with one stated concern"
+        },
+        "value_type": "structured_text",
+        "initial_status": "confirmed",
+        "initial_usage_class": "assertable",
+        "frozen_state": "confirmed",
+        "reduced_usage_class": "assertable",
+        "effective_usage_class": "assertable",
+        "frozen_state_hash": "b7e909a68d7c9f3037494be3f06f89877b97feb85bde12d25a5be375a7859c50",
+        "state_event_cursor": {
+          "claim_state_event_id": "2f2e26b8-d13f-59de-9d0a-08c476e9665e",
+          "event_sequence": 1
+        },
+        "attribution_requirement": {
+          "required": true,
+          "approved_prefix": "The fictional ledger"
+        },
+        "approved_representation": "The fictional ledger records relief in two selected supporter notes, with a concern in one.",
+        "support_refs": [
+          {
+            "claim_support_id": "80a0b10f-f491-5e4d-b8f6-4ae06252d3ec",
+            "support_kind": "evidence",
+            "support_role": "supports_value",
+            "evidence_unit_id": "ae3ba8e4-5657-586b-9bb9-84dce9fbd198",
+            "derivation_run_id": null,
+            "external_support_identity": null,
+            "support_hash": "7c9b7103f8355e256e19deeca391507cd5665ba388aa690c915db686dcac0e84"
+          }
+        ]
+      },
+      {
+        "claim_id": "13280589-4ad9-5109-9f1f-d7d4d6079116",
+        "claim_content_hash": "fe951400bdd54741fe57c9d4ba870e52e18adf042b6592e20f2c55bd4d5ceeff",
+        "kind": "lore",
+        "origin": "first_party",
+        "subject_domain": "football",
+        "subject_ref": "Bellhaven Athletic",
+        "predicate": "clearance_phrase",
+        "value": "a borrowed breath",
+        "value_type": "text",
+        "initial_status": "confirmed",
+        "initial_usage_class": "assertable",
+        "frozen_state": "confirmed",
+        "reduced_usage_class": "assertable",
+        "effective_usage_class": "assertable",
+        "frozen_state_hash": "aada891798a442480794b27727254d2a0549f4ccdafdd0ddc95a3e8c75fa3c4e",
+        "state_event_cursor": {
+          "claim_state_event_id": "f10819ed-34c4-50bd-9c83-3a0a6da861c5",
+          "event_sequence": 1
+        },
+        "attribution_requirement": {
+          "required": true,
+          "approved_prefix": "The fictional pamphlet"
+        },
+        "approved_representation": "The fictional pamphlet calls a hurried clearance a borrowed breath.",
+        "support_refs": [
+          {
+            "claim_support_id": "0a8633b6-4491-5471-af2d-d0e24bde1ef6",
+            "support_kind": "evidence",
+            "support_role": "supports_value",
+            "evidence_unit_id": "03fc1029-4eda-5556-87b1-62056f1c53e8",
+            "derivation_run_id": null,
+            "external_support_identity": null,
+            "support_hash": "a452780557a5aa8dadc4ea512794111a576d92f714fc8e9e006c413288b222ad"
+          }
+        ]
+      },
+      {
+        "claim_id": "0ee3cc88-74c6-5815-8b18-b86772fee142",
+        "claim_content_hash": "622e52c027ed3569c93a7776e0d786c954b240e7df85905c5063bc13793e6c48",
+        "kind": "desk_derived",
+        "origin": "desk_derived",
+        "subject_domain": "football",
+        "subject_ref": "Bellhaven Athletic",
+        "predicate": "late_concession_match_count",
+        "value": {
+          "count": 2,
+          "sample_size": 5,
+          "after_minute": 80
+        },
+        "value_type": "count_window",
+        "initial_status": "confirmed",
+        "initial_usage_class": "assertable",
+        "frozen_state": "confirmed",
+        "reduced_usage_class": "assertable",
+        "effective_usage_class": "assertable",
+        "frozen_state_hash": "56be73a107f845543dbeecc5253b019ea2db476271f3c6d09ea20434d0426949",
+        "state_event_cursor": {
+          "claim_state_event_id": "02d663f4-d157-534a-b68c-475b4757963c",
+          "event_sequence": 1
+        },
+        "attribution_requirement": {
+          "required": true,
+          "approved_prefix": "The fictional ledger"
+        },
+        "approved_representation": "The fictional match ledger yields two late-concession matches in the selected five.",
+        "support_refs": [
+          {
+            "claim_support_id": "ef334790-f779-5afa-a41e-c1c6844f8f53",
+            "support_kind": "derivation",
+            "support_role": "supports_value",
+            "evidence_unit_id": null,
+            "derivation_run_id": "3cfc6236-f202-5b18-9515-3d163b39580a",
+            "external_support_identity": null,
+            "support_hash": "31beac346bf8884a5ff96b1d5b8f55d8304a6e86a10aa87d02bcd4341670bc2f"
+          }
+        ]
+      },
+      {
+        "claim_id": "af00a068-d5ba-52e7-83bf-ebb583588b42",
+        "claim_content_hash": "3c1053dcb9e48656206c6e1c86c86868fe6507cac18b6df4fced970f4b02daea",
+        "kind": "observation",
+        "origin": "first_party",
+        "subject_domain": "football",
+        "subject_ref": "Bellhaven Athletic",
+        "predicate": "excerpt_R",
+        "value": {
+          "near_midfielder": "central",
+          "second_ball": "opponent_collected",
+          "central_lane_pass": false
+        },
+        "value_type": "structured_text",
+        "initial_status": "confirmed",
+        "initial_usage_class": "assertable",
+        "frozen_state": "confirmed",
+        "reduced_usage_class": "assertable",
+        "effective_usage_class": "assertable",
+        "frozen_state_hash": "31522d4cf09ff61b349f40e5c3dddf5d73e5f6335caf6bdc121565c10d3e4d0b",
+        "state_event_cursor": {
+          "claim_state_event_id": "7d09f7c1-a565-5265-8840-3a8636ec293b",
+          "event_sequence": 1
+        },
+        "attribution_requirement": {
+          "required": true,
+          "approved_prefix": "The fictional ledger"
+        },
+        "approved_representation": "The fictional ledger describes excerpt R with central cover and no central pass in that excerpt.",
+        "support_refs": [
+          {
+            "claim_support_id": "b8e5949f-fb1e-5476-bfe0-2a1bf0453bc9",
+            "support_kind": "evidence",
+            "support_role": "supports_value",
+            "evidence_unit_id": "bdfa859a-f7f1-5aec-88b0-d98ca1982fc2",
+            "derivation_run_id": null,
+            "external_support_identity": null,
+            "support_hash": "036d505e1a8a0bc0b06b137f16716e88a24c8cbbb449165132da49b4a69b362f"
+          }
+        ]
+      },
+      {
+        "claim_id": "a5807836-8468-5b76-9467-4785cdf3b6c0",
+        "claim_content_hash": "3b27024effb987432190666332602b93cc09e77389510a25643f4cf8c53a1f2e",
+        "kind": "observation",
+        "origin": "first_party",
+        "subject_domain": "football",
+        "subject_ref": "Bellhaven Athletic",
+        "predicate": "excerpt_S",
+        "value": {
+          "near_midfielder": "towards_second_ball",
+          "second_ball": "contested",
+          "central_lane_pass": true
+        },
+        "value_type": "structured_text",
+        "initial_status": "confirmed",
+        "initial_usage_class": "assertable",
+        "frozen_state": "confirmed",
+        "reduced_usage_class": "assertable",
+        "effective_usage_class": "assertable",
+        "frozen_state_hash": "b76cc0b9bb12b8dcb4626c93e6f40b2f90c47b858f0f2306d29c73274efbcd95",
+        "state_event_cursor": {
+          "claim_state_event_id": "1a373ba2-182b-5f5a-9301-ebe259c113a0",
+          "event_sequence": 1
+        },
+        "attribution_requirement": {
+          "required": true,
+          "approved_prefix": "The fictional ledger"
+        },
+        "approved_representation": "The fictional ledger describes excerpt S with vacated central cover and a central pass in that excerpt.",
+        "support_refs": [
+          {
+            "claim_support_id": "73d2982b-9de6-504c-9d6a-0be505fded78",
+            "support_kind": "evidence",
+            "support_role": "supports_value",
+            "evidence_unit_id": "097a46c4-a115-5650-badb-324b7e9fc15b",
+            "derivation_run_id": null,
+            "external_support_identity": null,
+            "support_hash": "85bfa7c4198f81abc27c5e25a4c205649398e34ee95f3169dcfcb1376135f011"
+          }
+        ]
+      },
+      {
+        "claim_id": "46050fc9-ec1b-5e5f-9346-2be287d6a5cc",
+        "claim_content_hash": "3ed6143a59c225445cf4851fd444f75830573b8d00232775cc14cd634fcea7fb",
+        "kind": "status",
+        "origin": "first_party",
+        "subject_domain": "football",
+        "subject_ref": "Bellhaven Athletic",
+        "predicate": "silent_calibration",
+        "value": {
+          "scalar": "17"
+        },
+        "value_type": "exact_decimal",
+        "initial_status": "confirmed",
+        "initial_usage_class": "silent",
+        "frozen_state": "confirmed",
+        "reduced_usage_class": "silent",
+        "effective_usage_class": "silent",
+        "frozen_state_hash": "858bf01c6fbd2442d47b407c24ae5d614400ad88188e0d7e00a36c83eef018a1",
+        "state_event_cursor": {
+          "claim_state_event_id": "fd676359-9530-598f-9d4a-91f18a25513b",
+          "event_sequence": 1
+        },
+        "attribution_requirement": {
+          "required": false,
+          "approved_prefix": "The fictional ledger"
+        },
+        "approved_representation": "Silent calibration input; never narrate.",
+        "support_refs": [
+          {
+            "claim_support_id": "0b4ca64a-548b-572d-b891-965dc7c4daab",
+            "support_kind": "evidence",
+            "support_role": "supports_value",
+            "evidence_unit_id": "49b62d29-aade-5121-bd87-bd1b53d511d8",
+            "derivation_run_id": null,
+            "external_support_identity": null,
+            "support_hash": "0e52a51c56cc53a2ea82f7c62ace48cd9d2bfc88be136a0d1ef53e5dcbeaf2ee"
+          }
+        ]
+      }
+    ],
+    "evidence": [
+      {
+        "acquisition_ref": "authored-fixture109-1",
+        "competition_identity": "Fictional Estuary Cup109",
+        "entity_identity": "Bellhaven Athletic",
+        "language": "en-GB",
+        "modality": "text",
+        "origin": "first_party",
+        "retention_class": "fixture_source",
+        "rights_policy_version": "0e7f75a6-e7f2-5414-8e6a-b35e9ded3444",
+        "source_identity": "Bellhaven Fictional Ledger109",
+        "source_item_identity": "fixture109-e1",
+        "source_modality": "text",
+        "source_role": "authored_synthetic",
+        "as_of": "2024-06-26T18:00:00Z",
+        "consumer_exposure": {
+          "planner": "exact_excerpt",
+          "writer": "exact_excerpt",
+          "auditor": "exact_excerpt"
+        },
+        "content_hash": "132f8b7d572b4d23a8eac1704a3171c3f0adbba604188ed1a9c761c708d0fe3f",
+        "evidence_type": "fact",
+        "evidence_unit_id": "da25102a-f352-5601-b3b5-f76b77dd8590",
+        "locator": {
+          "member": "EVIDENCE-ROWS.json",
+          "evidence_unit_id": "da25102a-f352-5601-b3b5-f76b77dd8590"
+        },
+        "paraphrase_permission": true,
+        "quote_permission": true,
+        "retention_declaration": {
+          "source_body_retained": true,
+          "authored_fiction": true
+        },
+        "rights_version_id": "0e7f75a6-e7f2-5414-8e6a-b35e9ded3444",
+        "speaker_identity": null,
+        "event_identity": "bellhaven-quartz-20240625"
+      },
+      {
+        "acquisition_ref": "authored-fixture109-2",
+        "competition_identity": "Fictional Estuary Cup109",
+        "entity_identity": "Bellhaven Athletic",
+        "language": "en-GB",
+        "modality": "text",
+        "origin": "first_party",
+        "retention_class": "fixture_source",
+        "rights_policy_version": "0e7f75a6-e7f2-5414-8e6a-b35e9ded3444",
+        "source_identity": "Bellhaven Fictional Ledger109",
+        "source_item_identity": "fixture109-e2",
+        "source_modality": "text",
+        "source_role": "authored_synthetic",
+        "as_of": "2024-06-26T18:00:00Z",
+        "consumer_exposure": {
+          "planner": "exact_excerpt",
+          "writer": "exact_excerpt",
+          "auditor": "exact_excerpt"
+        },
+        "content_hash": "02efeea313a355375919acab8d5810e2543dc66943519a91f66dad058ea770ed",
+        "evidence_type": "quote",
+        "evidence_unit_id": "9d8b96b4-5089-5d5e-9259-0d576551271b",
+        "locator": {
+          "member": "EVIDENCE-ROWS.json",
+          "evidence_unit_id": "9d8b96b4-5089-5d5e-9259-0d576551271b"
+        },
+        "paraphrase_permission": true,
+        "quote_permission": true,
+        "retention_declaration": {
+          "source_body_retained": true,
+          "authored_fiction": true
+        },
+        "rights_version_id": "0e7f75a6-e7f2-5414-8e6a-b35e9ded3444",
+        "speaker_identity": null,
+        "event_identity": "bellhaven-quartz-20240625",
+        "permitted_quote": {
+          "text": "Leave the centre covered."
+        }
+      },
+      {
+        "acquisition_ref": "authored-fixture109-3",
+        "competition_identity": "Fictional Estuary Cup109",
+        "entity_identity": "Bellhaven Athletic",
+        "language": "en-GB",
+        "modality": "text",
+        "origin": "first_party",
+        "retention_class": "fixture_source",
+        "rights_policy_version": "0e7f75a6-e7f2-5414-8e6a-b35e9ded3444",
+        "source_identity": "Bellhaven Fictional Ledger109",
+        "source_item_identity": "fixture109-e3",
+        "source_modality": "text",
+        "source_role": "authored_synthetic",
+        "as_of": "2024-06-26T18:00:00Z",
+        "consumer_exposure": {
+          "planner": "exact_excerpt",
+          "writer": "exact_excerpt",
+          "auditor": "exact_excerpt"
+        },
+        "content_hash": "d3e36ff5e91571e528b9272ba45887eb4a0b0f41381d3e20f7bc209a4b56cad0",
+        "evidence_type": "analysis",
+        "evidence_unit_id": "e82736cb-4702-56a5-9fb7-ac8c9629ab81",
+        "locator": {
+          "member": "EVIDENCE-ROWS.json",
+          "evidence_unit_id": "e82736cb-4702-56a5-9fb7-ac8c9629ab81"
+        },
+        "paraphrase_permission": true,
+        "quote_permission": true,
+        "retention_declaration": {
+          "source_body_retained": true,
+          "authored_fiction": true
+        },
+        "rights_version_id": "0e7f75a6-e7f2-5414-8e6a-b35e9ded3444",
+        "speaker_identity": null,
+        "event_identity": "bellhaven-quartz-20240625"
+      },
+      {
+        "acquisition_ref": "authored-fixture109-4",
+        "competition_identity": "Fictional Estuary Cup109",
+        "entity_identity": "Bellhaven Athletic",
+        "language": "en-GB",
+        "modality": "text",
+        "origin": "first_party",
+        "retention_class": "fixture_source",
+        "rights_policy_version": "0e7f75a6-e7f2-5414-8e6a-b35e9ded3444",
+        "source_identity": "Bellhaven Fictional Ledger109",
+        "source_item_identity": "fixture109-e4",
+        "source_modality": "text",
+        "source_role": "authored_synthetic",
+        "as_of": "2024-06-26T18:00:00Z",
+        "consumer_exposure": {
+          "planner": "exact_excerpt",
+          "writer": "exact_excerpt",
+          "auditor": "exact_excerpt"
+        },
+        "content_hash": "7c9b7103f8355e256e19deeca391507cd5665ba388aa690c915db686dcac0e84",
+        "evidence_type": "sentiment",
+        "evidence_unit_id": "ae3ba8e4-5657-586b-9bb9-84dce9fbd198",
+        "locator": {
+          "member": "EVIDENCE-ROWS.json",
+          "evidence_unit_id": "ae3ba8e4-5657-586b-9bb9-84dce9fbd198"
+        },
+        "paraphrase_permission": true,
+        "quote_permission": true,
+        "retention_declaration": {
+          "source_body_retained": true,
+          "authored_fiction": true
+        },
+        "rights_version_id": "0e7f75a6-e7f2-5414-8e6a-b35e9ded3444",
+        "speaker_identity": null,
+        "event_identity": "bellhaven-quartz-20240625"
+      },
+      {
+        "acquisition_ref": "authored-fixture109-5",
+        "competition_identity": "Fictional Estuary Cup109",
+        "entity_identity": "Bellhaven Athletic",
+        "language": "en-GB",
+        "modality": "text",
+        "origin": "first_party",
+        "retention_class": "fixture_source",
+        "rights_policy_version": "0e7f75a6-e7f2-5414-8e6a-b35e9ded3444",
+        "source_identity": "Bellhaven Fictional Ledger109",
+        "source_item_identity": "fixture109-e5",
+        "source_modality": "text",
+        "source_role": "authored_synthetic",
+        "as_of": "2024-06-26T18:00:00Z",
+        "consumer_exposure": {
+          "planner": "exact_excerpt",
+          "writer": "exact_excerpt",
+          "auditor": "exact_excerpt"
+        },
+        "content_hash": "a452780557a5aa8dadc4ea512794111a576d92f714fc8e9e006c413288b222ad",
+        "evidence_type": "context",
+        "evidence_unit_id": "03fc1029-4eda-5556-87b1-62056f1c53e8",
+        "locator": {
+          "member": "EVIDENCE-ROWS.json",
+          "evidence_unit_id": "03fc1029-4eda-5556-87b1-62056f1c53e8"
+        },
+        "paraphrase_permission": true,
+        "quote_permission": true,
+        "retention_declaration": {
+          "source_body_retained": true,
+          "authored_fiction": true
+        },
+        "rights_version_id": "0e7f75a6-e7f2-5414-8e6a-b35e9ded3444",
+        "speaker_identity": null,
+        "event_identity": "bellhaven-quartz-20240625",
+        "permitted_quote": {
+          "text": "a borrowed breath"
+        }
+      },
+      {
+        "acquisition_ref": "authored-fixture109-6",
+        "competition_identity": "Fictional Estuary Cup109",
+        "entity_identity": "Bellhaven Athletic",
+        "language": "en-GB",
+        "modality": "text",
+        "origin": "first_party",
+        "retention_class": "fixture_source",
+        "rights_policy_version": "0e7f75a6-e7f2-5414-8e6a-b35e9ded3444",
+        "source_identity": "Bellhaven Fictional Ledger109",
+        "source_item_identity": "fixture109-e6",
+        "source_modality": "text",
+        "source_role": "authored_synthetic",
+        "as_of": "2024-06-26T18:00:00Z",
+        "consumer_exposure": {
+          "planner": "exact_excerpt",
+          "writer": "exact_excerpt",
+          "auditor": "exact_excerpt"
+        },
+        "content_hash": "036d505e1a8a0bc0b06b137f16716e88a24c8cbbb449165132da49b4a69b362f",
+        "evidence_type": "observation",
+        "evidence_unit_id": "bdfa859a-f7f1-5aec-88b0-d98ca1982fc2",
+        "locator": {
+          "member": "EVIDENCE-ROWS.json",
+          "evidence_unit_id": "bdfa859a-f7f1-5aec-88b0-d98ca1982fc2"
+        },
+        "paraphrase_permission": true,
+        "quote_permission": true,
+        "retention_declaration": {
+          "source_body_retained": true,
+          "authored_fiction": true
+        },
+        "rights_version_id": "0e7f75a6-e7f2-5414-8e6a-b35e9ded3444",
+        "speaker_identity": null,
+        "event_identity": "bellhaven-quartz-20240625"
+      },
+      {
+        "acquisition_ref": "authored-fixture109-7",
+        "competition_identity": "Fictional Estuary Cup109",
+        "entity_identity": "Bellhaven Athletic",
+        "language": "en-GB",
+        "modality": "text",
+        "origin": "first_party",
+        "retention_class": "fixture_source",
+        "rights_policy_version": "0e7f75a6-e7f2-5414-8e6a-b35e9ded3444",
+        "source_identity": "Bellhaven Fictional Ledger109",
+        "source_item_identity": "fixture109-e7",
+        "source_modality": "text",
+        "source_role": "authored_synthetic",
+        "as_of": "2024-06-26T18:00:00Z",
+        "consumer_exposure": {
+          "planner": "exact_excerpt",
+          "writer": "exact_excerpt",
+          "auditor": "exact_excerpt"
+        },
+        "content_hash": "85bfa7c4198f81abc27c5e25a4c205649398e34ee95f3169dcfcb1376135f011",
+        "evidence_type": "observation",
+        "evidence_unit_id": "097a46c4-a115-5650-badb-324b7e9fc15b",
+        "locator": {
+          "member": "EVIDENCE-ROWS.json",
+          "evidence_unit_id": "097a46c4-a115-5650-badb-324b7e9fc15b"
+        },
+        "paraphrase_permission": true,
+        "quote_permission": true,
+        "retention_declaration": {
+          "source_body_retained": true,
+          "authored_fiction": true
+        },
+        "rights_version_id": "0e7f75a6-e7f2-5414-8e6a-b35e9ded3444",
+        "speaker_identity": null,
+        "event_identity": "bellhaven-quartz-20240625"
+      },
+      {
+        "acquisition_ref": "authored-fixture109-8",
+        "competition_identity": "Fictional Estuary Cup109",
+        "entity_identity": "Bellhaven Athletic",
+        "language": "en-GB",
+        "modality": "text",
+        "origin": "first_party",
+        "retention_class": "fixture_source",
+        "rights_policy_version": "0e7f75a6-e7f2-5414-8e6a-b35e9ded3444",
+        "source_identity": "Bellhaven Fictional Ledger109",
+        "source_item_identity": "fixture109-e8",
+        "source_modality": "text",
+        "source_role": "authored_synthetic",
+        "as_of": "2024-06-26T18:00:00Z",
+        "consumer_exposure": {
+          "planner": "hidden",
+          "writer": "hidden",
+          "auditor": "hidden"
+        },
+        "content_hash": "0e52a51c56cc53a2ea82f7c62ace48cd9d2bfc88be136a0d1ef53e5dcbeaf2ee",
+        "evidence_type": "context",
+        "evidence_unit_id": "49b62d29-aade-5121-bd87-bd1b53d511d8",
+        "locator": {
+          "member": "EVIDENCE-ROWS.json",
+          "evidence_unit_id": "49b62d29-aade-5121-bd87-bd1b53d511d8"
+        },
+        "paraphrase_permission": false,
+        "quote_permission": false,
+        "retention_declaration": {
+          "source_body_retained": true,
+          "authored_fiction": true
+        },
+        "rights_version_id": "0e7f75a6-e7f2-5414-8e6a-b35e9ded3444",
+        "speaker_identity": null,
+        "event_identity": "bellhaven-quartz-20240625"
+      },
+      {
+        "acquisition_ref": "authored-fixture109-9",
+        "competition_identity": "Fictional Estuary Cup109",
+        "entity_identity": "Bellhaven Athletic",
+        "language": "en-GB",
+        "modality": "text",
+        "origin": "first_party",
+        "retention_class": "fixture_source",
+        "rights_policy_version": "0e7f75a6-e7f2-5414-8e6a-b35e9ded3444",
+        "source_identity": "Bellhaven Fictional Ledger109",
+        "source_item_identity": "fixture109-e9",
+        "source_modality": "text",
+        "source_role": "authored_synthetic",
+        "as_of": "2024-06-26T18:00:00Z",
+        "consumer_exposure": {
+          "planner": "exact_excerpt",
+          "writer": "exact_excerpt",
+          "auditor": "exact_excerpt"
+        },
+        "content_hash": "bc36e9840ddf0b77d7afbe48f190d75c2bca10b6136e9fde0fa8e8d287bd867c",
+        "evidence_type": "fact",
+        "evidence_unit_id": "f1090000-0000-4000-8000-000000000012",
+        "locator": {
+          "member": "EVIDENCE-ROWS.json",
+          "evidence_unit_id": "f1090000-0000-4000-8000-000000000012"
+        },
+        "paraphrase_permission": true,
+        "quote_permission": true,
+        "retention_declaration": {
+          "source_body_retained": true,
+          "authored_fiction": true
+        },
+        "rights_version_id": "0e7f75a6-e7f2-5414-8e6a-b35e9ded3444",
+        "speaker_identity": null,
+        "event_identity": "bellhaven-quartz-20240625"
+      },
+      {
+        "acquisition_ref": "authored-fixture109-10",
+        "competition_identity": "Fictional Estuary Cup109",
+        "entity_identity": "Bellhaven Athletic",
+        "language": "en-GB",
+        "modality": "text",
+        "origin": "first_party",
+        "retention_class": "fixture_source",
+        "rights_policy_version": "0e7f75a6-e7f2-5414-8e6a-b35e9ded3444",
+        "source_identity": "Bellhaven Fictional Ledger109",
+        "source_item_identity": "fixture109-e10",
+        "source_modality": "text",
+        "source_role": "authored_synthetic",
+        "as_of": "2024-06-26T18:00:00Z",
+        "consumer_exposure": {
+          "planner": "exact_excerpt",
+          "writer": "exact_excerpt",
+          "auditor": "exact_excerpt"
+        },
+        "content_hash": "913ce4940f7b04ad37f5f94b3b0e3aa9dcbdd71057d2c3838bd66b39526c09ac",
+        "evidence_type": "fact",
+        "evidence_unit_id": "f1090000-0000-4000-8000-000000000013",
+        "locator": {
+          "member": "EVIDENCE-ROWS.json",
+          "evidence_unit_id": "f1090000-0000-4000-8000-000000000013"
+        },
+        "paraphrase_permission": true,
+        "quote_permission": true,
+        "retention_declaration": {
+          "source_body_retained": true,
+          "authored_fiction": true
+        },
+        "rights_version_id": "0e7f75a6-e7f2-5414-8e6a-b35e9ded3444",
+        "speaker_identity": null,
+        "event_identity": "bellhaven-larch-quay-20240618"
+      },
+      {
+        "acquisition_ref": "authored-fixture109-11",
+        "competition_identity": "Fictional Estuary Cup109",
+        "entity_identity": "Bellhaven Athletic",
+        "language": "en-GB",
+        "modality": "text",
+        "origin": "first_party",
+        "retention_class": "fixture_source",
+        "rights_policy_version": "0e7f75a6-e7f2-5414-8e6a-b35e9ded3444",
+        "source_identity": "Bellhaven Fictional Ledger109",
+        "source_item_identity": "fixture109-e11",
+        "source_modality": "text",
+        "source_role": "authored_synthetic",
+        "as_of": "2024-06-26T18:00:00Z",
+        "consumer_exposure": {
+          "planner": "exact_excerpt",
+          "writer": "exact_excerpt",
+          "auditor": "exact_excerpt"
+        },
+        "content_hash": "e56f1ba04d6f975b817a6674814e9b154470f1bc0712f99fe2ca59b72ca47c5b",
+        "evidence_type": "fact",
+        "evidence_unit_id": "f1090000-0000-4000-8000-000000000014",
+        "locator": {
+          "member": "EVIDENCE-ROWS.json",
+          "evidence_unit_id": "f1090000-0000-4000-8000-000000000014"
+        },
+        "paraphrase_permission": true,
+        "quote_permission": true,
+        "retention_declaration": {
+          "source_body_retained": true,
+          "authored_fiction": true
+        },
+        "rights_version_id": "0e7f75a6-e7f2-5414-8e6a-b35e9ded3444",
+        "speaker_identity": null,
+        "event_identity": "bellhaven-ternstead-20240611"
+      },
+      {
+        "acquisition_ref": "authored-fixture109-12",
+        "competition_identity": "Fictional Estuary Cup109",
+        "entity_identity": "Bellhaven Athletic",
+        "language": "en-GB",
+        "modality": "text",
+        "origin": "first_party",
+        "retention_class": "fixture_source",
+        "rights_policy_version": "0e7f75a6-e7f2-5414-8e6a-b35e9ded3444",
+        "source_identity": "Bellhaven Fictional Ledger109",
+        "source_item_identity": "fixture109-e12",
+        "source_modality": "text",
+        "source_role": "authored_synthetic",
+        "as_of": "2024-06-26T18:00:00Z",
+        "consumer_exposure": {
+          "planner": "exact_excerpt",
+          "writer": "exact_excerpt",
+          "auditor": "exact_excerpt"
+        },
+        "content_hash": "96ef96209f843fd920659e3693458e10aa7fdeee717f765be6a1bcee8661e684",
+        "evidence_type": "fact",
+        "evidence_unit_id": "f1090000-0000-4000-8000-000000000015",
+        "locator": {
+          "member": "EVIDENCE-ROWS.json",
+          "evidence_unit_id": "f1090000-0000-4000-8000-000000000015"
+        },
+        "paraphrase_permission": true,
+        "quote_permission": true,
+        "retention_declaration": {
+          "source_body_retained": true,
+          "authored_fiction": true
+        },
+        "rights_version_id": "0e7f75a6-e7f2-5414-8e6a-b35e9ded3444",
+        "speaker_identity": null,
+        "event_identity": "bellhaven-mallow-heath-20240604"
+      },
+      {
+        "acquisition_ref": "authored-fixture109-13",
+        "competition_identity": "Fictional Estuary Cup109",
+        "entity_identity": "Bellhaven Athletic",
+        "language": "en-GB",
+        "modality": "text",
+        "origin": "first_party",
+        "retention_class": "fixture_source",
+        "rights_policy_version": "0e7f75a6-e7f2-5414-8e6a-b35e9ded3444",
+        "source_identity": "Bellhaven Fictional Ledger109",
+        "source_item_identity": "fixture109-e13",
+        "source_modality": "text",
+        "source_role": "authored_synthetic",
+        "as_of": "2024-06-26T18:00:00Z",
+        "consumer_exposure": {
+          "planner": "exact_excerpt",
+          "writer": "exact_excerpt",
+          "auditor": "exact_excerpt"
+        },
+        "content_hash": "8e017ca9ee27727ae86382f956aa800e3f4762d5e1db30d3e016b622bebfc73f",
+        "evidence_type": "fact",
+        "evidence_unit_id": "f1090000-0000-4000-8000-000000000016",
+        "locator": {
+          "member": "EVIDENCE-ROWS.json",
+          "evidence_unit_id": "f1090000-0000-4000-8000-000000000016"
+        },
+        "paraphrase_permission": true,
+        "quote_permission": true,
+        "retention_declaration": {
+          "source_body_retained": true,
+          "authored_fiction": true
+        },
+        "rights_version_id": "0e7f75a6-e7f2-5414-8e6a-b35e9ded3444",
+        "speaker_identity": null,
+        "event_identity": "bellhaven-alder-fen-20240601"
+      }
+    ],
+    "beats": [
+      {
+        "beat_id": "fixture109-central-cover",
+        "member_claim_refs": [
+          "a50f7424-47ba-559a-a0de-f011fe3784b1",
+          "9d40e3c5-e145-5bc1-ad1c-55ce09dd66c7",
+          "6cd06f82-a9ad-5e46-8e52-b16e7d44b998",
+          "acf27cee-53eb-5fbd-a67b-114f94ca795d",
+          "13280589-4ad9-5109-9f1f-d7d4d6079116",
+          "0ee3cc88-74c6-5815-8b18-b86772fee142",
+          "af00a068-d5ba-52e7-83bf-ebb583588b42",
+          "a5807836-8468-5b76-9467-4785cdf3b6c0"
+        ]
+      }
+    ],
+    "signals": [],
+    "context_candidates": [
+      {
+        "claim_id": "13280589-4ad9-5109-9f1f-d7d4d6079116",
+        "context_id": "fixture109-clearance-lore"
+      }
+    ],
+    "continuity": [],
+    "silent_inputs": [
+      {
+        "claim_id": "46050fc9-ec1b-5e5f-9346-2be287d6a5cc",
+        "support_refs": [
+          "49b62d29-aade-5121-bd87-bd1b53d511d8"
+        ]
+      }
+    ],
+    "sensitivities": [],
+    "coverage_conditions": [],
+    "source_attribution": [
+      {
+        "source_identity": "Bellhaven Fictional Ledger109",
+        "attribution": "Explicit fictional source; no real match or reporting claim."
+      }
+    ]
+  },
+  "package_hash": "c60a91ac6383a791011f533d4b4d2dfd428b3dbe9e15b5113f4cd60ea03c539e",
+  "schema_version": "evidence-package/2.0",
+  "scope_hash": "cef57d361219657024244f79b5b04407ada9d4abe74856b7dfdf1f53a2cd471c",
+  "selector_run_id": "fixture109-authored-selection"
+}

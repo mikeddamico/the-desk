@@ -1,0 +1,458 @@
+{
+  "schema": "speech-texture-specimen/1",
+  "script_phase": "speech_texture",
+  "revision_reason": "speech_texture_pass",
+  "purpose": "evaluation",
+  "writing_policy_version": "writing-0.2.3",
+  "brief_hash": "e49eb2ff86990cd5a439c68b236f99ba34f1294be02c568b635091f5b0f11a71",
+  "package_hash": "c60a91ac6383a791011f533d4b4d2dfd428b3dbe9e15b5113f4cd60ea03c539e",
+  "parent_script_hash": "ced37e3db0c2511d4f1cfb8d913f66e223cd103adf9087ae809b30511de7a116",
+  "program_block_refs": [
+    "0f0d7326-2220-5975-b2b0-7022a8bd5d64",
+    "cb6719f5-a20c-5887-81cb-6a2678775348",
+    "2ba5580e-0aa6-5c80-9de2-046489ad942b",
+    "00c5e82f-23dd-5256-b269-0c997a32cc01",
+    "30f24830-b9d6-5190-b44e-1c0d5f43bb52",
+    "92b033a2-fa37-570a-8a7e-d4dd6504761c",
+    "8fa577b5-1249-5241-b128-f570d294e17f",
+    "ca5df371-5c0b-5561-aa79-96c81783cd06",
+    "19e5a737-f97d-5ea8-a636-0a834e956a80"
+  ],
+  "turns": [
+    {
+      "semantic_turn_id": "estuary109_t01",
+      "sequence": 1,
+      "program_block_id": "0f0d7326-2220-5975-b2b0-7022a8bd5d64",
+      "participant_id": "nia_calder",
+      "spoken_text": "Imagine a touchline umbrella with a handle so large that nobody can grip it. That seems an ambitious way to stay dry."
+    },
+    {
+      "semantic_turn_id": "estuary109_t02",
+      "sequence": 2,
+      "program_block_id": "0f0d7326-2220-5975-b2b0-7022a8bd5d64",
+      "participant_id": "jonah_reed",
+      "spoken_text": "I'd choose the ordinary handle."
+    },
+    {
+      "semantic_turn_id": "estuary109_t03",
+      "sequence": 3,
+      "program_block_id": "cb6719f5-a20c-5887-81cb-6a2678775348",
+      "participant_id": "mara_ives",
+      "spoken_text": "Back to Bellhaven Athletic. This is an entirely fictional football evaluation."
+    },
+    {
+      "semantic_turn_id": "estuary109_t04",
+      "sequence": 4,
+      "program_block_id": "2ba5580e-0aa6-5c80-9de2-046489ad942b",
+      "participant_id": "mara_ives",
+      "spoken_text": "The fictional ledger records a Bellhaven Athletic win over Quartz Vale."
+    },
+    {
+      "semantic_turn_id": "estuary109_t05",
+      "sequence": 5,
+      "program_block_id": "2ba5580e-0aa6-5c80-9de2-046489ad942b",
+      "participant_id": "jonah_reed",
+      "spoken_text": "The fictional ledger records two late concessions in five selected completed cup matches. That window is a description, not a diagnosis."
+    },
+    {
+      "semantic_turn_id": "estuary109_t06",
+      "sequence": 6,
+      "program_block_id": "00c5e82f-23dd-5256-b269-0c997a32cc01",
+      "participant_id": "mara_ives",
+      "spoken_text": "The fictional training note says 'Leave the centre covered.' The near midfielder is asked to stay central while a teammate contests the second ball."
+    },
+    {
+      "semantic_turn_id": "estuary109_t07",
+      "sequence": 7,
+      "program_block_id": "00c5e82f-23dd-5256-b269-0c997a32cc01",
+      "participant_id": "jonah_reed",
+      "spoken_text": "The fictional ledger describes excerpt R: the near midfielder stays central; the opponent collects the loose ball but makes no central pass. In excerpt S, the midfielder moves towards the second ball and an opponent passes through the vacated lane."
+    },
+    {
+      "semantic_turn_id": "estuary109_t08",
+      "sequence": 8,
+      "program_block_id": "00c5e82f-23dd-5256-b269-0c997a32cc01",
+      "participant_id": "nia_calder",
+      "spoken_text": "What can that comparison establish?"
+    },
+    {
+      "semantic_turn_id": "estuary109_t09",
+      "sequence": 9,
+      "program_block_id": "00c5e82f-23dd-5256-b269-0c997a32cc01",
+      "participant_id": "jonah_reed",
+      "spoken_text": "The fictional ledger gives us central cover in R and a vacated lane in S. The fictional training note asks for central cover. R illustrates compliance with that instruction and S illustrates departure, but these excerpts alone do not establish what caused either outcome."
+    },
+    {
+      "semantic_turn_id": "estuary109_t10",
+      "sequence": 10,
+      "program_block_id": "00c5e82f-23dd-5256-b269-0c997a32cc01",
+      "participant_id": "jonah_reed",
+      "spoken_text": "The fictional Estuary Analyst suggests fatigue could explain a late retreat. That remains a hypothesis, separate from the positioning comparison."
+    },
+    {
+      "semantic_turn_id": "estuary109_t11",
+      "sequence": 11,
+      "program_block_id": "30f24830-b9d6-5190-b44e-1c0d5f43bb52",
+      "participant_id": "mara_ives",
+      "spoken_text": "The fictional ledger therefore leaves us with a concrete difference in positioning, not a general explanation for the result."
+    },
+    {
+      "semantic_turn_id": "estuary109_t12",
+      "sequence": 12,
+      "program_block_id": "92b033a2-fa37-570a-8a7e-d4dd6504761c",
+      "participant_id": "nia_calder",
+      "spoken_text": "The fictional ledger records relief in the selected supporter notes, with worry about the final clearance in Pella's note. I can understand that mixed reaction without calling it a whole crowd speaking."
+    },
+    {
+      "semantic_turn_id": "estuary109_t13",
+      "sequence": 13,
+      "program_block_id": "92b033a2-fa37-570a-8a7e-d4dd6504761c",
+      "participant_id": "mara_ives",
+      "spoken_text": "The fictional pamphlet calls a hurried clearance 'a borrowed breath'."
+    },
+    {
+      "semantic_turn_id": "estuary109_t14",
+      "sequence": 14,
+      "program_block_id": "92b033a2-fa37-570a-8a7e-d4dd6504761c",
+      "participant_id": "jonah_reed",
+      "spoken_text": "A useful image; it is not a measurement."
+    },
+    {
+      "semantic_turn_id": "estuary109_t15",
+      "sequence": 15,
+      "program_block_id": "8fa577b5-1249-5241-b128-f570d294e17f",
+      "participant_id": "mara_ives",
+      "spoken_text": "The fictional ledger contrasts R, where the near midfielder stays central, with S, where that player follows the second ball and the lane is used. The fictional training note asks for central cover. Keep that specific contrast; the cause remains open."
+    },
+    {
+      "semantic_turn_id": "estuary109_t16",
+      "sequence": 16,
+      "program_block_id": "ca5df371-5c0b-5561-aa79-96c81783cd06",
+      "participant_id": "mara_ives",
+      "spoken_text": "If a later fictional instruction asks for central cover, I expect checking that lane to be a useful first question."
+    },
+    {
+      "semantic_turn_id": "estuary109_t17",
+      "sequence": 17,
+      "program_block_id": "ca5df371-5c0b-5561-aa79-96c81783cd06",
+      "participant_id": "jonah_reed",
+      "spoken_text": "If a later fictional report proposes a cause, I expect the quality of its measurements to matter more than its confidence."
+    },
+    {
+      "semantic_turn_id": "estuary109_t18",
+      "sequence": 18,
+      "program_block_id": "ca5df371-5c0b-5561-aa79-96c81783cd06",
+      "participant_id": "nia_calder",
+      "spoken_text": "If a later fictional supporter note sounds relieved, I expect to keep reading for whatever concern accompanies it."
+    },
+    {
+      "semantic_turn_id": "estuary109_t19",
+      "sequence": 19,
+      "program_block_id": "19e5a737-f97d-5ea8-a636-0a834e956a80",
+      "participant_id": "mara_ives",
+      "spoken_text": "That closes this fictional discussion. No real match or performed timing has been established."
+    }
+  ],
+  "turn_claim_uses": [
+    {
+      "claim_id": "a50f7424-47ba-559a-a0de-f011fe3784b1",
+      "use_mode": "attributed",
+      "span_start": 0,
+      "span_end": 71,
+      "claim_state_hash": "0830c994d42d989b180059ab410f0c4301408e8b6438969b29988df84f6fc127",
+      "semantic_turn_id": "estuary109_t04"
+    },
+    {
+      "claim_id": "0ee3cc88-74c6-5815-8b18-b86772fee142",
+      "use_mode": "attributed",
+      "span_start": 0,
+      "span_end": 136,
+      "claim_state_hash": "56be73a107f845543dbeecc5253b019ea2db476271f3c6d09ea20434d0426949",
+      "semantic_turn_id": "estuary109_t05"
+    },
+    {
+      "claim_id": "9d40e3c5-e145-5bc1-ad1c-55ce09dd66c7",
+      "use_mode": "attributed",
+      "span_start": 0,
+      "span_end": 148,
+      "claim_state_hash": "f43a4b9a4e1988d6fb4581211d0f4a1d38b8b5bd00a3d770000858b2ef5ba653",
+      "semantic_turn_id": "estuary109_t06"
+    },
+    {
+      "claim_id": "af00a068-d5ba-52e7-83bf-ebb583588b42",
+      "use_mode": "attributed",
+      "span_start": 0,
+      "span_end": 248,
+      "claim_state_hash": "31522d4cf09ff61b349f40e5c3dddf5d73e5f6335caf6bdc121565c10d3e4d0b",
+      "semantic_turn_id": "estuary109_t07"
+    },
+    {
+      "claim_id": "a5807836-8468-5b76-9467-4785cdf3b6c0",
+      "use_mode": "attributed",
+      "span_start": 0,
+      "span_end": 248,
+      "claim_state_hash": "b76cc0b9bb12b8dcb4626c93e6f40b2f90c47b858f0f2306d29c73274efbcd95",
+      "semantic_turn_id": "estuary109_t07"
+    },
+    {
+      "claim_id": "9d40e3c5-e145-5bc1-ad1c-55ce09dd66c7",
+      "use_mode": "attributed",
+      "span_start": 74,
+      "span_end": 125,
+      "claim_state_hash": "f43a4b9a4e1988d6fb4581211d0f4a1d38b8b5bd00a3d770000858b2ef5ba653",
+      "semantic_turn_id": "estuary109_t09"
+    },
+    {
+      "claim_id": "af00a068-d5ba-52e7-83bf-ebb583588b42",
+      "use_mode": "attributed",
+      "span_start": 0,
+      "span_end": 271,
+      "claim_state_hash": "31522d4cf09ff61b349f40e5c3dddf5d73e5f6335caf6bdc121565c10d3e4d0b",
+      "semantic_turn_id": "estuary109_t09"
+    },
+    {
+      "claim_id": "a5807836-8468-5b76-9467-4785cdf3b6c0",
+      "use_mode": "attributed",
+      "span_start": 0,
+      "span_end": 271,
+      "claim_state_hash": "b76cc0b9bb12b8dcb4626c93e6f40b2f90c47b858f0f2306d29c73274efbcd95",
+      "semantic_turn_id": "estuary109_t09"
+    },
+    {
+      "claim_id": "6cd06f82-a9ad-5e46-8e52-b16e7d44b998",
+      "use_mode": "hedged",
+      "span_start": 0,
+      "span_end": 145,
+      "claim_state_hash": "23cc23380675247c56837f4ec9fa59c3713c191894407f1dcb8c7acd6c713789",
+      "semantic_turn_id": "estuary109_t10"
+    },
+    {
+      "claim_id": "af00a068-d5ba-52e7-83bf-ebb583588b42",
+      "use_mode": "attributed",
+      "span_start": 0,
+      "span_end": 125,
+      "claim_state_hash": "31522d4cf09ff61b349f40e5c3dddf5d73e5f6335caf6bdc121565c10d3e4d0b",
+      "semantic_turn_id": "estuary109_t11"
+    },
+    {
+      "claim_id": "a5807836-8468-5b76-9467-4785cdf3b6c0",
+      "use_mode": "attributed",
+      "span_start": 0,
+      "span_end": 125,
+      "claim_state_hash": "b76cc0b9bb12b8dcb4626c93e6f40b2f90c47b858f0f2306d29c73274efbcd95",
+      "semantic_turn_id": "estuary109_t11"
+    },
+    {
+      "claim_id": "acf27cee-53eb-5fbd-a67b-114f94ca795d",
+      "use_mode": "attributed",
+      "span_start": 0,
+      "span_end": 202,
+      "claim_state_hash": "b7e909a68d7c9f3037494be3f06f89877b97feb85bde12d25a5be375a7859c50",
+      "semantic_turn_id": "estuary109_t12"
+    },
+    {
+      "claim_id": "13280589-4ad9-5109-9f1f-d7d4d6079116",
+      "use_mode": "attributed",
+      "span_start": 0,
+      "span_end": 69,
+      "claim_state_hash": "aada891798a442480794b27727254d2a0549f4ccdafdd0ddc95a3e8c75fa3c4e",
+      "semantic_turn_id": "estuary109_t13"
+    },
+    {
+      "claim_id": "9d40e3c5-e145-5bc1-ad1c-55ce09dd66c7",
+      "use_mode": "attributed",
+      "span_start": 147,
+      "span_end": 198,
+      "claim_state_hash": "f43a4b9a4e1988d6fb4581211d0f4a1d38b8b5bd00a3d770000858b2ef5ba653",
+      "semantic_turn_id": "estuary109_t15"
+    },
+    {
+      "claim_id": "af00a068-d5ba-52e7-83bf-ebb583588b42",
+      "use_mode": "attributed",
+      "span_start": 0,
+      "span_end": 251,
+      "claim_state_hash": "31522d4cf09ff61b349f40e5c3dddf5d73e5f6335caf6bdc121565c10d3e4d0b",
+      "semantic_turn_id": "estuary109_t15"
+    },
+    {
+      "claim_id": "a5807836-8468-5b76-9467-4785cdf3b6c0",
+      "use_mode": "attributed",
+      "span_start": 0,
+      "span_end": 251,
+      "claim_state_hash": "b76cc0b9bb12b8dcb4626c93e6f40b2f90c47b858f0f2306d29c73274efbcd95",
+      "semantic_turn_id": "estuary109_t15"
+    }
+  ],
+  "turn_evidence_uses": [
+    {
+      "evidence_unit_id": "da25102a-f352-5601-b3b5-f76b77dd8590",
+      "use_mode": "paraphrased",
+      "span_start": 0,
+      "span_end": 71,
+      "rights_policy_version": "0e7f75a6-e7f2-5414-8e6a-b35e9ded3444",
+      "semantic_turn_id": "estuary109_t04"
+    },
+    {
+      "evidence_unit_id": "9d8b96b4-5089-5d5e-9259-0d576551271b",
+      "use_mode": "paraphrased",
+      "span_start": 0,
+      "span_end": 33,
+      "rights_policy_version": "0e7f75a6-e7f2-5414-8e6a-b35e9ded3444",
+      "semantic_turn_id": "estuary109_t06"
+    },
+    {
+      "evidence_unit_id": "9d8b96b4-5089-5d5e-9259-0d576551271b",
+      "use_mode": "paraphrased",
+      "span_start": 61,
+      "span_end": 148,
+      "rights_policy_version": "0e7f75a6-e7f2-5414-8e6a-b35e9ded3444",
+      "semantic_turn_id": "estuary109_t06"
+    },
+    {
+      "evidence_unit_id": "9d8b96b4-5089-5d5e-9259-0d576551271b",
+      "use_mode": "quoted",
+      "span_start": 33,
+      "span_end": 60,
+      "rights_policy_version": "0e7f75a6-e7f2-5414-8e6a-b35e9ded3444",
+      "semantic_turn_id": "estuary109_t06"
+    },
+    {
+      "evidence_unit_id": "bdfa859a-f7f1-5aec-88b0-d98ca1982fc2",
+      "use_mode": "paraphrased",
+      "span_start": 0,
+      "span_end": 248,
+      "rights_policy_version": "0e7f75a6-e7f2-5414-8e6a-b35e9ded3444",
+      "semantic_turn_id": "estuary109_t07"
+    },
+    {
+      "evidence_unit_id": "097a46c4-a115-5650-badb-324b7e9fc15b",
+      "use_mode": "paraphrased",
+      "span_start": 0,
+      "span_end": 248,
+      "rights_policy_version": "0e7f75a6-e7f2-5414-8e6a-b35e9ded3444",
+      "semantic_turn_id": "estuary109_t07"
+    },
+    {
+      "evidence_unit_id": "9d8b96b4-5089-5d5e-9259-0d576551271b",
+      "use_mode": "paraphrased",
+      "span_start": 74,
+      "span_end": 125,
+      "rights_policy_version": "0e7f75a6-e7f2-5414-8e6a-b35e9ded3444",
+      "semantic_turn_id": "estuary109_t09"
+    },
+    {
+      "evidence_unit_id": "bdfa859a-f7f1-5aec-88b0-d98ca1982fc2",
+      "use_mode": "paraphrased",
+      "span_start": 0,
+      "span_end": 271,
+      "rights_policy_version": "0e7f75a6-e7f2-5414-8e6a-b35e9ded3444",
+      "semantic_turn_id": "estuary109_t09"
+    },
+    {
+      "evidence_unit_id": "097a46c4-a115-5650-badb-324b7e9fc15b",
+      "use_mode": "paraphrased",
+      "span_start": 0,
+      "span_end": 271,
+      "rights_policy_version": "0e7f75a6-e7f2-5414-8e6a-b35e9ded3444",
+      "semantic_turn_id": "estuary109_t09"
+    },
+    {
+      "evidence_unit_id": "e82736cb-4702-56a5-9fb7-ac8c9629ab81",
+      "use_mode": "paraphrased",
+      "span_start": 0,
+      "span_end": 145,
+      "rights_policy_version": "0e7f75a6-e7f2-5414-8e6a-b35e9ded3444",
+      "semantic_turn_id": "estuary109_t10"
+    },
+    {
+      "evidence_unit_id": "bdfa859a-f7f1-5aec-88b0-d98ca1982fc2",
+      "use_mode": "paraphrased",
+      "span_start": 0,
+      "span_end": 125,
+      "rights_policy_version": "0e7f75a6-e7f2-5414-8e6a-b35e9ded3444",
+      "semantic_turn_id": "estuary109_t11"
+    },
+    {
+      "evidence_unit_id": "097a46c4-a115-5650-badb-324b7e9fc15b",
+      "use_mode": "paraphrased",
+      "span_start": 0,
+      "span_end": 125,
+      "rights_policy_version": "0e7f75a6-e7f2-5414-8e6a-b35e9ded3444",
+      "semantic_turn_id": "estuary109_t11"
+    },
+    {
+      "evidence_unit_id": "ae3ba8e4-5657-586b-9bb9-84dce9fbd198",
+      "use_mode": "paraphrased",
+      "span_start": 0,
+      "span_end": 202,
+      "rights_policy_version": "0e7f75a6-e7f2-5414-8e6a-b35e9ded3444",
+      "semantic_turn_id": "estuary109_t12"
+    },
+    {
+      "evidence_unit_id": "03fc1029-4eda-5556-87b1-62056f1c53e8",
+      "use_mode": "paraphrased",
+      "span_start": 0,
+      "span_end": 49,
+      "rights_policy_version": "0e7f75a6-e7f2-5414-8e6a-b35e9ded3444",
+      "semantic_turn_id": "estuary109_t13"
+    },
+    {
+      "evidence_unit_id": "03fc1029-4eda-5556-87b1-62056f1c53e8",
+      "use_mode": "quoted",
+      "span_start": 49,
+      "span_end": 68,
+      "rights_policy_version": "0e7f75a6-e7f2-5414-8e6a-b35e9ded3444",
+      "semantic_turn_id": "estuary109_t13"
+    },
+    {
+      "evidence_unit_id": "9d8b96b4-5089-5d5e-9259-0d576551271b",
+      "use_mode": "paraphrased",
+      "span_start": 147,
+      "span_end": 198,
+      "rights_policy_version": "0e7f75a6-e7f2-5414-8e6a-b35e9ded3444",
+      "semantic_turn_id": "estuary109_t15"
+    },
+    {
+      "evidence_unit_id": "bdfa859a-f7f1-5aec-88b0-d98ca1982fc2",
+      "use_mode": "paraphrased",
+      "span_start": 0,
+      "span_end": 251,
+      "rights_policy_version": "0e7f75a6-e7f2-5414-8e6a-b35e9ded3444",
+      "semantic_turn_id": "estuary109_t15"
+    },
+    {
+      "evidence_unit_id": "097a46c4-a115-5650-badb-324b7e9fc15b",
+      "use_mode": "paraphrased",
+      "span_start": 0,
+      "span_end": 251,
+      "rights_policy_version": "0e7f75a6-e7f2-5414-8e6a-b35e9ded3444",
+      "semantic_turn_id": "estuary109_t15"
+    }
+  ],
+  "prediction_candidates": [
+    {
+      "semantic_turn_id": "estuary109_t16",
+      "prediction_candidate_id": "estuary109_prediction_mara_ives",
+      "participant_id": "mara_ives",
+      "prediction_text": "If a later fictional instruction asks for central cover, I expect checking that lane to be a useful first question.",
+      "horizon": "next fictional evaluation, if any",
+      "topic_thread_id": "fixture109-central-cover"
+    },
+    {
+      "semantic_turn_id": "estuary109_t17",
+      "prediction_candidate_id": "estuary109_prediction_jonah_reed",
+      "participant_id": "jonah_reed",
+      "prediction_text": "If a later fictional report proposes a cause, I expect the quality of its measurements to matter more than its confidence.",
+      "horizon": "next fictional evaluation, if any",
+      "topic_thread_id": "fixture109-central-cover"
+    },
+    {
+      "semantic_turn_id": "estuary109_t18",
+      "prediction_candidate_id": "estuary109_prediction_nia_calder",
+      "participant_id": "nia_calder",
+      "prediction_text": "If a later fictional supporter note sounds relieved, I expect to keep reading for whatever concern accompanies it.",
+      "horizon": "next fictional evaluation, if any",
+      "topic_thread_id": "fixture109-central-cover"
+    }
+  ]
+}

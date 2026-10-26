@@ -1,0 +1,141 @@
+{
+  "authored_tables": [
+    {
+      "table": "accounts",
+      "exact_rows": 1,
+      "canonical_bytes": 187,
+      "sha256": "42693377a33da286131fb31806234e8fb5a9b0702b7e796b88d6b78d00b02882"
+    },
+    {
+      "table": "shows",
+      "exact_rows": 1,
+      "canonical_bytes": 148,
+      "sha256": "ca191bcc12468fd017df7dfde1c61e3aa1cf068adf7fcdb1cf3ca9593cf6852a"
+    },
+    {
+      "table": "show_config_versions",
+      "exact_rows": 1,
+      "canonical_bytes": 1023,
+      "sha256": "1726e9573e36433ee38b7d61a66e4b823a923a9e2b1e636c8110b153d799bcd1"
+    },
+    {
+      "table": "program_runs",
+      "exact_rows": 1,
+      "canonical_bytes": 277,
+      "sha256": "a232069184d8cae0eab63c80cc107b3ec70515f445fac166c43f1e2d65e1e3d1"
+    },
+    {
+      "table": "program_run_attempts",
+      "exact_rows": 1,
+      "canonical_bytes": 365,
+      "sha256": "d1b7170f0e1de8195e4a3b51b2da2b0987f62b7acfd1b98933749aa181603480"
+    },
+    {
+      "table": "rights_versions",
+      "exact_rows": 1,
+      "canonical_bytes": 717,
+      "sha256": "f52f0612d33eb87dccdbbc7cb7608fadd60f7ba0adb8b7a08b5607ebda8b668b"
+    },
+    {
+      "table": "evidence_units",
+      "exact_rows": 13,
+      "canonical_bytes": 7056,
+      "sha256": "62f4698b6811220e4a6fc1db7ce84b883b9dad1690e563278725cf2f7d81bc4d"
+    },
+    {
+      "table": "claims",
+      "exact_rows": 9,
+      "canonical_bytes": 4581,
+      "sha256": "fc13a7268975d988dcec480dfdb6a5c49fb16d793cb6b1c90306118c8e753e5f"
+    },
+    {
+      "table": "claim_state_events",
+      "exact_rows": 9,
+      "canonical_bytes": 3547,
+      "sha256": "c0eb43fa5474baed1c12d99da8a3a013873e34f435fff665fcc200cda5693d33"
+    },
+    {
+      "table": "claim_supports",
+      "exact_rows": 9,
+      "canonical_bytes": 3621,
+      "sha256": "2822725de159e4251e4f28233b4e674accd2f3b7fa062cf87da5d33cf94a7a98"
+    },
+    {
+      "table": "derivation_runs",
+      "exact_rows": 1,
+      "canonical_bytes": 6640,
+      "sha256": "203ebdbda5bd22c07ac40b869b6b7e3d381c292498cc73740cb19997243743e4"
+    },
+    {
+      "table": "artifacts",
+      "exact_rows": 4,
+      "canonical_bytes": 75808,
+      "sha256": "937ea054f5630c71b7e1a091346a0d22018b6426a8c3d5001d9cd59f70857406"
+    },
+    {
+      "table": "evidence_packages",
+      "exact_rows": 1,
+      "canonical_bytes": 199,
+      "sha256": "ec979ea2a4f32d01106a0f1bf8df866a3667e4e0698ca745f97347280b732b5c"
+    },
+    {
+      "table": "showrunner_brief_versions",
+      "exact_rows": 1,
+      "canonical_bytes": 264,
+      "sha256": "c9c17c0c2e24f6160957b3d1af4e643ec43d6d00fbca1c2bc5fec193dc429ebf"
+    },
+    {
+      "table": "program_blocks",
+      "exact_rows": 9,
+      "canonical_bytes": 5781,
+      "sha256": "f208da07d169657d3e2177443baab33372889ebdc13d470101773654fcef37a2"
+    },
+    {
+      "table": "script_versions",
+      "exact_rows": 2,
+      "canonical_bytes": 699,
+      "sha256": "b02aef581dafcf72e7b182f0696b7a7a4c47ca51dc55bfca2dce73708d7f8884"
+    },
+    {
+      "table": "turns",
+      "exact_rows": 38,
+      "canonical_bytes": 13497,
+      "sha256": "697ea12409943b770f24a53f6c956cb669abff5073fca9f2133e42a48e9cecfe"
+    },
+    {
+      "table": "turn_claim_uses",
+      "exact_rows": 32,
+      "canonical_bytes": 6843,
+      "sha256": "e5dba2cba2537a04e3f959afa12ffbca3718a405f5be4518be4687500b8592b0"
+    },
+    {
+      "table": "turn_evidence_uses",
+      "exact_rows": 36,
+      "canonical_bytes": 8119,
+      "sha256": "92879dd216aa197beac309eceaff5584ba7e2c8ac3c8b84986411ebcaea73f68"
+    }
+  ],
+  "runtime_expected_effects": {
+    "claims_gate_results": 18,
+    "direction_artifacts": 1,
+    "direction_versions": 1,
+    "performance_intents": 1,
+    "performance_gate_results": 7,
+    "construction_observation_artifacts": 1,
+    "operation_artifacts": 1,
+    "audit_artifacts": 1,
+    "audit_runs": 1,
+    "model_runs": 0,
+    "provider_calls": 0,
+    "render_manifests": 0
+  },
+  "fixed_reader_caps": {
+    "max_artifact_canonical_bytes": 262144,
+    "max_complete_fixture_bytes": 2097152,
+    "max_source_events_per_claim": 2,
+    "positive_source_events_per_claim": 1,
+    "max_observation_rows": 128,
+    "max_owned_performance_rows": 32
+  },
+  "cap_explanation": "Extra-event negatives may be read within cap2 then refused by exact positive population equality. Oversize/extra pages refuse; no truncate-and-pass. Source-bound numeric caps are proposed, not measured runtime costs."
+}

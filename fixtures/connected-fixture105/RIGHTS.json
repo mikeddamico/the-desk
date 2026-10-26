@@ -1,0 +1,20 @@
+{
+  "rights_version_id": "0e7f75a6-e7f2-5414-8e6a-b35e9ded3444",
+  "source_identity": "Bellhaven Fictional Ledger109",
+  "policy": {
+    "covered_source_identities": ["Bellhaven Fictional Ledger109"],
+    "quotation_permission": true,
+    "paraphrase_permission": true,
+    "consumer_exposure_ceiling": {
+      "planner": ["hidden", "claim_only", "paraphrase", "exact_excerpt"],
+      "writer": ["hidden", "claim_only", "paraphrase", "exact_excerpt"],
+      "auditor": ["hidden", "claim_only", "paraphrase", "exact_excerpt"]
+    },
+    "authored_fiction": true,
+    "public_fixture_use": true,
+    "public_github_ci": true,
+    "real_world_reporting": false,
+    "scope": "Only these newly authored fixture109 source bodies and derivatives; no rights to any private trial content."
+  },
+  "created_at": "2024-06-26T18:00:00Z"
+}

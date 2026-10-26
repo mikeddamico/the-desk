@@ -1,0 +1,852 @@
+{
+  "status": "normative exact decoded projections for this fixed profile; no SELECT star",
+  "tables": [
+    {
+      "table": "accounts",
+      "primary_key": "account_id",
+      "columns": [
+        {
+          "column": "account_id",
+          "sql_type": "uuid",
+          "nullable": false
+        },
+        {
+          "column": "external_subject",
+          "sql_type": "text",
+          "nullable": true
+        },
+        {
+          "column": "display_name",
+          "sql_type": "text",
+          "nullable": false
+        },
+        {
+          "column": "actor_kind",
+          "sql_type": "text",
+          "nullable": false
+        },
+        {
+          "column": "created_at",
+          "sql_type": "timestamptz",
+          "nullable": false
+        }
+      ]
+    },
+    {
+      "table": "shows",
+      "primary_key": "show_id",
+      "columns": [
+        {
+          "column": "show_id",
+          "sql_type": "uuid",
+          "nullable": false
+        },
+        {
+          "column": "slug",
+          "sql_type": "text",
+          "nullable": false
+        },
+        {
+          "column": "title",
+          "sql_type": "text",
+          "nullable": false
+        },
+        {
+          "column": "created_at",
+          "sql_type": "timestamptz",
+          "nullable": false
+        }
+      ]
+    },
+    {
+      "table": "show_config_versions",
+      "primary_key": "show_config_version_id",
+      "columns": [
+        {
+          "column": "show_config_version_id",
+          "sql_type": "uuid",
+          "nullable": false
+        },
+        {
+          "column": "show_id",
+          "sql_type": "uuid",
+          "nullable": false
+        },
+        {
+          "column": "version_number",
+          "sql_type": "integer",
+          "nullable": false
+        },
+        {
+          "column": "config_hash",
+          "sql_type": "text",
+          "nullable": false
+        },
+        {
+          "column": "schema_version",
+          "sql_type": "text",
+          "nullable": false
+        },
+        {
+          "column": "canonical_payload",
+          "sql_type": "jsonb",
+          "nullable": false
+        },
+        {
+          "column": "pre_publish_review_required",
+          "sql_type": "boolean",
+          "nullable": false
+        },
+        {
+          "column": "parent_version_id",
+          "sql_type": "uuid",
+          "nullable": true
+        },
+        {
+          "column": "created_at",
+          "sql_type": "timestamptz",
+          "nullable": false
+        }
+      ]
+    },
+    {
+      "table": "program_runs",
+      "primary_key": "program_run_id",
+      "columns": [
+        {
+          "column": "program_run_id",
+          "sql_type": "uuid",
+          "nullable": false
+        },
+        {
+          "column": "show_id",
+          "sql_type": "uuid",
+          "nullable": false
+        },
+        {
+          "column": "purpose",
+          "sql_type": "text",
+          "nullable": false
+        },
+        {
+          "column": "show_config_version_id",
+          "sql_type": "uuid",
+          "nullable": true
+        },
+        {
+          "column": "publication_enabled",
+          "sql_type": "boolean",
+          "nullable": true
+        },
+        {
+          "column": "state",
+          "sql_type": "lifecycle_state",
+          "nullable": false
+        },
+        {
+          "column": "created_at",
+          "sql_type": "timestamptz",
+          "nullable": false
+        }
+      ]
+    },
+    {
+      "table": "program_run_attempts",
+      "primary_key": "attempt_id",
+      "columns": [
+        {
+          "column": "attempt_id",
+          "sql_type": "uuid",
+          "nullable": false
+        },
+        {
+          "column": "program_run_id",
+          "sql_type": "uuid",
+          "nullable": false
+        },
+        {
+          "column": "show_config_version_id",
+          "sql_type": "uuid",
+          "nullable": false
+        },
+        {
+          "column": "parent_attempt_id",
+          "sql_type": "uuid",
+          "nullable": true
+        },
+        {
+          "column": "repair_plan_id",
+          "sql_type": "uuid",
+          "nullable": true
+        },
+        {
+          "column": "evidence_package_id",
+          "sql_type": "uuid",
+          "nullable": true
+        },
+        {
+          "column": "state",
+          "sql_type": "lifecycle_state",
+          "nullable": false
+        },
+        {
+          "column": "publication_enabled",
+          "sql_type": "boolean",
+          "nullable": false
+        },
+        {
+          "column": "created_at",
+          "sql_type": "timestamptz",
+          "nullable": false
+        }
+      ]
+    },
+    {
+      "table": "rights_versions",
+      "primary_key": "rights_version_id",
+      "columns": [
+        {
+          "column": "rights_version_id",
+          "sql_type": "uuid",
+          "nullable": false
+        },
+        {
+          "column": "source_identity",
+          "sql_type": "text",
+          "nullable": false
+        },
+        {
+          "column": "policy",
+          "sql_type": "jsonb",
+          "nullable": false
+        },
+        {
+          "column": "created_at",
+          "sql_type": "timestamptz",
+          "nullable": false
+        }
+      ]
+    },
+    {
+      "table": "evidence_units",
+      "primary_key": "evidence_unit_id",
+      "columns": [
+        {
+          "column": "evidence_unit_id",
+          "sql_type": "uuid",
+          "nullable": false
+        },
+        {
+          "column": "content_hash",
+          "sql_type": "text",
+          "nullable": false
+        },
+        {
+          "column": "evidence_type",
+          "sql_type": "text",
+          "nullable": false
+        },
+        {
+          "column": "usage_class",
+          "sql_type": "text",
+          "nullable": false
+        },
+        {
+          "column": "canonical_content",
+          "sql_type": "jsonb",
+          "nullable": false
+        },
+        {
+          "column": "rights_version_id",
+          "sql_type": "uuid",
+          "nullable": false
+        },
+        {
+          "column": "supersedes_evidence_unit_id",
+          "sql_type": "uuid",
+          "nullable": true
+        },
+        {
+          "column": "created_at",
+          "sql_type": "timestamptz",
+          "nullable": false
+        }
+      ]
+    },
+    {
+      "table": "claims",
+      "primary_key": "claim_id",
+      "columns": [
+        {
+          "column": "claim_id",
+          "sql_type": "uuid",
+          "nullable": false
+        },
+        {
+          "column": "content_hash",
+          "sql_type": "text",
+          "nullable": false
+        },
+        {
+          "column": "claim_kind",
+          "sql_type": "text",
+          "nullable": false
+        },
+        {
+          "column": "origin",
+          "sql_type": "text",
+          "nullable": false
+        },
+        {
+          "column": "subject_domain",
+          "sql_type": "text",
+          "nullable": false
+        },
+        {
+          "column": "subject",
+          "sql_type": "jsonb",
+          "nullable": false
+        },
+        {
+          "column": "predicate",
+          "sql_type": "text",
+          "nullable": false
+        },
+        {
+          "column": "value",
+          "sql_type": "jsonb",
+          "nullable": false
+        },
+        {
+          "column": "initial_status",
+          "sql_type": "text",
+          "nullable": false
+        },
+        {
+          "column": "initial_usage_class",
+          "sql_type": "text",
+          "nullable": false
+        },
+        {
+          "column": "asserted_at",
+          "sql_type": "timestamptz",
+          "nullable": true
+        },
+        {
+          "column": "supersedes_claim_id",
+          "sql_type": "uuid",
+          "nullable": true
+        },
+        {
+          "column": "created_at",
+          "sql_type": "timestamptz",
+          "nullable": false
+        }
+      ]
+    },
+    {
+      "table": "claim_state_events",
+      "primary_key": "claim_state_event_id",
+      "columns": [
+        {
+          "column": "claim_state_event_id",
+          "sql_type": "uuid",
+          "nullable": false
+        },
+        {
+          "column": "claim_id",
+          "sql_type": "uuid",
+          "nullable": false
+        },
+        {
+          "column": "actor_id",
+          "sql_type": "uuid",
+          "nullable": false
+        },
+        {
+          "column": "occurred_at",
+          "sql_type": "timestamptz",
+          "nullable": false
+        },
+        {
+          "column": "event_type",
+          "sql_type": "text",
+          "nullable": false
+        },
+        {
+          "column": "event_sequence",
+          "sql_type": "integer",
+          "nullable": false
+        },
+        {
+          "column": "event_payload",
+          "sql_type": "jsonb",
+          "nullable": false
+        }
+      ]
+    },
+    {
+      "table": "claim_supports",
+      "primary_key": "claim_support_id",
+      "columns": [
+        {
+          "column": "claim_id",
+          "sql_type": "uuid",
+          "nullable": false
+        },
+        {
+          "column": "claim_support_id",
+          "sql_type": "uuid",
+          "nullable": false
+        },
+        {
+          "column": "support_kind",
+          "sql_type": "text",
+          "nullable": false
+        },
+        {
+          "column": "support_role",
+          "sql_type": "text",
+          "nullable": false
+        },
+        {
+          "column": "evidence_unit_id",
+          "sql_type": "uuid",
+          "nullable": true
+        },
+        {
+          "column": "derivation_run_id",
+          "sql_type": "uuid",
+          "nullable": true
+        },
+        {
+          "column": "external_support_identity",
+          "sql_type": "text",
+          "nullable": true
+        },
+        {
+          "column": "support_hash",
+          "sql_type": "text",
+          "nullable": false
+        },
+        {
+          "column": "created_at",
+          "sql_type": "timestamptz",
+          "nullable": false
+        }
+      ]
+    },
+    {
+      "table": "derivation_runs",
+      "primary_key": "derivation_run_id",
+      "columns": [
+        {
+          "column": "derivation_run_id",
+          "sql_type": "uuid",
+          "nullable": false
+        },
+        {
+          "column": "rule_version",
+          "sql_type": "text",
+          "nullable": false
+        },
+        {
+          "column": "parameters",
+          "sql_type": "jsonb",
+          "nullable": false
+        },
+        {
+          "column": "exact_input_refs",
+          "sql_type": "jsonb",
+          "nullable": false
+        },
+        {
+          "column": "output",
+          "sql_type": "jsonb",
+          "nullable": false
+        },
+        {
+          "column": "output_hash",
+          "sql_type": "text",
+          "nullable": false
+        },
+        {
+          "column": "created_at",
+          "sql_type": "timestamptz",
+          "nullable": false
+        }
+      ]
+    },
+    {
+      "table": "artifacts",
+      "primary_key": "artifact_id",
+      "columns": [
+        {
+          "column": "artifact_id",
+          "sql_type": "uuid",
+          "nullable": false
+        },
+        {
+          "column": "artifact_type",
+          "sql_type": "text",
+          "nullable": false
+        },
+        {
+          "column": "schema_version",
+          "sql_type": "text",
+          "nullable": false
+        },
+        {
+          "column": "content_hash",
+          "sql_type": "text",
+          "nullable": false
+        },
+        {
+          "column": "storage_uri",
+          "sql_type": "text",
+          "nullable": true
+        },
+        {
+          "column": "byte_size",
+          "sql_type": "bigint",
+          "nullable": true
+        },
+        {
+          "column": "canonical_payload",
+          "sql_type": "jsonb",
+          "nullable": true
+        },
+        {
+          "column": "parent_artifact_id",
+          "sql_type": "uuid",
+          "nullable": true
+        },
+        {
+          "column": "supersedes_artifact_id",
+          "sql_type": "uuid",
+          "nullable": true
+        },
+        {
+          "column": "created_at",
+          "sql_type": "timestamptz",
+          "nullable": false
+        }
+      ]
+    },
+    {
+      "table": "evidence_packages",
+      "primary_key": "evidence_package_id",
+      "columns": [
+        {
+          "column": "evidence_package_id",
+          "sql_type": "uuid",
+          "nullable": false
+        },
+        {
+          "column": "artifact_id",
+          "sql_type": "uuid",
+          "nullable": false
+        },
+        {
+          "column": "package_hash",
+          "sql_type": "sha256_hex",
+          "nullable": false
+        }
+      ]
+    },
+    {
+      "table": "showrunner_brief_versions",
+      "primary_key": "showrunner_brief_version_id",
+      "columns": [
+        {
+          "column": "showrunner_brief_version_id",
+          "sql_type": "uuid",
+          "nullable": false
+        },
+        {
+          "column": "artifact_id",
+          "sql_type": "uuid",
+          "nullable": false
+        },
+        {
+          "column": "evidence_package_id",
+          "sql_type": "uuid",
+          "nullable": false
+        },
+        {
+          "column": "attempt_id",
+          "sql_type": "uuid",
+          "nullable": false
+        },
+        {
+          "column": "revision_parent_id",
+          "sql_type": "uuid",
+          "nullable": true
+        }
+      ]
+    },
+    {
+      "table": "program_blocks",
+      "primary_key": "program_block_id",
+      "columns": [
+        {
+          "column": "program_block_id",
+          "sql_type": "uuid",
+          "nullable": false
+        },
+        {
+          "column": "showrunner_brief_version_id",
+          "sql_type": "uuid",
+          "nullable": false
+        },
+        {
+          "column": "sequence",
+          "sql_type": "integer",
+          "nullable": false
+        },
+        {
+          "column": "block_type",
+          "sql_type": "text",
+          "nullable": false
+        },
+        {
+          "column": "semantic_payload",
+          "sql_type": "jsonb",
+          "nullable": false
+        }
+      ]
+    },
+    {
+      "table": "script_versions",
+      "primary_key": "script_version_id",
+      "columns": [
+        {
+          "column": "script_version_id",
+          "sql_type": "uuid",
+          "nullable": false
+        },
+        {
+          "column": "artifact_id",
+          "sql_type": "uuid",
+          "nullable": false
+        },
+        {
+          "column": "showrunner_brief_version_id",
+          "sql_type": "uuid",
+          "nullable": false
+        },
+        {
+          "column": "attempt_id",
+          "sql_type": "uuid",
+          "nullable": false
+        },
+        {
+          "column": "revision_parent_id",
+          "sql_type": "uuid",
+          "nullable": true
+        },
+        {
+          "column": "revision_parent_content_identity",
+          "sql_type": "sha256_hex",
+          "nullable": true
+        }
+      ]
+    },
+    {
+      "table": "turns",
+      "primary_key": "turn_id",
+      "columns": [
+        {
+          "column": "turn_id",
+          "sql_type": "uuid",
+          "nullable": false
+        },
+        {
+          "column": "script_version_id",
+          "sql_type": "uuid",
+          "nullable": false
+        },
+        {
+          "column": "program_block_id",
+          "sql_type": "uuid",
+          "nullable": false
+        },
+        {
+          "column": "sequence",
+          "sql_type": "integer",
+          "nullable": false
+        },
+        {
+          "column": "participant_id",
+          "sql_type": "text",
+          "nullable": false
+        },
+        {
+          "column": "spoken_text",
+          "sql_type": "text",
+          "nullable": false
+        }
+      ]
+    },
+    {
+      "table": "turn_claim_uses",
+      "primary_key": "turn_claim_use_id",
+      "columns": [
+        {
+          "column": "turn_claim_use_id",
+          "sql_type": "uuid",
+          "nullable": false
+        },
+        {
+          "column": "turn_id",
+          "sql_type": "uuid",
+          "nullable": false
+        },
+        {
+          "column": "claim_id",
+          "sql_type": "uuid",
+          "nullable": false
+        },
+        {
+          "column": "use_mode",
+          "sql_type": "text",
+          "nullable": false
+        },
+        {
+          "column": "span_start",
+          "sql_type": "integer",
+          "nullable": false
+        },
+        {
+          "column": "span_end",
+          "sql_type": "integer",
+          "nullable": false
+        }
+      ]
+    },
+    {
+      "table": "turn_evidence_uses",
+      "primary_key": "turn_evidence_use_id",
+      "columns": [
+        {
+          "column": "turn_evidence_use_id",
+          "sql_type": "uuid",
+          "nullable": false
+        },
+        {
+          "column": "turn_id",
+          "sql_type": "uuid",
+          "nullable": false
+        },
+        {
+          "column": "evidence_unit_id",
+          "sql_type": "uuid",
+          "nullable": false
+        },
+        {
+          "column": "use_mode",
+          "sql_type": "text",
+          "nullable": false
+        },
+        {
+          "column": "span_start",
+          "sql_type": "integer",
+          "nullable": false
+        },
+        {
+          "column": "span_end",
+          "sql_type": "integer",
+          "nullable": false
+        }
+      ]
+    },
+    {
+      "table": "performance_direction_versions",
+      "primary_key": "performance_direction_version_id",
+      "columns": [
+        {
+          "column": "performance_direction_version_id",
+          "sql_type": "uuid",
+          "nullable": false
+        },
+        {
+          "column": "artifact_id",
+          "sql_type": "uuid",
+          "nullable": false
+        },
+        {
+          "column": "script_version_id",
+          "sql_type": "uuid",
+          "nullable": false
+        }
+      ]
+    },
+    {
+      "table": "performance_intents",
+      "primary_key": "performance_intent_id",
+      "columns": [
+        {
+          "column": "performance_intent_id",
+          "sql_type": "uuid",
+          "nullable": false
+        },
+        {
+          "column": "performance_direction_version_id",
+          "sql_type": "uuid",
+          "nullable": false
+        },
+        {
+          "column": "turn_id",
+          "sql_type": "uuid",
+          "nullable": false
+        },
+        {
+          "column": "intent",
+          "sql_type": "jsonb",
+          "nullable": false
+        }
+      ]
+    },
+    {
+      "table": "gate_results",
+      "primary_key": "gate_result_id",
+      "columns": [
+        {
+          "column": "gate_result_id",
+          "sql_type": "uuid",
+          "nullable": false
+        },
+        {
+          "column": "gate_definition_id",
+          "sql_type": "uuid",
+          "nullable": false
+        },
+        {
+          "column": "attempt_id",
+          "sql_type": "uuid",
+          "nullable": false
+        },
+        {
+          "column": "input_fingerprint",
+          "sql_type": "sha256_hex",
+          "nullable": false
+        },
+        {
+          "column": "outcome",
+          "sql_type": "text",
+          "nullable": false
+        },
+        {
+          "column": "result",
+          "sql_type": "jsonb",
+          "nullable": false
+        },
+        {
+          "column": "created_at",
+          "sql_type": "timestamptz",
+          "nullable": false
+        }
+      ]
+    }
+  ]
+}
