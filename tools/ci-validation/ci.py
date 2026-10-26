@@ -970,6 +970,22 @@ def fixture_prepare(base, checkout):
     return binding
 
 
+def fixture_graph_difference(expected, actual, kind):
+    """Bounded diagnostic of existing graphs: paths and field names, never values."""
+    paths = sorted(path for path in expected.keys() | actual.keys()
+                   if path not in expected or path not in actual or expected[path] != actual[path])
+    differences = []
+    for path in paths[:10]:
+        before, after = expected.get(path, {}), actual.get(path, {})
+        fields = sorted(key for key in before.keys() | after.keys()
+                        if key not in before or key not in after or before[key] != after[key])
+        differences.append({'path': path[:200] if path else '.',
+                            'classification': 'added' if path not in expected else 'removed' if path not in actual else 'changed',
+                            'fields': fields})
+    return json.dumps({'kind': kind, 'changed_path_count': len(paths), 'differences': differences},
+                      sort_keys=True, separators=(',', ':'), ensure_ascii=True)
+
+
 def fixture_validate(base, checkout, settled=False):
     base, checkout = Path(base), Path(checkout)
     binding = json.loads(fixture_read(base / 'evidence/fixture105-binding.json', 8192))
@@ -995,8 +1011,10 @@ def fixture_validate(base, checkout, settled=False):
             raise RuntimeError('fixture binding changed')
         if 'INVENTORY' in name:
             kind = 'source' if name.startswith('SOURCE') else 'tools'
-            if json.loads(data) != fixture_graph(checkout if kind == 'source' else checkout / 'node_modules', kind):
-                raise RuntimeError('fixture immutable graph changed')
+            expected = json.loads(data)
+            actual = fixture_graph(checkout if kind == 'source' else checkout / 'node_modules', kind)
+            if expected != actual:
+                raise RuntimeError('fixture immutable graph changed ' + fixture_graph_difference(expected, actual, kind))
     release_bytes = fixture_read(root / 'bindings/RELEASE.json', 262144)
     ledger_bytes = fixture_read(root / 'bindings/SOURCE-LEDGER.json', 262144)
     adoption = json.loads(fixture_read(root / 'bindings/ADOPTION.json', 262144))

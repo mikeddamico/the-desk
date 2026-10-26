@@ -1615,5 +1615,72 @@ class Fixture105Tooling(unittest.TestCase):
                         ci.fixture_snapshot_population(snapshot)
 
 
+class FixtureGraphDiagnostic(unittest.TestCase):
+    def diagnostic(self, expected, actual, kind='source'):
+        return json.loads(ci.fixture_graph_difference(expected, actual, kind))
+
+    def test_equality_and_success_unchanged(self):
+        graph = {'': {'type': 'directory', 'mode': 448}}
+        self.assertEqual(self.diagnostic(graph, graph),
+                         {'kind': 'source', 'changed_path_count': 0, 'differences': []})
+        with fixture_world() as (base, checkout, root, binding):
+            with mock.patch.object(ci, 'fixture_graph', wraps=ci.fixture_graph) as capture:
+                self.assertEqual(ci.fixture_validate(base, checkout), (binding, {'absent': True}))
+            self.assertEqual([call.args for call in capture.call_args_list],
+                             [(checkout, 'source'), (checkout / 'node_modules', 'tools')])
+
+    def test_addition_removal_sorted_and_values_excluded(self):
+        expected = {'z': {'type': 'symlink', 'target': 'PRIVATE_TARGET'}}
+        actual = {'a': {'type': 'file', 'sha256': 'PRIVATE_HASH', 'bytes': 123}}
+        raw = ci.fixture_graph_difference(expected, actual, 'tools')
+        result = json.loads(raw)
+        self.assertEqual(result['kind'], 'tools')
+        self.assertEqual(result['changed_path_count'], 2)
+        self.assertEqual(result['differences'], [
+            {'path': 'a', 'classification': 'added', 'fields': ['bytes', 'sha256', 'type']},
+            {'path': 'z', 'classification': 'removed', 'fields': ['target', 'type']}])
+        for value in ('PRIVATE_TARGET', 'PRIVATE_HASH', '123'):
+            self.assertNotIn(value, raw)
+
+    def test_changed_fields_not_metadata_values(self):
+        before = {'x': {'type': 'file', 'mode': 384, 'bytes': 123, 'sha256': 'OLD_HASH'}}
+        after = {'x': {'type': 'file', 'mode': 384, 'bytes': 456, 'sha256': 'NEW_HASH'}}
+        self.assertEqual(self.diagnostic(before, after)['differences'],
+                         [{'path': 'x', 'classification': 'changed', 'fields': ['bytes', 'sha256']}])
+        before['x']['target'] = None
+        self.assertIn('target', self.diagnostic(before, after)['differences'][0]['fields'])
+
+    def test_mode_only_root_and_empty_directory(self):
+        before = {'': {'type': 'directory', 'mode': 448}, 'empty': {'type': 'directory', 'mode': 448}}
+        after = {'': {'type': 'directory', 'mode': 493}}
+        self.assertEqual(self.diagnostic(before, after)['differences'], [
+            {'path': '.', 'classification': 'changed', 'fields': ['mode']},
+            {'path': 'empty', 'classification': 'removed', 'fields': ['mode', 'type']}])
+
+    def test_output_bounds_full_count_and_determinism(self):
+        actual = {('%03d' % i) + '\u2603' * 250: {'type': 'directory', 'mode': 448} for i in reversed(range(30))}
+        raw = ci.fixture_graph_difference({}, actual, 'tools')
+        result = json.loads(raw)
+        self.assertEqual(result['changed_path_count'], 30)
+        self.assertEqual(len(result['differences']), 10)
+        self.assertEqual([r['path'] for r in result['differences']], [p[:200] for p in sorted(actual)[:10]])
+        self.assertTrue(all(len(r['path']) == 200 for r in result['differences']))
+        self.assertLess(len(raw.encode()), 14000)
+        self.assertEqual(raw, ci.fixture_graph_difference({}, dict(reversed(list(actual.items()))), 'tools'))
+
+    def test_refusal_prefix_graph_kind_and_no_recapture(self):
+        for kind in ('source', 'tools'):
+            with self.subTest(kind=kind), fixture_world() as (base, checkout, root, binding):
+                parent = checkout if kind == 'source' else checkout / 'node_modules'
+                (parent / 'new-empty').mkdir(mode=0o700)
+                with mock.patch.object(ci, 'fixture_graph', wraps=ci.fixture_graph) as capture:
+                    with self.assertRaisesRegex(RuntimeError, '^fixture immutable graph changed ') as raised:
+                        ci.fixture_validate(base, checkout)
+                detail = json.loads(str(raised.exception).removeprefix('fixture immutable graph changed '))
+                self.assertEqual(detail, {'kind': kind, 'changed_path_count': 1, 'differences': [
+                    {'path': 'new-empty', 'classification': 'added', 'fields': ['mode', 'type']}]})
+                self.assertEqual(capture.call_count, 1 if kind == 'source' else 2)
+
+
 if __name__ == '__main__':
     unittest.main()
