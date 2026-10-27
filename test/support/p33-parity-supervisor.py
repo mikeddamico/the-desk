@@ -679,7 +679,7 @@ def guard(args):
     filters = {'unit': ['--exclude', 'test/integration/**', '--exclude', test],
                'all': ['--exclude', test], 'integration': ['test/integration'],
                'focused': [test],
-               'connected': ['test/unit/connected-fixture105.test.ts', 'test/integration/connected-fixture105.test.ts'],
+               'connected': ['test/unit/connected-fixture105.test.ts', 'test/integration/connected-fixture105.test.ts', '--reporter', 'verbose', '--bail', '1'],
                'parity': ['test/unit/fixture-pack-extraction-parity.test.ts'], 'p33': ['test/unit/fixture-pack-extraction-parity.test.ts',
                    '--testNamePattern', '^P28-P37 legacy formats, freshness and discarded faults P33 multidisk$']}
     command = [node, str(ROOT/'node_modules/vitest/vitest.mjs'), 'run', *filters[args.profile]]
