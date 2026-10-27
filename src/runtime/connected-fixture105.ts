@@ -762,13 +762,6 @@ const fixtureCheckout = fileURLToPath(
 export function validateConnectedFixture105ExecutionRoot(): string {
   return fixtureExecutionRoot(fixtureCheckout).root;
 }
-/** Runtime bindings are prepared externally by the independently bound runner. */
-function bindingBytes(
-  name: "RELEASE.json" | "SOURCE-LEDGER.json" | "ADOPTION.json",
-): Buffer {
-  const execution = fixtureExecutionRoot(fixtureCheckout);
-  return fixtureRead(`${execution.root}/bindings/${name}`, 262144);
-}
 function jsonBytes(bytes: Buffer): Obj {
   try {
     return obj(
@@ -790,12 +783,24 @@ function fixedSubject(): Obj {
     ]),
   );
 }
-function readRelease(): ReleaseBinding {
-  // No user-selected pathname or object. The external adoption record is reviewed
-  // deployment evidence, not authentication against a malicious filesystem owner.
-  const releaseBytes = bindingBytes("RELEASE.json");
-  const ledgerBytes = bindingBytes("SOURCE-LEDGER.json");
-  const adoption = jsonBytes(bindingBytes("ADOPTION.json"));
+function readRelease(): {
+  binding: ReleaseBinding;
+  observation: Readonly<{ root_sha256: string; temp: FixtureRootObject }>;
+} {
+  // Fresh full checks bracket this synchronous read only. Nothing is reused across
+  // a guard call or await; this is not authentication against hostile same-user code.
+  const before = fixtureExecutionRoot(fixtureCheckout);
+  const releaseBytes = fixtureRead(
+    `${before.root}/bindings/RELEASE.json`,
+    262144,
+  );
+  const ledgerBytes = fixtureRead(
+    `${before.root}/bindings/SOURCE-LEDGER.json`,
+    262144,
+  );
+  const adoption = jsonBytes(
+    fixtureRead(`${before.root}/bindings/ADOPTION.json`, 262144),
+  );
   const release = jsonBytes(releaseBytes);
   const ledger = jsonBytes(ledgerBytes);
   if (
@@ -971,13 +976,22 @@ function readRelease(): ReleaseBinding {
   )
     throw new ConnectedFixture105Refusal("fixture_release_source_link");
   const execution = fixtureExecutionRoot(fixtureCheckout);
+  if (
+    execution.root !== before.root ||
+    execution.rootHash !== before.rootHash ||
+    canonicalJson(execution.marker) !== canonicalJson(before.marker)
+  )
+    throw new ConnectedFixture105Refusal("fixture_release_changed");
   return frozen({
-    release,
-    digest: sha256(releaseBytes),
-    ledgerDigest: sha256(ledgerBytes),
-    subject: fixedSubject(),
-    rootHash: execution.rootHash,
-    root: execution.root,
+    binding: {
+      release,
+      digest: sha256(releaseBytes),
+      ledgerDigest: sha256(ledgerBytes),
+      subject: fixedSubject(),
+      rootHash: execution.rootHash,
+      root: execution.root,
+    },
+    observation: { root_sha256: execution.rootHash, temp: execution.temp },
   });
 }
 
@@ -1812,12 +1826,8 @@ class Connected105Session {
         }) !== this.environment
       )
         throw new ConnectedFixture105Refusal("fixture_context_changed");
-      const now = readRelease();
-      const observed = fixtureExecutionRoot(fixtureCheckout);
-      FIXTURE_TOOL_OBSERVATIONS.push({
-        root_sha256: observed.rootHash,
-        temp: observed.temp,
-      });
+      const { binding: now, observation } = readRelease();
+      FIXTURE_TOOL_OBSERVATIONS.push(observation);
       if (FIXTURE_TOOL_OBSERVATIONS.length > 4096)
         throw new ConnectedFixture105Refusal("fixture_tool_observation_bound");
       if (
@@ -2887,7 +2897,7 @@ function openConnected105Session(): Connected105Session {
   }
   if (config.DESK_ENV !== "test" || config.PROVIDERS_ENABLED)
     throw new ConnectedFixture105Refusal("fixture_runtime_context");
-  const release = readRelease();
+  const { binding: release } = readRelease();
   return new Connected105Session(config, release);
 }
 const CONTINUATIONS = new WeakMap<
