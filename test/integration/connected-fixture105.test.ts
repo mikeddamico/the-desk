@@ -165,7 +165,12 @@ const CASE_EXPECTATIONS: readonly {
   {
     case_id:
       "refuses a preseeded source population without constructing an observation",
-    expected: ["expected_refusal"],
+    expected: [
+      "expected_refusal",
+      "expected_refusal",
+      "expected_refusal",
+      "expected_refusal",
+    ],
   },
   {
     case_id: "rolls back the package when the later observation insert fails",
@@ -712,12 +717,48 @@ suite("connected fixture105 native ownership", () => {
     await cluster.bootstrap();
   }, LIMIT);
 
-  async function fresh(): Promise<DbEnv> {
+  type ConfigSeed = "exact" | "missing-config" | "changed-show" | "extra-show";
+  async function fresh(seed: ConfigSeed = "exact"): Promise<DbEnv> {
     // Track before migration so setup failure still reaches independent teardown.
     if (cluster === undefined) throw new Error("fixture cluster not allocated");
     const env = await requireCluster().create({ migrate: false });
     current = env;
     await migrate(env.migrator);
+    // Configuration belongs to the existing setup role; runtime privileges stay unchanged.
+    const fixed = connectedFixture105Data();
+    for (const table of ["shows", "show_config_versions"] as const) {
+      const spec = fixed.sql.find((value) => value.table === table);
+      if (spec === undefined)
+        throw new Error("missing fixed configuration SQL map");
+      const columns = spec.columns as Obj[];
+      let rows = (fixed.tables[table] ?? []).map((row) => structuredClone(row));
+      if (table === "show_config_versions" && seed === "missing-config")
+        rows = [];
+      if (table === "shows" && seed === "changed-show") {
+        const first = rows[0];
+        if (first === undefined) throw new Error("missing fixed show");
+        first.title = "Changed fixture show";
+      }
+      if (table === "shows" && seed === "extra-show") {
+        const first = rows[0];
+        if (first === undefined) throw new Error("missing fixed show");
+        rows.push({
+          ...first,
+          show_id: "00000000-0000-4000-8000-000000000001",
+          slug: "foreign-fixture-show",
+        });
+      }
+      for (const row of rows) {
+        await env.migrator.query(
+          `INSERT INTO ${table} (${columns.map((column) => String(column.column)).join(",")}) VALUES (${columns.map((column, index) => `$${String(index + 1)}${column.sql_type === "jsonb" ? "::jsonb" : ""}`).join(",")})`,
+          columns.map((column) =>
+            column.sql_type === "jsonb"
+              ? canonicalJson(row[String(column.column)])
+              : row[String(column.column)],
+          ),
+        );
+      }
+    }
     await requireCluster().settle(env.name); // One memoized outcome; no second pool.end.
     process.env.DESK_ENV = "test";
     process.env.DATABASE_URL = env.runtimeUrl;
@@ -1008,6 +1049,14 @@ suite("connected fixture105 native ownership", () => {
       "records actual18+7 results, one direction and a labelled audit with retained semantic gaps",
       async () => {
         const env = await fresh();
+        await inspect(env, async (pool) => {
+          const privileges = await pool.query(
+            "SELECT has_table_privilege(current_user, 'show_config_versions', 'INSERT') AS current_insert, has_table_privilege(session_user, 'show_config_versions', 'INSERT') AS session_insert",
+          );
+          expect(privileges.rows).toEqual([
+            { current_insert: false, session_insert: false },
+          ]);
+        });
         const result = await runConnectedFixture105();
         expect(result.status).toBe("created");
         expect(result.claims.rows).toHaveLength(18);
@@ -1131,39 +1180,54 @@ suite("connected fixture105 native ownership", () => {
     caseBody(
       "refuses a preseeded source population without constructing an observation",
       async () => {
-        const env = await fresh();
-        await inspect(env, async (pool) => {
-          const row = connectedFixture105Data().tables.claims?.[0];
-          if (row === undefined) throw new Error("missing fixed claim");
-          await pool.query(
-            "INSERT INTO claims (claim_id,content_hash,claim_kind,origin,subject_domain,subject,predicate,value,initial_status,initial_usage_class,asserted_at,supersedes_claim_id,created_at) VALUES ($1,$2,$3,$4,$5,$6::jsonb,$7,$8::jsonb,$9,$10,$11,$12,$13)",
-            [
-              row.claim_id,
-              row.content_hash,
-              row.claim_kind,
-              row.origin,
-              row.subject_domain,
-              JSON.stringify(row.subject),
-              row.predicate,
-              JSON.stringify(row.value),
-              row.initial_status,
-              row.initial_usage_class,
-              row.asserted_at,
-              row.supersedes_claim_id,
-              row.created_at,
-            ],
+        for (const variant of [
+          "foreign-claim",
+          "missing-config",
+          "changed-show",
+          "extra-show",
+        ] as const) {
+          const env = await fresh(
+            variant === "foreign-claim" ? "exact" : variant,
           );
-        });
-        await expect(runConnectedFixture105()).rejects.toThrow(
-          "fixture_initial_population",
-        );
-        expect(await counts(env)).toEqual({
-          packages: 0,
-          directions: 0,
-          intents: 0,
-          gates: 0,
-          audits: 0,
-        });
+          try {
+            if (variant === "foreign-claim")
+              await inspect(env, async (pool) => {
+                const row = connectedFixture105Data().tables.claims?.[0];
+                if (row === undefined) throw new Error("missing fixed claim");
+                await pool.query(
+                  "INSERT INTO claims (claim_id,content_hash,claim_kind,origin,subject_domain,subject,predicate,value,initial_status,initial_usage_class,asserted_at,supersedes_claim_id,created_at) VALUES ($1,$2,$3,$4,$5,$6::jsonb,$7,$8::jsonb,$9,$10,$11,$12,$13)",
+                  [
+                    row.claim_id,
+                    row.content_hash,
+                    row.claim_kind,
+                    row.origin,
+                    row.subject_domain,
+                    JSON.stringify(row.subject),
+                    row.predicate,
+                    JSON.stringify(row.value),
+                    row.initial_status,
+                    row.initial_usage_class,
+                    row.asserted_at,
+                    row.supersedes_claim_id,
+                    row.created_at,
+                  ],
+                );
+              });
+            await expect(runConnectedFixture105()).rejects.toThrow(
+              "fixture_initial_population",
+            );
+            expect(await counts(env)).toEqual({
+              packages: 0,
+              directions: 0,
+              intents: 0,
+              gates: 0,
+              audits: 0,
+            });
+          } finally {
+            await env.close();
+            current = undefined;
+          }
+        }
       },
     ),
     LIMIT,

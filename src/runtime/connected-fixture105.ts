@@ -209,8 +209,10 @@ function fixtureGraph(
   kind: "source" | "tools",
 ): FixtureRootObject {
   const result: FixtureRootObject = {};
+  let visited = 0;
   function visit(path: string, relative: string): void {
-    if (Object.keys(result).length > 20000)
+    // Each prior visit can add at most one own key; preserve the exact bound.
+    if (visited++ > 20000 && Object.keys(result).length > 20000)
       throw new Error("fixture_inventory_bound");
     const info = fixtureFs.lstatSync(path);
     if (info.isSymbolicLink()) {
@@ -2082,6 +2084,27 @@ class Connected105Session {
     const f = connectedFixture105Data();
     await this.transaction(async (tx) => {
       for (const table of Object.keys(f.tables)) {
+        if (table === "shows" || table === "show_config_versions") {
+          // Fixed configuration is installed by test setup, never by runtime.
+          const found = await tx.query(queryProjection(table));
+          const expected = (f.tables[table] ?? [])
+            .map((row) => connectedFixture105Row(table, row))
+            .sort((a, b) =>
+              a.primary_key < b.primary_key
+                ? -1
+                : a.primary_key > b.primary_key
+                  ? 1
+                  : 0,
+            );
+          if (
+            found.rows.length >= 129 ||
+            canonicalJson(
+              found.rows.map((row) => connectedFixture105Row(table, row)),
+            ) !== canonicalJson(expected)
+          )
+            throw new ConnectedFixture105Refusal("fixture_initial_population");
+          continue;
+        }
         if (
           (await tx.query(`SELECT 1 AS present FROM ${table} LIMIT 1`)).rows
             .length !== 0
@@ -2103,8 +2126,7 @@ class Connected105Session {
         )
           throw new ConnectedFixture105Refusal("fixture_initial_population");
       }
-      for (const table of ["accounts", "shows", "show_config_versions"])
-        await insertFixedTable(tx, table, f.tables[table] ?? []);
+      await insertFixedTable(tx, "accounts", f.tables.accounts ?? []);
     });
     const ids = obj(f.identities.ids);
     const created = String(f.identities.authored_fiction_time);
