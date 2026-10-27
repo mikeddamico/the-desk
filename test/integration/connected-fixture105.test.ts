@@ -1572,6 +1572,7 @@ suite("connected fixture105 native ownership", () => {
             .spyOn(packageOwner, "persistConnectedFixture105Package")
             .mockImplementation(async (capability) => {
               reached = true;
+              const pending = original(capability);
               if (variant === "context") {
                 const changed = new URL(env.runtimeUrl);
                 changed.pathname = "/foreign_fixture_target";
@@ -1586,7 +1587,7 @@ suite("connected fixture105 native ownership", () => {
                 mkdirSync(rootPath, { mode: 0o700 });
               }
               try {
-                await expect(original(capability)).rejects.toThrow();
+                await expect(pending).rejects.toThrow();
               } finally {
                 if (variant === "context")
                   process.env.DATABASE_URL = env.runtimeUrl;

@@ -8,7 +8,6 @@
 // explicit cursor/prefix, frozen state and hash), each SELECTED support ref against its own claim_supports row and exact target hash (not against every current row of the claim). One
 // normalized payload representation is hashed, compared and stored. No selection, scoring, scope or eligibility policy is implemented.
 import type { Pool } from "pg";
-import { takeConnectedFixture105PackageBorrow } from "./connected-fixture105.js";
 
 import { canonicalJson, normalizeString } from "../identity/canonical-json.js";
 import { evidenceBodyHash } from "../identity/domains.js";
@@ -709,6 +708,9 @@ async function persistPackageCore(
 export async function persistConnectedFixture105Package(
   capability: object,
 ): Promise<Outcome<StoredPackage>> {
+  const { takeConnectedFixture105PackageBorrow } = await import(
+    "./connected-fixture105.js"
+  );
   const borrowed = takeConnectedFixture105PackageBorrow(capability);
   const parsed = parsePackage(borrowed.pkg);
   for (const id of borrowed.options.expectedUnitIds ?? [])

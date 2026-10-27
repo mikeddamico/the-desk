@@ -13,10 +13,7 @@
 // to plan rows. An unowned throwable propagates with its identity; only the finite gate stop mapping below is returned as data.
 import type { Pool, PoolClient } from "pg";
 
-import {
-  connectedFixture105Data,
-  takeConnectedFixture105EvaluationBorrow,
-} from "./connected-fixture105.js";
+import { connectedFixture105Data } from "./connected-fixture105-data.js";
 
 import { codePointLength } from "../fixture/code-points.js";
 import { GATE_SET_VERSION } from "../fixture/derive.js";
@@ -5231,6 +5228,9 @@ export function isClosedConnectedFixture105ClaimsResult(
 export async function recordConnectedFixture105Claims(
   capability: object,
 ): Promise<void> {
+  const { takeConnectedFixture105EvaluationBorrow } = await import(
+    "./connected-fixture105.js"
+  );
   const borrow = takeConnectedFixture105EvaluationBorrow(capability, "claims");
   const result = borrow.claims;
   connectedFixture105ClaimsResultHash(result);

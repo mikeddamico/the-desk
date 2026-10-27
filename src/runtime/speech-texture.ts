@@ -16,7 +16,7 @@
 // Session scope: a trusted, exclusively owned disposable fixture session (see docs/g1-speech-texture.md).
 import type { Pool, PoolClient } from "pg";
 
-import { connectedFixture105Data } from "./connected-fixture105.js";
+import { connectedFixture105Data } from "./connected-fixture105-data.js";
 
 import { codePointLength } from "../fixture/code-points.js";
 import {

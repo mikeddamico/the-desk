@@ -2,9 +2,7 @@
 import {
   connectedFixture105Data,
   connectedFixture105Id,
-  takeConnectedFixture105EvaluationBorrow,
-  connectedFixture105Row,
-} from "./connected-fixture105.js";
+} from "./connected-fixture105-data.js";
 import { connectedFixture105ArtifactHash } from "../identity/artifacts.js";
 import { canonicalJson, sha256 } from "../identity/canonical-json.js";
 import {
@@ -211,6 +209,8 @@ export function isClosedConnectedFixture105PerformanceResult(
 export async function recordConnectedFixture105Performance(
   capability: object,
 ): Promise<void> {
+  const { takeConnectedFixture105EvaluationBorrow, connectedFixture105Row } =
+    await import("./connected-fixture105.js");
   const borrow = takeConnectedFixture105EvaluationBorrow(
     capability,
     "performance",
