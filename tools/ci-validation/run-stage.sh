@@ -1,9 +1,11 @@
 #!/bin/bash
 # Fixed-stage envelope around the UNCHANGED P33 guard (test/support/p33-parity-supervisor.py).
 # PROPOSED, NOT YET REVIEWED OR RUN. Hosted ubuntu-24.04 VM only; never run it elsewhere.
-# One argument: prerequisite | focused | all | p33-diagnostic.
+# One argument: prerequisite | focused | all | p33-diagnostic | connected-diagnostic.
 # p33-diagnostic reuses all-stage prechecks/capture with fixed guard p33, 60s outer ceiling,
-# and always exits nonzero. It NEVER supplies aggregate acceptance. Inner deadlines unchanged.
+# and always exits nonzero. connected-diagnostic selects the two fixed connected files,
+# forwards the disposable DB URL, and has a 600s outer ceiling. Neither supplies
+# aggregate acceptance. Inner deadlines, test selection within each file and containment unchanged.
 # The disposable VM is the outer containment boundary; this wrapper adds only: a wall ceiling,
 # core 0, a 64 MiB per-file ceiling, a sanitized environment, exclusive capture files, and the
 # real exit status (never swallowed, never --preserve-status).
@@ -15,7 +17,7 @@
 #   BEST-EFFORT supplemental: ps-pre.txt / ps-post.txt process-table snapshots (no arguments are recorded). They are
 #     diagnostics only and are NEVER ownership or cleanup proof; their status goes to snapshot-status.txt.
 #
-# Database URL: only profile `all` receives TEST_DATABASE_URL. It is written to a pipe (a shell builtin, so it is
+# Database URL: only profiles `all` and `connected` receive TEST_DATABASE_URL. It is written to a pipe (a shell builtin, so it is
 # never in any argv), read by the child shell from stdin, exported for that one exec and closed before the guard
 # starts (the guard's stdin is /dev/null). Every other stage runs without it.
 set -u
@@ -23,7 +25,7 @@ set -C   # noclobber: every capture file below is created exclusively; an existi
 umask 077
 
 if [ "$#" -ne 1 ]; then
-  echo "usage: run-stage.sh <prerequisite|focused|all|p33-diagnostic>" >&2
+  echo "usage: run-stage.sh <prerequisite|focused|all|p33-diagnostic|connected-diagnostic>" >&2
   exit 64
 fi
 STAGE=$1
@@ -34,6 +36,7 @@ case "$STAGE" in
   focused) CEILING=120 ;;
   all) CEILING=7200 ;;
   p33-diagnostic) STAGE=all; PROFILE=p33; CEILING=60; DIAGNOSTIC_ONLY=1 ;;
+  connected-diagnostic) STAGE=all; PROFILE=connected; CEILING=600; DIAGNOSTIC_ONLY=1 ;;
   *) echo "unknown stage" >&2; exit 64 ;;
 esac
 KILL_AFTER=20          # seconds after TERM before KILL
@@ -102,10 +105,10 @@ if [ -n "${RUNNER_TRACKING_ID:-}" ]; then
   RUNNER_ID_ARG=("RUNNER_TRACKING_ID=$RUNNER_TRACKING_ID")
 fi
 
-# The child shell: read one line from the pipe, export it only for profile all, then exec the timeout-wrapped guard
+# The child shell: read one line from the pipe, export it for all/connected, then exec the timeout-wrapped guard
 # with stdin from /dev/null. Single-quoted on purpose: $1/$2/$3 are child positional parameters.
 CHILD='IFS= read -r DB_LINE || DB_LINE=""
-if [ "$3" = all ]; then
+if [ "$3" = all ] || [ "$3" = connected ]; then
   [ -n "$DB_LINE" ] || exit 75
   export TEST_DATABASE_URL="$DB_LINE"
 fi
@@ -114,7 +117,7 @@ exec /usr/bin/timeout --signal=TERM --kill-after=20 "$2" /usr/bin/python3 test/s
 
 cd "$ROOT" || fail_prelaunch "cd"
 # Sanitized environment: nothing is inherited except what is listed (RUNNER_TRACKING_ID is preserved).
-if [ "$PROFILE" = all ]; then DB_FEED=$TEST_DATABASE_URL; else DB_FEED=""; fi
+if [ "$PROFILE" = all ] || [ "$PROFILE" = connected ]; then DB_FEED=$TEST_DATABASE_URL; else DB_FEED=""; fi
 printf '%s\n' "$DB_FEED" | /usr/bin/env -i \
   PATH="$NODE_BIN:/usr/bin:/bin" HOME="$CI_DIR/home" TMPDIR="$CI_DIR/tmp" \
   LANG=C.UTF-8 LC_ALL=C.UTF-8 TZ=UTC CI=true DESK_FIXTURE105_BINDING="$FIXTURE_BINDING" \
@@ -145,7 +148,7 @@ if [ "$RC" -eq 0 ] && [ "$POST_FAIL" -ne 0 ]; then
   exit 78
 fi
 if [ "$DIAGNOSTIC_ONLY" -eq 1 ]; then
-  echo "HOLD: diagnostic-only P33 profile; no aggregate acceptance (guard exit $RC)" >&2
+  echo "HOLD: diagnostic-only $PROFILE profile; no aggregate acceptance (guard exit $RC)" >&2
   exit 78
 fi
 exit "$RC"
