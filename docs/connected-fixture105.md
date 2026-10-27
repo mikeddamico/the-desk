@@ -109,3 +109,27 @@ The successor uses the explicitly named connectedFixture151ArtifactHash entry po
 Release validation performs two fresh complete execution-root/inventory checks bracketing each synchronous release/adoption/ledger read. Every binding leaf and all 61 owner files retain their independent descriptor reads and hash/identity checks. Start/end root, root hash and complete marker must agree; current-context observations use that final check rather than repeat a third scan. All guard callsites across awaits and SQL remain; no inventory or authority is cached across calls. These are cooperating-runner checks, not detection of every transient mutation or authentication against hostile same-user code. Timeouts and teardown requirements are unchanged.
 
 The temporary diagnostic workflow step, connected-only/bail profile, diagnostic wrapper branches and P33 timing prints are removed before final validation. Normal prerequisite/focused/all routing, original aggregate deadline, complete case accounting, retention, audit and security gates are restored. CI105 supplied representative native evidence: the first 13 cases passed, including the complete handoff in 79.051 seconds under its original 120-second deadline. Its 600-second diagnostic envelope then interrupted the remaining run; process containment settled without residuals, but the suite was incomplete. These partial results are not final aggregate acceptance.
+
+## CI155: isolated writer/rest validation
+
+The CI106 serial aggregate reached its unchanged 7,200-second limit after 14
+completed files (6,680 cases). The writer file alone completed 4,908 cases in
+4,150.007 seconds. This was incomplete coverage, not aggregate acceptance.
+
+The validation harness now proposes two isolated standard-runner jobs with the
+same limits: writer (one file, 4,908 cases) and rest (77 files, 3,651 cases,
+including all 29 integration files). File execution remains serial within each
+job. Both jobs retain the original static, source, cleanup, evidence, upload,
+audit and secret-scanning checks. Physical stage names remain prerequisite,
+focused and all; the partition identity is bound separately and is not a
+caller-selected test filter. Only rest receives database credentials in the
+aggregate child. Writer must prove an empty private connected-fixture journal
+population; rest must prove the complete original 33-case connected journal.
+
+The final verify job requires both jobs and the container build. It checks
+bounded proof outputs against the current checkout, source inventory, run and
+attempt, and requires the disjoint original 78-file / 8,559-case union. One
+passing partition does not establish acceptance. New verifier negative tests
+remain in the Python harness, outside the frozen TypeScript test inventory.
+Complement duration is not yet proven. No test deadline, semantic assertion,
+fixture content, application admission or audio clearance is changed.

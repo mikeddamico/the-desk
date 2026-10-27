@@ -47,6 +47,8 @@ EXPECTED_TEST_FILES = 79          # tracked *.test.ts files under test/
 EXPECTED_ALL_FILES = 78           # 79 minus the focused harness the `all` profile excludes
 EXPECTED_ALL_TESTS = 8559
 EXPECTED_INTEGRATION_FILES = 29
+WRITER_TEST = 'test/unit/writer-fixture-input.test.ts'
+PARTITION_COUNTS = {'writer': (1, 4908, 0), 'rest': (77, 3651, 29)}
 DB_NAME = 'the_desk_test'
 DB_URL = re.compile(r'postgresql://([^:@/\s]+):([^@/\s]+)@(localhost|127\.0\.0\.1):5432/' + DB_NAME)
 HEX40 = re.compile(r'[0-9a-f]{40}')
@@ -632,6 +634,65 @@ def expected_all_files(tracked):
     return tests, [n for n in tests if n != HARNESS_TEST]
 
 
+def partition_label(required=False):
+    value = os.environ.get('DESK_CI_PARTITION')
+    if value is None and not required:
+        return 'all'  # Historical, non-hosted harness mode only.
+    if value not in PARTITION_COUNTS:
+        raise RuntimeError('missing or unknown CI partition')
+    return value
+
+
+def partition_files(tracked, partition):
+    tests, selected = expected_all_files(tracked)
+    if (len(tests) != EXPECTED_TEST_FILES or len(selected) != EXPECTED_ALL_FILES
+            or len(set(tests)) != len(tests) or HARNESS_TEST not in tests
+            or WRITER_TEST not in selected
+            or len([p for p in selected if p.startswith(INTEGRATION_PREFIX)]) != EXPECTED_INTEGRATION_FILES):
+        raise RuntimeError('partition source inventory mismatch')
+    if partition == 'writer':
+        return [WRITER_TEST]
+    if partition == 'rest':
+        return [p for p in selected if p != WRITER_TEST]
+    if partition == 'all':
+        return selected
+    raise RuntimeError('unknown partition')
+
+
+def partition_identity(identity, members):
+    return {'checkout': identity['checkout_head'], 'head': identity.get('pr_head_sha'),
+            'tree': identity['checkout_tree'], 'repository': identity['repository'],
+            'run_id': identity['run_id'], 'run_attempt': identity['run_attempt'],
+            'source_sha256': hashlib.sha256(fixture_bytes(members)).hexdigest()}
+
+
+def partition_binding(partition, identity, members):
+    if partition not in PARTITION_COUNTS:
+        raise RuntimeError('hosted partition required')
+    return {'schema': 'ci-partition/1', 'partition': partition,
+            'identity': partition_identity(identity, members),
+            'selection': partition_files(sorted(members), partition),
+            'counts': list(PARTITION_COUNTS[partition])}
+
+
+def check_partition_binding():
+    partition = partition_label(required=True)
+    ev = ci_dir() / 'evidence'
+    identity = load_json(ev / 'identity.json')
+    if identity.get('errors') != []:
+        raise RuntimeError('partition source identity failed')
+    pre = load_pre(ev)
+    expected = partition_binding(partition, identity, pre['members'])
+    actual = load_json(ev / 'partition.json', JSON_LIMIT)
+    if actual != expected:
+        raise RuntimeError('partition binding changed')
+    for key, name in [('checkout', 'GITHUB_SHA'), ('run_id', 'GITHUB_RUN_ID'),
+                      ('run_attempt', 'GITHUB_RUN_ATTEMPT'), ('repository', 'GITHUB_REPOSITORY')]:
+        if actual['identity'][key] != os.environ.get(name):
+            raise RuntimeError('partition invocation changed')
+    return actual
+
+
 def check_all_files(stdout, tracked, errors, facts):
     tests, selected = expected_all_files(tracked)
     integration = [n for n in selected if n.startswith(INTEGRATION_PREFIX)]
@@ -643,6 +704,15 @@ def check_all_files(stdout, tracked, errors, facts):
         errors.append('selected file count %d, want %d' % (len(selected), EXPECTED_ALL_FILES))
     if len(integration) != EXPECTED_INTEGRATION_FILES:
         errors.append('integration file count %d, want %d' % (len(integration), EXPECTED_INTEGRATION_FILES))
+    partition = partition_label()
+    if partition != 'all':
+        try:
+            selected = partition_files(tracked, partition)
+        except RuntimeError as error:
+            errors.append(str(error))
+            return
+    facts['partition'] = partition
+    facts['selected_files'] = selected
     seen = parse_file_lines(stdout)
     total = 0
     for name in selected:
@@ -658,15 +728,17 @@ def check_all_files(stdout, tracked, errors, facts):
                 errors.append('connected per-file count drift: ' + name)
             if row['failed'] or row['skipped'] or row['todo'] or row['tests'] < 1:
                 errors.append('%s reported failed/skipped/todo or no tests: %r' % (name, row))
-    for name in FIXTURE_CONNECTED_COUNTS:
+    for name in FIXTURE_CONNECTED_COUNTS if partition != 'writer' else []:
         if name not in selected:
             errors.append('required connected file absent: ' + name)
     unexpected = sorted(set(seen) - set(selected))
     if unexpected:
         errors.append('result lines for files outside the selection: %s' % unexpected[:5])
-    if total != EXPECTED_ALL_TESTS:
-        errors.append('per-file test counts sum to %d, want %d' % (total, EXPECTED_ALL_TESTS))
+    expected_total = EXPECTED_ALL_TESTS if partition == 'all' else PARTITION_COUNTS[partition][1]
+    if total != expected_total:
+        errors.append('per-file test counts sum to %d, want %d' % (total, expected_total))
     facts['per_file_total'] = total
+    facts['file_results'] = seen
     facts['integration_results'] = {n: seen.get(n) for n in integration}
 
 
@@ -706,6 +778,9 @@ def evaluate_stage(stage, stage_dir, runtime_dir, tracked=None):
         errors.extend(problems)
         facts['summary'] = summary
         want_files, want_tests = EXPECTED_COUNTS[stage]
+        if stage == 'all' and partition_label() != 'all':
+            files, tests, _ = PARTITION_COUNTS[partition_label()]
+            want_files, want_tests = {'passed': files, 'total': files}, {'passed': tests, 'total': tests}
         if summary.get('files') != want_files:
             errors.append('Test Files counts %r, want %r' % (summary.get('files'), want_files))
         if summary.get('tests') != want_tests:
@@ -754,7 +829,7 @@ def evaluate_stage(stage, stage_dir, runtime_dir, tracked=None):
             check_ledger(load_json(attempt / 'guard-result.json'), 'guard-result', errors, guard=True)
         except Exception as error:
             errors.append('guard-result.json unreadable (%s)' % type(error).__name__)
-    modes = ['complete', 'noncomplete'] if stage == 'focused' else ['p33']
+    modes = ['complete', 'noncomplete'] if stage == 'focused' else ([] if partition_label() == 'writer' else ['p33'])
     if len(cases) != len(modes):
         errors.append('case directory count %d, want %d' % (len(cases), len(modes)))
         return errors, facts
@@ -1257,6 +1332,15 @@ def fixture_capture_raw(base, label, checkout):
     return {'snapshot': pins, 'errors': errors}
 
 
+def fixture_empty_writer(base, root):
+    for name in ('expectations', 'receipts'):
+        fixture_identity(root / name)
+        if os.listdir(root / name):
+            raise RuntimeError('writer connected population is not empty')
+    if os.path.lexists(base / 'evidence/fixture105-suite.json'):
+        raise RuntimeError('writer unexpectedly produced a connected suite journal')
+
+
 def fixture_capture_stage(base, stage, facts, required):
     record = {'stage': stage, **fixture_capture_raw(base, stage, ROOT)}
     try:
@@ -1264,14 +1348,20 @@ def fixture_capture_stage(base, stage, facts, required):
         root = Path(binding['root'])
         nonces = [row['nonce'] for row in facts.get('cases', []) if row.get('mode') == 'p33']
         _, known = expected_all_files(tracked_files())
+        if partition_label() != 'all':
+            known = partition_files(tracked_files(), partition_label())
         cache = fixture_cache_snapshot(root, set(known) | {HARNESS_TEST}, nonces, required and stage != 'prerequisite')
         record.update(binding=binding, temp=temp, cache=cache)
         if record['snapshot'] != cache:
             raise RuntimeError('fixture captured cache or loader population changed')
         if stage == 'all':
-            suite_bytes = fixture_read(base / 'evidence/fixture105-suite.json', SNAPSHOT_LIMIT)
-            fixture_journal(root, json.loads(suite_bytes))
-            record['suite_sha256'] = fixture_hash(suite_bytes)
+            if partition_label() == 'writer':
+                fixture_empty_writer(base, root)
+                record['connected_population'] = 'empty'
+            else:
+                suite_bytes = fixture_read(base / 'evidence/fixture105-suite.json', SNAPSHOT_LIMIT)
+                fixture_journal(root, json.loads(suite_bytes))
+                record['suite_sha256'] = fixture_hash(suite_bytes)
     except Exception as error:
         record['errors'].append('fixture validation: ' + type(error).__name__)
     record['complete'] = not record['errors']
@@ -1351,7 +1441,7 @@ def fixture_collect(base, keep, scope, successful):
     for name in FIXTURE_BINDINGS:
         retain(root / 'bindings' / name, 'fixture105/bindings/' + name, SNAPSHOT_LIMIT if 'INVENTORY' in name else 262144)
     retain(base / 'evidence/fixture105-binding.json', 'fixture105/runner-binding.json', 8192)
-    if scope == 'full':
+    if scope == 'full' and partition_label() != 'writer':
         retain(base / 'evidence/fixture105-suite.json', 'fixture105/suite.json', SNAPSHOT_LIMIT)
     try:
         allowed = {'ROOT.json', 'bindings', 'expectations', 'receipts', 'tool-cache', 'RETENTION.json'}
@@ -1375,7 +1465,10 @@ def fixture_collect(base, keep, scope, successful):
                     raise RuntimeError('fixture receipt name')
                 retain(directory / name, 'fixture105/receipts/' + target + '/' + name, 16384 if name == 'CONSTRUCTION.json' else 262144)
         if scope == 'full' and 'all' in successful:
-            fixture_journal(root, json.loads(fixture_read(base / 'evidence/fixture105-suite.json', SNAPSHOT_LIMIT)))
+            if partition_label() == 'writer':
+                fixture_empty_writer(base, root)
+            else:
+                fixture_journal(root, json.loads(fixture_read(base / 'evidence/fixture105-suite.json', SNAPSHOT_LIMIT)))
     except Exception as error:
         keep.problems['errors'].append('fixture journal collection: ' + type(error).__name__)
     for stage in SCOPES[scope]:
@@ -1435,6 +1528,7 @@ def load_event():
 
 
 def cmd_init():
+    partition = partition_label(required=True)
     errors = []
     env = os.environ
     base = ci_dir()
@@ -1514,6 +1608,7 @@ def cmd_init():
         write_json_x(ev / 'snapshot-pre.json', snap)
         bind['errors'] = snapshot_errors(snap)
         bind['tracked_files'] = len(tracked)
+        write_json_x(ev / 'partition.json', partition_binding(partition, identity, snap['members']))
     except Exception as error:
         bind['errors'].append('snapshot failed: %s' % type(error).__name__)
     bind['ok'] = not bind['errors']
@@ -1596,6 +1691,22 @@ def verdict_ok(path):
         return False
 
 
+def stage_verdict_ok(path, stage):
+    try:
+        record = load_json(path, JSON_LIMIT * 4)
+        return (record.get('ok') is True and (partition_label() == 'all'
+                or (record.get('stage') == stage and record.get('partition') == partition_label())))
+    except Exception:
+        return False
+
+
+def collection_identity_ok(record):
+    return (record.get('partition') == partition_label()
+            and record.get('commit') == os.environ.get('GITHUB_SHA')
+            and record.get('run_id') == os.environ.get('GITHUB_RUN_ID')
+            and record.get('run_attempt') == os.environ.get('GITHUB_RUN_ATTEMPT'))
+
+
 def controls_problems(upload):
     """The aggregate may start only after the controls evidence was collected completely (R1). Pure file inspection."""
     try:
@@ -1605,6 +1716,8 @@ def controls_problems(upload):
     if not isinstance(final, dict):
         return ['controls collection record is not an object']
     problems = []
+    if partition_label() != 'all' and not collection_identity_ok(final):
+        problems.append('controls collection partition/identity mismatch')
     if final.get('scope') != 'controls':
         problems.append('collection record is not for the controls scope')
     if final.get('all_stages_ok') is not True:
@@ -1625,7 +1738,7 @@ def cmd_precheck(stage):
         if not verdict_ok(ev / name):
             problems.append(name + ' missing or not ok')
     index = STAGES.index(stage)
-    if index and not verdict_ok(ev / ('verdict-%s.json' % STAGES[index - 1])):
+    if index and not stage_verdict_ok(ev / ('verdict-%s.json' % STAGES[index - 1]), STAGES[index - 1]):
         problems.append('predecessor verdict missing or not ok')
     if (ev / stage).exists() or (ev / ('verdict-%s.json' % stage)).exists():
         problems.append('stage already attempted')
@@ -1639,7 +1752,7 @@ def cmd_check(stage):
     base = ci_dir()
     ev = base / 'evidence'
     errors, facts, tracked = [], {}, []
-    record = {'label': 'post-' + stage, 'errors': []}
+    record = {'label': 'post-' + stage, 'partition': partition_label(), 'errors': []}
     try:
         pre = load_pre(ev)
         build = load_json(ev / 'bind-build.json')
@@ -1669,7 +1782,7 @@ def cmd_check(stage):
             errors.append('fixture preservation/retention incomplete')
     except Exception as error:
         errors.append('fixture preservation/retention failed: ' + type(error).__name__)
-    verdict = {'stage': stage, 'ok': not errors, 'errors': errors, 'facts': facts}
+    verdict = {'stage': stage, 'partition': partition_label(), 'ok': not errors, 'errors': errors, 'facts': facts}
     write_json_x(ev / ('verdict-%s.json' % stage), verdict)
     print(json.dumps({'check': stage, 'ok': verdict['ok'], 'errors': errors[:8]}))
     return 0 if verdict['ok'] else 1
@@ -1745,8 +1858,15 @@ def cmd_collect(scope):
     ev = base / 'evidence'
     keep = Retention(upload, extra=[os.environ.get('TEST_DATABASE_URL') or ''])
     problems = keep.problems
+    if partition_label() != 'all':
+        try:
+            check_partition_binding()
+        except Exception as error:
+            problems['errors'].append('partition binding: ' + type(error).__name__)
     for name, limit in COMMON_FILES:
         keep.copy(ev / name, Path(name), limit, required=True)
+    if partition_label() != 'all':
+        keep.copy(ev / 'partition.json', Path('partition.json'), JSON_LIMIT, required=True)
     verdicts, successful, not_attempted = {}, {}, []
     for stage in stages:
         attempted = (ev / stage).exists() or (ev / ('verdict-%s.json' % stage)).exists()
@@ -1761,7 +1881,7 @@ def cmd_collect(scope):
             keep.copy(ev / stage / name, Path('stages') / stage / name, limit, required=True)
         try:
             verdict = load_json(ev / ('verdict-%s.json' % stage), JSON_LIMIT * 4)
-            verdicts[stage] = verdict.get('ok') is True
+            verdicts[stage] = stage_verdict_ok(ev / ('verdict-%s.json' % stage), stage)
             if verdicts[stage]:
                 successful[stage] = verdict
         except Exception:
@@ -1802,7 +1922,7 @@ def cmd_collect(scope):
         warnings += ['%s: %s' % (stage, w) for w in (verdict.get('facts') or {}).get('warnings', [])]
     all_ok = all(v is True for v in verdicts.values())
     complete = all_ok and not any(problems.values())
-    final = {'scope': scope, 'commit': os.environ.get('GITHUB_SHA'), 'run_id': os.environ.get('GITHUB_RUN_ID'),
+    final = {'scope': scope, 'partition': partition_label(), 'commit': os.environ.get('GITHUB_SHA'), 'run_id': os.environ.get('GITHUB_RUN_ID'),
              'run_attempt': os.environ.get('GITHUB_RUN_ATTEMPT'), 'verdicts': verdicts, 'not_attempted': not_attempted,
              'all_stages_ok': all_ok, 'collection_problems': problems, 'supplemental_warnings': warnings,
              'retention_limits_bytes': {'stdout_stderr': COPY_LIMIT, 'json': JSON_LIMIT, 'case_output': CASE_OUTPUT_LIMIT,
@@ -1833,6 +1953,144 @@ def final_verdict(finals, outcomes):
     return reasons
 
 
+def proof_identity_now(allow_dist):
+    event = load_event()
+    head = ((event.get('pull_request') or {}).get('head') or {}).get('sha')
+    errors, identity = check_identity(dict(os.environ), event, collect_git(head if isinstance(head, str) and HEX40.fullmatch(head) else None))
+    tracked = tracked_files()
+    snapshot = take_snapshot(tracked, allow_dist=allow_dist)
+    errors += snapshot_errors(snapshot)
+    if errors:
+        raise RuntimeError('joint/proof source identity failed: ' + '; '.join(errors[:3]))
+    return identity, snapshot['members']
+
+
+def build_partition_proof(binding, verdict):
+    if (binding.get('schema') != 'ci-partition/1' or binding.get('partition') not in PARTITION_COUNTS
+            or verdict.get('ok') is not True or verdict.get('partition') != binding['partition']
+            or verdict.get('stage') != 'all'):
+        raise RuntimeError('invalid partition verdict')
+    facts = verdict.get('facts', {})
+    rows = facts.get('file_results', {})
+    if set(rows) != set(binding['selection']) or facts.get('selected_files') != binding['selection']:
+        raise RuntimeError('partition file evidence mismatch')
+    counts = {}
+    for path in binding['selection']:
+        results = rows[path]
+        if (not isinstance(results, list) or len(results) != 1 or set(results[0]) != {'tests', 'failed', 'skipped', 'todo'}
+                or type(results[0]['tests']) is not int or results[0]['tests'] <= 0
+                or any(type(results[0][key]) is not int or results[0][key] != 0 for key in ('failed', 'skipped', 'todo'))):
+            raise RuntimeError('partition file did not pass completely')
+        counts[path] = results[0]['tests']
+    files, tests, integrations = PARTITION_COUNTS[binding['partition']]
+    if len(counts) != files or sum(counts.values()) != tests:
+        raise RuntimeError('partition proof count mismatch')
+    return {'schema': 'ci-partition-proof/1', 'partition': binding['partition'], 'identity': binding['identity'],
+            'files': counts, 'totals': [files, tests, integrations], 'source_verified': True, 'evidence_complete': True}
+
+
+def parse_partition_proof(raw):
+    if not isinstance(raw, str) or not raw or len(raw.encode('utf-8')) > JSON_LIMIT or '\n' in raw or '\r' in raw:
+        raise RuntimeError('partition proof missing or exceeds bound')
+    def unique(pairs):
+        obj = {}
+        for key, value in pairs:
+            if key in obj:
+                raise RuntimeError('duplicate proof key')
+            obj[key] = value
+        return obj
+    value = json.loads(raw, object_pairs_hook=unique, parse_constant=lambda _: (_ for _ in ()).throw(RuntimeError('nonfinite proof')))
+    if not isinstance(value, dict):
+        raise RuntimeError('proof must be an object')
+    validate_proof_shape(value)
+    if raw != fixture_bytes(value).decode().rstrip('\n'):
+        raise RuntimeError('noncanonical proof encoding')
+    return value
+
+
+def validate_proof_shape(value):
+    if (set(value) != {'schema', 'partition', 'identity', 'files', 'totals', 'source_verified', 'evidence_complete'}
+            or value['schema'] != 'ci-partition-proof/1' or value['partition'] not in PARTITION_COUNTS
+            or value['source_verified'] is not True or value['evidence_complete'] is not True):
+        raise RuntimeError('proof shape or assertions invalid')
+    identity = value['identity']
+    if not isinstance(identity, dict) or set(identity) != {'checkout', 'head', 'tree', 'repository', 'run_id', 'run_attempt', 'source_sha256'}:
+        raise RuntimeError('proof identity shape invalid')
+    for key in ('checkout', 'tree'):
+        if not isinstance(identity[key], str) or not HEX40.fullmatch(identity[key]):
+            raise RuntimeError('invalid proof commit/tree')
+    if identity['head'] is not None and (not isinstance(identity['head'], str) or not HEX40.fullmatch(identity['head'])):
+        raise RuntimeError('invalid proof head')
+    if not isinstance(identity['source_sha256'], str) or not SHA256.fullmatch(identity['source_sha256']):
+        raise RuntimeError('invalid source digest')
+    if not isinstance(identity['repository'], str) or not REPO_NAME.fullmatch(identity['repository']):
+        raise RuntimeError('invalid proof repository')
+    for key in ('run_id', 'run_attempt'):
+        if not isinstance(identity[key], str) or not re.fullmatch(r'[1-9][0-9]{0,19}', identity[key]):
+            raise RuntimeError('invalid proof run identity')
+    files = value['files']
+    if not isinstance(files, dict) or not 1 <= len(files) <= EXPECTED_ALL_FILES:
+        raise RuntimeError('proof file count bound')
+    for path, count in files.items():
+        if (not isinstance(path, str) or len(path) > 512 or not re.fullmatch(r'test/[A-Za-z0-9_./-]+\.test\.ts', path)
+                or '..' in path.split('/') or type(count) is not int or not 1 <= count <= EXPECTED_ALL_TESTS):
+            raise RuntimeError('proof file/count shape')
+    if not isinstance(value['totals'], list) or len(value['totals']) != 3 or any(type(n) is not int or not 0 <= n <= EXPECTED_ALL_TESTS for n in value['totals']):
+        raise RuntimeError('proof total shape')
+
+
+def joint_problems(proofs, expected_identity, tracked, outcomes):
+    errors = []
+    if set(outcomes) != {'writer', 'rest', 'container'} or any(value != 'success' for value in outcomes.values()):
+        errors.append('every required job must succeed')
+    if set(proofs) != {'writer', 'rest'}:
+        return errors + ['both distinct proofs are required']
+    union = {}
+    for label in ('writer', 'rest'):
+        proof = proofs[label]
+        try:
+            validate_proof_shape(proof)
+        except (RuntimeError, TypeError, KeyError):
+            errors.append(label + ' malformed proof')
+            continue
+        if (not isinstance(proof, dict) or set(proof) != {'schema', 'partition', 'identity', 'files', 'totals', 'source_verified', 'evidence_complete'}
+                or proof['schema'] != 'ci-partition-proof/1' or proof['partition'] != label
+                or proof['identity'] != expected_identity or proof['source_verified'] is not True
+                or proof['evidence_complete'] is not True):
+            errors.append(label + ' proof identity/shape mismatch')
+            continue
+        expected = partition_files(tracked, label)
+        counts = proof['files']
+        if (not isinstance(counts, dict) or set(counts) != set(expected)
+                or any(type(n) is not int or n <= 0 for n in counts.values())
+                or not isinstance(proof['totals'], list) or any(type(n) is not int for n in proof['totals'])
+                or proof['totals'] != list(PARTITION_COUNTS[label])
+                or sum(counts.values()) != PARTITION_COUNTS[label][1]
+                or len([p for p in counts if p.startswith(INTEGRATION_PREFIX)]) != PARTITION_COUNTS[label][2]):
+            errors.append(label + ' selection/count mismatch')
+            continue
+        if label == 'rest' and any(counts.get(path) != n for path, n in FIXTURE_CONNECTED_COUNTS.items()):
+            errors.append('rest connected coverage mismatch')
+        if set(union) & set(counts):
+            errors.append('partition overlap')
+        union.update(counts)
+    if set(union) != set(partition_files(tracked, 'all')) or sum(union.values()) != EXPECTED_ALL_TESTS:
+        errors.append('partition union mismatch')
+    return errors
+
+
+def cmd_joint():
+    try:
+        identity, members = proof_identity_now(False)
+        proofs = {label: parse_partition_proof(os.environ.get(label.upper() + '_PROOF')) for label in ('writer', 'rest')}
+        outcomes = {label: os.environ.get(label.upper() + '_OUTCOME') for label in ('writer', 'rest', 'container')}
+        errors = joint_problems(proofs, partition_identity(identity, members), sorted(members), outcomes)
+    except Exception as error:
+        errors = ['joint validation failed: ' + type(error).__name__ + ': ' + str(error)[:300]]
+    print(json.dumps({'joint': 'HOLD' if errors else 'ACCEPT-CANDIDATE', 'errors': errors}))
+    return 1 if errors else 0
+
+
 def cmd_final():
     finals = {}
     for scope in SCOPES:
@@ -1841,6 +2099,27 @@ def cmd_final():
         except Exception:
             finals[scope] = None
     reasons = final_verdict(finals, {name: os.environ.get(name) for name in FINAL_OUTCOMES})
+    if not reasons and partition_label() != 'all':
+        try:
+            binding = check_partition_binding()
+            identity, members = proof_identity_now(True)
+            if partition_binding(binding['partition'], identity, members) != binding:
+                raise RuntimeError('source changed before final proof')
+            for record in finals.values():
+                if (record.get('partition') != binding['partition'] or record.get('commit') != binding['identity']['checkout']
+                        or record.get('run_id') != binding['identity']['run_id'] or record.get('run_attempt') != binding['identity']['run_attempt']):
+                    raise RuntimeError('final record partition/identity mismatch')
+            verdict = load_json(ci_dir() / 'evidence/verdict-all.json', JSON_LIMIT * 4)
+            proof = build_partition_proof(binding, verdict)
+            encoded = fixture_bytes(proof).decode().rstrip('\n')
+            parse_partition_proof(encoded)
+            output = os.environ.get('GITHUB_OUTPUT')
+            if not output or not os.path.isabs(output):
+                raise RuntimeError('missing GitHub output destination')
+            with open(output, 'a', encoding='utf-8') as stream:
+                stream.write('proof=' + encoded + '\n')
+        except Exception as error:
+            reasons.append('partition proof refused: ' + type(error).__name__ + ': ' + str(error)[:200])
     print(json.dumps({'final': 'HOLD' if reasons else 'ACCEPT-CANDIDATE', 'reasons': reasons}))
     return 1 if reasons else 0
 
@@ -1860,7 +2139,12 @@ def main(argv=None):
     f = sub.add_parser('fixture-binding')
     f.add_argument('stage', choices=STAGES)
     sub.add_parser('final')
+    sub.add_parser('joint')
     args = parser.parse_args(argv)
+    if args.command == 'joint':
+        return cmd_joint()
+    if args.command not in ('init', 'collect'):
+        check_partition_binding()
     if args.command == 'fixture-binding':
         return cmd_fixture_binding(args.stage)
     if args.command == 'init':

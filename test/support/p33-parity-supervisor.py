@@ -678,6 +678,8 @@ def guard(args):
     test = 'test/unit/p33-parity-harness.test.ts'
     filters = {'unit': ['--exclude', 'test/integration/**', '--exclude', test],
                'all': ['--exclude', test], 'integration': ['test/integration'],
+               'writer': ['test/unit/writer-fixture-input.test.ts'],
+               'rest': ['--exclude', test, '--exclude', 'test/unit/writer-fixture-input.test.ts'],
                'focused': [test],
                'parity': ['test/unit/fixture-pack-extraction-parity.test.ts'], 'p33': ['test/unit/fixture-pack-extraction-parity.test.ts',
                    '--testNamePattern', '^P28-P37 legacy formats, freshness and discarded faults P33 multidisk$']}
@@ -808,7 +810,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest='role', required=True)
     g = sub.add_parser('guard')
-    g.add_argument('profile', choices=['prerequisite', 'focused', 'p33', 'parity', 'unit', 'integration', 'all'])
+    g.add_argument('profile', choices=['prerequisite', 'focused', 'p33', 'parity', 'unit', 'integration', 'all', 'writer', 'rest'])
     o = sub.add_parser('owner')
     for key in ('lease', 'device', 'inode', 'link', 'guard'):
         o.add_argument('--'+key, type=int, required=True)

@@ -9,7 +9,7 @@ permissions:
   contents: read
 
 jobs:
-  verify:
+  verify-writer:
     runs-on: ubuntu-24.04
     timeout-minutes: 190
     services:
@@ -23,7 +23,10 @@ jobs:
         options: >-
           --health-cmd "pg_isready -U postgres -d the_desk_test"
           --health-interval 5s --health-timeout 5s --health-retries 10
+    outputs:
+      proof: ${{ steps.final.outputs.proof }}
     env:
+      DESK_CI_PARTITION: writer
       TEST_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/the_desk_test
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -53,6 +56,9 @@ jobs:
         timeout-minutes: 5
       - run: npm run build
         timeout-minutes: 5
+      - name: Validate the evidence harness
+        run: env -u DESK_CI_PARTITION /usr/bin/python3 -I -B tools/ci-validation/test_ci.py
+        timeout-minutes: 2
       - name: Bind the emitted build output
         run: /usr/bin/python3 -I -B tools/ci-validation/ci.py bind-build
         timeout-minutes: 2
@@ -79,7 +85,7 @@ jobs:
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         timeout-minutes: 2
         with:
-          name: ci-controls-${{ github.run_id }}-${{ github.run_attempt }}
+          name: ci-controls-writer-${{ github.run_id }}-${{ github.run_attempt }}
           path: ${{ runner.temp }}/ci/upload-controls
           if-no-files-found: error
           retention-days: 30
@@ -100,7 +106,7 @@ jobs:
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         timeout-minutes: 3
         with:
-          name: ci-full-${{ github.run_id }}-${{ github.run_attempt }}
+          name: ci-full-writer-${{ github.run_id }}-${{ github.run_attempt }}
           path: ${{ runner.temp }}/ci/upload-full
           if-no-files-found: error
           retention-days: 30
@@ -113,6 +119,7 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Final evidence gate
+        id: final
         if: ${{ always() && steps.init.outcome != 'skipped' }}
         run: /usr/bin/python3 -I -B tools/ci-validation/ci.py final
         timeout-minutes: 1
@@ -121,6 +128,154 @@ jobs:
           UPLOAD_OUTCOME: ${{ steps.upload-full.outcome }}
           AUDIT_OUTCOME: ${{ steps.audit.outcome }}
           GITLEAKS_OUTCOME: ${{ steps.gitleaks.outcome }}
+
+  verify-rest:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 190
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: the_desk_test
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres -d the_desk_test"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    outputs:
+      proof: ${{ steps.final.outputs.proof }}
+    env:
+      DESK_CI_PARTITION: rest
+      TEST_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/the_desk_test
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        timeout-minutes: 2
+        with: { fetch-depth: 0 }
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        timeout-minutes: 2
+        with:
+          node-version: 24.21.0
+          cache: npm
+      - run: npm install --global npm@11.19.0 --ignore-scripts
+        timeout-minutes: 3
+      - run: npm ci --ignore-scripts
+        timeout-minutes: 5
+      - name: Bind source, identity and runner before anything runs
+        id: init
+        run: /usr/bin/python3 -I -B tools/ci-validation/ci.py init
+        timeout-minutes: 2
+      - name: Probe the disposable database (read-only)
+        run: /usr/bin/python3 -I -B tools/ci-validation/ci.py dbprobe
+        timeout-minutes: 1
+      - run: npm run format:check -- --cache-location "$RUNNER_TEMP/ci/tmp/prettier-format-check-unused.json"
+        timeout-minutes: 3
+      - run: npm run lint
+        timeout-minutes: 5
+      - run: npm run typecheck
+        timeout-minutes: 5
+      - run: npm run build
+        timeout-minutes: 5
+      - name: Validate the evidence harness
+        run: env -u DESK_CI_PARTITION /usr/bin/python3 -I -B tools/ci-validation/test_ci.py
+        timeout-minutes: 2
+      - name: Bind the emitted build output
+        run: /usr/bin/python3 -I -B tools/ci-validation/ci.py bind-build
+        timeout-minutes: 2
+      - name: Guard P33 prerequisite
+        run: /bin/bash tools/ci-validation/run-stage.sh prerequisite
+        timeout-minutes: 1
+      - name: Validate P33 prerequisite
+        run: /usr/bin/python3 -I -B tools/ci-validation/ci.py check prerequisite
+        timeout-minutes: 1
+      - name: Guard P33 focused controls
+        run: /bin/bash tools/ci-validation/run-stage.sh focused
+        timeout-minutes: 3
+      - name: Validate P33 focused controls
+        run: /usr/bin/python3 -I -B tools/ci-validation/ci.py check focused
+        timeout-minutes: 1
+      - name: Collect controls evidence
+        id: collect-controls
+        if: ${{ always() && steps.init.outcome != 'skipped' }}
+        run: /usr/bin/python3 -I -B tools/ci-validation/ci.py collect --scope controls
+        timeout-minutes: 1
+      - name: Retain controls evidence
+        id: upload-controls
+        if: ${{ always() && steps.collect-controls.outcome == 'success' }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        timeout-minutes: 2
+        with:
+          name: ci-controls-rest-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/ci/upload-controls
+          if-no-files-found: error
+          retention-days: 30
+      - name: Guard P33 aggregate (all)
+        run: /bin/bash tools/ci-validation/run-stage.sh all
+        timeout-minutes: 122
+      - name: Validate aggregate counts, coverage and source
+        run: /usr/bin/python3 -I -B tools/ci-validation/ci.py check all
+        timeout-minutes: 2
+      - name: Collect full evidence
+        id: collect-full
+        if: ${{ always() && steps.init.outcome != 'skipped' }}
+        run: /usr/bin/python3 -I -B tools/ci-validation/ci.py collect --scope full
+        timeout-minutes: 2
+      - name: Retain full evidence
+        id: upload-full
+        if: ${{ always() && steps.collect-full.outcome == 'success' }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        timeout-minutes: 3
+        with:
+          name: ci-full-rest-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/ci/upload-full
+          if-no-files-found: error
+          retention-days: 30
+      - id: audit
+        run: npm audit --audit-level=high
+        timeout-minutes: 5
+      - id: gitleaks
+        uses: gitleaks/gitleaks-action@e0c47f4f8be36e29cdc102c57e68cb5cbf0e8d1e # v3.0.0
+        timeout-minutes: 5
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Final evidence gate
+        id: final
+        if: ${{ always() && steps.init.outcome != 'skipped' }}
+        run: /usr/bin/python3 -I -B tools/ci-validation/ci.py final
+        timeout-minutes: 1
+        env:
+          CONTROLS_UPLOAD_OUTCOME: ${{ steps.upload-controls.outcome }}
+          UPLOAD_OUTCOME: ${{ steps.upload-full.outcome }}
+          AUDIT_OUTCOME: ${{ steps.audit.outcome }}
+          GITLEAKS_OUTCOME: ${{ steps.gitleaks.outcome }}
+
+  verify:
+    needs: [verify-writer, verify-rest, container]
+    if: ${{ always() }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Require every isolated job
+        env:
+          WRITER_OUTCOME: ${{ needs.verify-writer.result }}
+          REST_OUTCOME: ${{ needs.verify-rest.result }}
+          CONTAINER_OUTCOME: ${{ needs.container.result }}
+        run: |
+          test "$WRITER_OUTCOME" = success
+          test "$REST_OUTCOME" = success
+          test "$CONTAINER_OUTCOME" = success
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        timeout-minutes: 2
+        with: { fetch-depth: 0 }
+      - name: Prove the complete disjoint test population
+        run: /usr/bin/python3 -I -B tools/ci-validation/ci.py joint
+        timeout-minutes: 2
+        env:
+          WRITER_PROOF: ${{ needs.verify-writer.outputs.proof }}
+          REST_PROOF: ${{ needs.verify-rest.outputs.proof }}
+          WRITER_OUTCOME: ${{ needs.verify-writer.result }}
+          REST_OUTCOME: ${{ needs.verify-rest.result }}
+          CONTAINER_OUTCOME: ${{ needs.container.result }}
 
   container:
     runs-on: ubuntu-latest

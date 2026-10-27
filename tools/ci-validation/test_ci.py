@@ -1682,5 +1682,336 @@ class FixtureGraphDiagnostic(unittest.TestCase):
                 self.assertEqual(capture.call_count, 1 if kind == 'source' else 2)
 
 
+
+class Partition155Tests(unittest.TestCase):
+    def setUp(self):
+        self.env = mock.patch.dict(os.environ, {}, clear=True)
+        self.env.start()
+        self.addCleanup(self.env.stop)
+        self.tracked = sorted([p for p in TRACKED if p != 'test/root00.test.ts'] + [ci.WRITER_TEST])
+        self.identity = {'checkout': 'a' * 40, 'head': 'b' * 40, 'tree': 'c' * 40,
+                         'repository': 'mikeddamico/the-desk', 'run_id': '123', 'run_attempt': '1', 'source_sha256': 'd' * 64}
+        rest = ci.partition_files(self.tracked, 'rest')
+        other = [p for p in rest if p not in ci.FIXTURE_CONNECTED_COUNTS]
+        self.counts = {p: 3560 // len(other) + (i < 3560 % len(other)) for i, p in enumerate(other)}
+        self.counts.update(ci.FIXTURE_CONNECTED_COUNTS)
+        self.counts[ci.WRITER_TEST] = 4908
+        self.proofs = {}
+        for label in ('writer', 'rest'):
+            selected = ci.partition_files(self.tracked, label)
+            binding = {'schema': 'ci-partition/1', 'partition': label, 'identity': self.identity,
+                       'selection': selected, 'counts': list(ci.PARTITION_COUNTS[label])}
+            verdict = {'ok': True, 'partition': label, 'stage': 'all', 'facts': {'selected_files': selected,
+                'file_results': {p: [{'tests': self.counts[p], 'failed': 0, 'skipped': 0, 'todo': 0}] for p in selected}}}
+            self.proofs[label] = ci.build_partition_proof(binding, verdict)
+        self.outcomes = {p: 'success' for p in ('writer', 'rest', 'container')}
+
+    def joint(self, proofs=None, identity=None, outcomes=None):
+        return ci.joint_problems(proofs if proofs is not None else self.proofs,
+                                 identity if identity is not None else self.identity,
+                                 self.tracked, outcomes if outcomes is not None else self.outcomes)
+
+    def copy(self, value):
+        return json.loads(json.dumps(value))
+
+    def test_exact_pair_and_disjoint_union(self):
+        self.assertEqual(self.joint(), [])
+        self.assertEqual(set(self.proofs['writer']['files']) & set(self.proofs['rest']['files']), set())
+        self.assertEqual(sum(sum(p['files'].values()) for p in self.proofs.values()), 8559)
+        self.assertEqual(len(ci.partition_files(self.tracked, 'all')), 78)
+
+    def test_missing_unknown_and_legacy_labels(self):
+        self.assertEqual(ci.partition_label(), 'all')
+        with self.assertRaises(RuntimeError): ci.partition_label(required=True)
+        for label in ('', 'all', 'WRITER', 'writer,rest', 'other'):
+            with mock.patch.dict(os.environ, {'DESK_CI_PARTITION': label}):
+                with self.assertRaises(RuntimeError): ci.partition_label(required=True)
+        for label in ('writer', 'rest'):
+            with mock.patch.dict(os.environ, {'DESK_CI_PARTITION': label}):
+                self.assertEqual(ci.partition_label(required=True), label)
+
+    def test_inventory_drift_and_duplicate(self):
+        for tracked in ([p for p in self.tracked if p != ci.HARNESS_TEST], self.tracked + ['test/new.test.ts'],
+                        self.tracked + [ci.WRITER_TEST], [p for p in self.tracked if p != ci.WRITER_TEST]):
+            with self.assertRaises(RuntimeError): ci.partition_files(tracked, 'rest')
+
+    def test_missing_swapped_reused_proofs(self):
+        for proofs in ({}, {'writer': self.proofs['writer']},
+                       {'writer': self.proofs['rest'], 'rest': self.proofs['writer']},
+                       {'writer': self.proofs['writer'], 'rest': self.proofs['writer']}):
+            self.assertTrue(self.joint(proofs=proofs))
+
+    def test_failed_skipped_cancelled_missing_dependencies(self):
+        for label in self.outcomes:
+            for state in ('failure', 'skipped', 'cancelled', None):
+                outcomes = dict(self.outcomes, **{label: state})
+                self.assertTrue(self.joint(outcomes=outcomes))
+        self.assertTrue(self.joint(outcomes={'writer': 'success', 'rest': 'success'}))
+
+    def test_every_identity_field_and_current_context(self):
+        for key in self.identity:
+            bad = self.copy(self.proofs)
+            bad['rest']['identity'][key] = 'changed'
+            self.assertTrue(self.joint(proofs=bad))
+            self.assertTrue(self.joint(identity=dict(self.identity, **{key: 'changed'})))
+
+    def test_schema_assertions_and_unknown_fields(self):
+        for label in self.proofs:
+            for key, value in [('schema', 'legacy-all'), ('partition', 'all'), ('source_verified', False),
+                               ('evidence_complete', 1), ('extra', True), ('identity', {})]:
+                bad = self.copy(self.proofs); bad[label][key] = value
+                self.assertTrue(self.joint(proofs=bad))
+
+    def test_missing_extra_overlapping_and_count_drift(self):
+        for label in self.proofs:
+            path = next(iter(self.proofs[label]['files']))
+            for value in (0, -1, True, '1', self.proofs[label]['files'][path] + 1):
+                bad = self.copy(self.proofs); bad[label]['files'][path] = value
+                self.assertTrue(self.joint(proofs=bad))
+            bad = self.copy(self.proofs); del bad[label]['files'][path]
+            self.assertTrue(self.joint(proofs=bad))
+            bad = self.copy(self.proofs); bad[label]['files']['test/unexpected.test.ts'] = 1
+            self.assertTrue(self.joint(proofs=bad))
+        bad = self.copy(self.proofs); bad['rest']['files'][ci.WRITER_TEST] = 4908
+        self.assertTrue(self.joint(proofs=bad))
+        bad = self.copy(self.proofs); paths = list(ci.FIXTURE_CONNECTED_COUNTS)
+        bad['rest']['files'][paths[0]] -= 1; bad['rest']['files'][paths[1]] += 1
+        self.assertTrue(self.joint(proofs=bad))
+
+    def test_proof_parser_closed_bounded_unique(self):
+        raw = ci.fixture_bytes(self.proofs['writer']).decode().rstrip('\n')
+        self.assertEqual(ci.parse_partition_proof(raw), self.proofs['writer'])
+        for text in (None, '', raw + '\n', raw + '\r', '[' + raw + ']', '{"a":1,"a":2}',
+                     '{"a":NaN}', 'x' * 65537, '{'):
+            with self.assertRaises((RuntimeError, ValueError)): ci.parse_partition_proof(text)
+
+    def test_file_summary_partition_rejections(self):
+        for label in ('writer', 'rest'):
+            selected = ci.partition_files(self.tracked, label)
+            counts = {p: self.counts[p] for p in selected}
+            with mock.patch.dict(os.environ, {'DESK_CI_PARTITION': label}):
+                errors, facts = [], {}
+                ci.check_all_files(file_lines(counts), self.tracked, errors, facts)
+                self.assertEqual(errors, [])
+                for text in (file_lines(counts) + file_lines({selected[0]: counts[selected[0]]}),
+                             file_lines(counts) + ' ✓ test/unexpected.test.ts (1 tests) 1ms\n',
+                             file_lines(counts).replace(' tests)', ' tests | 1 skipped)', 1),
+                             file_lines(counts).replace(' tests)', ' tests | 1 failed)', 1),
+                             file_lines(counts).replace(' tests)', ' tests | 1 todo)', 1),
+                             file_lines(counts).split('\n', 1)[1]):
+                    errors = []; ci.check_all_files(text, self.tracked, errors, {})
+                    self.assertTrue(errors)
+
+    def test_writer_empty_journal(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp); root = base / 'root'; root.mkdir(mode=0o700)
+            (base / 'evidence').mkdir(mode=0o700)
+            for name in ('expectations', 'receipts'): (root / name).mkdir(mode=0o700)
+            ci.fixture_empty_writer(base, root)
+            for path in (root / 'expectations/x', root / 'receipts/x', base / 'evidence/fixture105-suite.json'):
+                path.write_text('{}')
+                with self.assertRaises(RuntimeError): ci.fixture_empty_writer(base, root)
+                path.unlink()
+
+    def test_partition_binding_changes(self):
+        members = {p: [1, 'a' * 64] for p in self.tracked}
+        identity = {'checkout_head': 'a' * 40, 'pr_head_sha': 'b' * 40, 'checkout_tree': 'c' * 40,
+                    'repository': 'mikeddamico/the-desk', 'run_id': '123', 'run_attempt': '1', 'errors': []}
+        binding = ci.partition_binding('writer', identity, members)
+        env = {'DESK_CI_PARTITION': 'writer', 'GITHUB_SHA': 'a' * 40, 'GITHUB_RUN_ID': '123',
+               'GITHUB_RUN_ATTEMPT': '1', 'GITHUB_REPOSITORY': 'mikeddamico/the-desk'}
+        with tempfile.TemporaryDirectory() as tmp, mock.patch.dict(os.environ, env), \
+             mock.patch.object(ci, 'ci_dir', return_value=Path(tmp)), \
+             mock.patch.object(ci, 'load_pre', return_value={'members': members}):
+            ev = Path(tmp) / 'evidence'; ev.mkdir()
+            write_json(ev / 'identity.json', identity); write_json(ev / 'partition.json', binding)
+            self.assertEqual(ci.check_partition_binding(), binding)
+            for key in ('GITHUB_SHA', 'GITHUB_RUN_ID', 'GITHUB_RUN_ATTEMPT', 'GITHUB_REPOSITORY', 'DESK_CI_PARTITION'):
+                with mock.patch.dict(os.environ, {key: 'changed'}):
+                    with self.assertRaises(RuntimeError): ci.check_partition_binding()
+            changed = self.copy(binding); changed['selection'] = []
+            write_json(ev / 'partition.json', changed)
+            with self.assertRaises(RuntimeError): ci.check_partition_binding()
+
+    def test_native_p33_modes_and_guard_failures(self):
+        for label in ('writer', 'rest'):
+            with tempfile.TemporaryDirectory() as tmp, mock.patch.dict(os.environ, {'DESK_CI_PARTITION': label}):
+                stage, runtime = Path(tmp) / 'stage', Path(tmp) / 'runtime'
+                attempt = make_stage(stage, runtime, 'attempt-test', 'all', [])
+                selected = ci.partition_files(self.tracked, label)
+                files, tests, _ = ci.PARTITION_COUNTS[label]
+                write(stage / 'stdout', file_lines({p: self.counts[p] for p in selected}) +
+                      ' Test Files  %d passed (%d)\n      Tests  %d passed (%d)\n' % (files, files, tests, tests))
+                if label == 'writer':
+                    import shutil
+                    shutil.rmtree(attempt / NONCES['all'][0])
+                self.assertEqual(ci.evaluate_stage('all', stage, runtime, self.tracked)[0], [])
+                write(stage / 'exit', '124\n')
+                self.assertTrue(ci.evaluate_stage('all', stage, runtime, self.tracked)[0])
+                write(stage / 'exit', '0\n')
+                edit_json(attempt / 'guard-result.json', lambda r: r.update(noChildren=False))
+                self.assertTrue(ci.evaluate_stage('all', stage, runtime, self.tracked)[0])
+                edit_json(attempt / 'guard-result.json', lambda r: r.update(noChildren=True))
+                if label == 'writer': (attempt / ('d' * 48)).mkdir()
+                else:
+                    import shutil
+                    shutil.rmtree(attempt / NONCES['all'][0])
+                self.assertTrue(ci.evaluate_stage('all', stage, runtime, self.tracked)[0])
+
+    def test_failed_gate_never_emits_proof(self):
+        for outcome in ci.FINAL_OUTCOMES:
+            outcomes = {name: 'success' for name in ci.FINAL_OUTCOMES}; outcomes[outcome] = 'failure'
+            finals = {scope: {'all_stages_ok': True, 'evidence_status': 'complete'} for scope in ci.SCOPES}
+            self.assertTrue(ci.final_verdict(finals, outcomes))
+
+    @contextlib.contextmanager
+    def final_world(self, label):
+        members = {p: [1, 'a' * 64] for p in self.tracked}
+        identity = {'checkout_head': 'a' * 40, 'pr_head_sha': 'b' * 40, 'checkout_tree': 'c' * 40,
+                    'repository': 'mikeddamico/the-desk', 'run_id': '123', 'run_attempt': '1', 'errors': []}
+        binding = ci.partition_binding(label, identity, members)
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp); ev = base / 'evidence'; ev.mkdir()
+            output = base / 'github-output'
+            env = {'DESK_CI_PARTITION': label, 'GITHUB_SHA': 'a' * 40, 'GITHUB_RUN_ID': '123',
+                   'GITHUB_RUN_ATTEMPT': '1', 'GITHUB_REPOSITORY': 'mikeddamico/the-desk',
+                   'GITHUB_OUTPUT': str(output), **OK_OUTCOMES}
+            write_json(ev / 'identity.json', identity); write_json(ev / 'snapshot-pre.json', {'members': members})
+            write_json(ev / 'bind-pre.json', {'ok': True}); write_json(ev / 'partition.json', binding)
+            selected = binding['selection']
+            write_json(ev / 'verdict-all.json', {'ok': True, 'stage': 'all', 'partition': label, 'facts': {
+                'selected_files': selected, 'file_results': {p: [{'tests': self.counts[p], 'failed': 0, 'skipped': 0, 'todo': 0}] for p in selected}}})
+            for scope in ci.SCOPES:
+                (base / ('upload-' + scope)).mkdir(mode=0o700)
+                write_json(base / ('upload-' + scope) / 'final.json', {'scope': scope, 'all_stages_ok': True,
+                    'evidence_status': 'complete', 'partition': label, 'commit': 'a' * 40, 'run_id': '123', 'run_attempt': '1'})
+            with mock.patch.dict(os.environ, env), mock.patch.object(ci, 'ci_dir', return_value=base), \
+                 mock.patch.object(ci, 'proof_identity_now', return_value=(identity, members)), \
+                 contextlib.redirect_stdout(io.StringIO()):
+                yield base, output, identity, members
+
+    def test_final_emits_only_successful_canonical_proof(self):
+        for label in ('writer', 'rest'):
+            with self.final_world(label) as (base, output, identity, members):
+                self.assertEqual(ci.cmd_final(), 0)
+                raw = output.read_text()
+                self.assertEqual(raw.count('\n'), 1)
+                self.assertTrue(raw.startswith('proof='))
+                proof = ci.parse_partition_proof(raw[6:-1])
+                self.assertEqual(proof['partition'], label)
+                self.assertEqual(proof['identity'], ci.partition_identity(identity, members))
+                self.assertEqual(proof['files'], {p: self.counts[p] for p in ci.partition_files(self.tracked, label)})
+
+    def test_final_failures_emit_no_output(self):
+        for label in ('writer', 'rest'):
+            for outcome in ci.FINAL_OUTCOMES:
+                with self.final_world(label) as (base, output, identity, members), mock.patch.dict(os.environ, {outcome: 'failure'}):
+                    self.assertEqual(ci.cmd_final(), 1); self.assertFalse(output.exists())
+            for key, value in [('partition', 'all'), ('commit', 'e' * 40), ('run_id', '124'), ('run_attempt', '2'), ('evidence_status', 'partial/censored')]:
+                with self.final_world(label) as (base, output, identity, members):
+                    edit_json(base / 'upload-full/final.json', lambda r: r.update({key: value}))
+                    self.assertEqual(ci.cmd_final(), 1); self.assertFalse(output.exists())
+            with self.final_world(label) as (base, output, identity, members):
+                changed = dict(members); changed[next(iter(changed))] = [2, 'f' * 64]
+                with mock.patch.object(ci, 'proof_identity_now', return_value=(identity, changed)):
+                    self.assertEqual(ci.cmd_final(), 1); self.assertFalse(output.exists())
+
+    def test_joint_command_boundary(self):
+        members = {p: [1, 'a' * 64] for p in self.tracked}
+        identity = {'checkout_head': 'a' * 40, 'pr_head_sha': 'b' * 40, 'checkout_tree': 'c' * 40,
+                    'repository': 'mikeddamico/the-desk', 'run_id': '123', 'run_attempt': '1'}
+        proofs = self.copy(self.proofs)
+        for proof in proofs.values(): proof['identity'] = ci.partition_identity(identity, members)
+        env = {label.upper() + '_PROOF': ci.fixture_bytes(proof).decode().rstrip('\n') for label, proof in proofs.items()}
+        env.update({label.upper() + '_OUTCOME': value for label, value in self.outcomes.items()})
+        with mock.patch.dict(os.environ, env), mock.patch.object(ci, 'proof_identity_now', return_value=(identity, members)), contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(ci.cmd_joint(), 0)
+            for key, value in [('WRITER_PROOF', ''), ('REST_PROOF', '{}'), ('REST_OUTCOME', 'cancelled')]:
+                with mock.patch.dict(os.environ, {key: value}): self.assertEqual(ci.cmd_joint(), 1)
+            with mock.patch.object(ci, 'proof_identity_now', return_value=(dict(identity, checkout_head='e' * 40), members)):
+                self.assertEqual(ci.cmd_joint(), 1)
+
+    def test_parser_identity_schema_and_bounds(self):
+        original = self.proofs['writer']
+        changes = [('checkout', True), ('tree', 'g' * 40), ('head', ''), ('source_sha256', 'e' * 63),
+                   ('repository', 'a' * 101 + '/b'), ('run_id', '0'), ('run_attempt', '١'), ('extra', 'x')]
+        for key, value in changes:
+            proof = self.copy(original); proof['identity'][key] = value
+            with self.assertRaises(RuntimeError): ci.parse_partition_proof(ci.fixture_bytes(proof).decode().rstrip('\n'))
+        for counts in ({'test/' + 'a' * 513 + '.test.ts': 4908}, {'test/../x.test.ts': 4908},
+                       {'test/x%d.test.ts' % n: 1 for n in range(79)}):
+            proof = self.copy(original); proof['files'] = counts
+            with self.assertRaises(RuntimeError): ci.parse_partition_proof(ci.fixture_bytes(proof).decode().rstrip('\n'))
+        with self.assertRaises(RuntimeError): ci.parse_partition_proof(json.dumps(original))
+
+    def test_predecessor_and_controls_partition_binding(self):
+        with tempfile.TemporaryDirectory() as tmp, mock.patch.dict(os.environ, {'DESK_CI_PARTITION': 'writer',
+                'GITHUB_SHA': 'a' * 40, 'GITHUB_RUN_ID': '123', 'GITHUB_RUN_ATTEMPT': '1'}):
+            path = Path(tmp) / 'verdict.json'
+            write_json(path, {'stage': 'focused', 'partition': 'writer', 'ok': True})
+            self.assertTrue(ci.stage_verdict_ok(path, 'focused'))
+            for key, value in [('partition', 'rest'), ('partition', 'all'), ('stage', 'all')]:
+                write_json(path, {'stage': 'focused', 'partition': 'writer', 'ok': True, key: value})
+                self.assertFalse(ci.stage_verdict_ok(path, 'focused'))
+            final = {'scope': 'controls', 'all_stages_ok': True, 'evidence_status': 'complete',
+                     'collection_problems': {'missing': [], 'censored': [], 'errors': []},
+                     'verdicts': {'prerequisite': True, 'focused': True}, 'not_attempted': [],
+                     'partition': 'writer', 'commit': 'a' * 40, 'run_id': '123', 'run_attempt': '1'}
+            write_json(Path(tmp) / 'final.json', final)
+            self.assertEqual(ci.controls_problems(tmp), [])
+            for key, value in [('partition', 'rest'), ('commit', 'e' * 40), ('run_id', '124'), ('run_attempt', '2')]:
+                write_json(Path(tmp) / 'final.json', dict(final, **{key: value}))
+                self.assertTrue(ci.controls_problems(tmp))
+
+    def test_fixture_capture_and_collect_partition_paths(self):
+        for label in ('writer', 'rest'):
+            with fixture_world() as (base, checkout, root, binding), mock.patch.dict(os.environ, {'DESK_CI_PARTITION': label}), \
+                 mock.patch.object(ci, 'ROOT', checkout), mock.patch.object(ci, 'tracked_files', return_value=self.tracked):
+                journal = base / 'evidence/fixture105-suite.json'
+                journal.unlink()
+                ci.fixture_write(base / 'evidence/fixture105-before-all.json', {'binding': binding})
+                record = ci.fixture_capture_stage(base, 'all', {}, False)
+                self.assertEqual(record['complete'], label == 'writer', record)
+                if label == 'writer': self.assertEqual(record['connected_population'], 'empty')
+                upload = base / 'upload'; upload.mkdir(mode=0o700)
+                keep = ci.Retention(upload)
+                successful = {'all': {'facts': {'fixture105': record}}} if label == 'writer' else {}
+                ci.fixture_collect(base, keep, 'full', successful)
+                if label == 'writer':
+                    self.assertFalse(any(keep.problems.values()), keep.problems)
+                    self.assertFalse((upload / 'fixture105/suite.json').exists())
+                else:
+                    self.assertIn('fixture105/suite.json', keep.problems['missing'])
+        for mutation in ('journal', 'expectations', 'receipts'):
+            with fixture_world() as (base, checkout, root, binding), mock.patch.dict(os.environ, {'DESK_CI_PARTITION': 'writer'}), \
+                 mock.patch.object(ci, 'ROOT', checkout), mock.patch.object(ci, 'tracked_files', return_value=self.tracked):
+                if mutation != 'journal':
+                    (base / 'evidence/fixture105-suite.json').unlink()
+                    ci.fixture_write(root / mutation / ('a' * 64 + '.intent.json' if mutation == 'expectations' else 'x'), {})
+                record = ci.fixture_capture_stage(base, 'all', {}, False)
+                self.assertFalse(record['complete'])
+        with fixture_world() as (base, checkout, root, binding), mock.patch.dict(os.environ, {'DESK_CI_PARTITION': 'rest'}), \
+             mock.patch.object(ci, 'ROOT', checkout), mock.patch.object(ci, 'tracked_files', return_value=self.tracked):
+            record = ci.fixture_capture_stage(base, 'all', {}, False)
+            self.assertFalse(record['complete'])  # Existing intentionally incomplete 33-case journal.
+
+
+    def test_workflow_closed_jobs_and_credentials(self):
+        workflow = (ci.ROOT / '.github/workflows/ci.yml').read_text()
+        self.assertEqual(workflow.count('  verify-writer:\n'), 1)
+        self.assertEqual(workflow.count('  verify-rest:\n'), 1)
+        self.assertIn('needs: [verify-writer, verify-rest, container]', workflow)
+        for label in ('writer', 'rest'):
+            self.assertIn('DESK_CI_PARTITION: ' + label, workflow)
+            self.assertIn('needs.verify-' + label + '.outputs.proof', workflow)
+        self.assertNotIn('matrix:', workflow)
+        wrapper = (ci.ROOT / 'tools/ci-validation/run-stage.sh').read_text()
+        self.assertIn('all) CEILING=7200', wrapper)
+        self.assertIn('if [ "$PROFILE" = rest ]; then DB_FEED=$TEST_DATABASE_URL; else DB_FEED=""; fi', wrapper)
+        self.assertIn('/bin/bash -c "$CHILD" _ "$PROFILE" "$CEILING"', wrapper)
+        self.assertEqual(workflow.count('id: gitleaks'), 2)
+        self.assertEqual(workflow.count('id: audit'), 2)
+
+
 if __name__ == '__main__':
     unittest.main()
