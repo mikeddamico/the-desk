@@ -39,6 +39,34 @@ function deepFreeze<T>(v: T): T {
   return v;
 }
 const CONNECTED105_RESULTS = new WeakSet<object>();
+// Nested gate findings, not public command outcome codes.
+function fixedModeFinding(
+  code: "mode_unregistered" | "denominator_mismatch",
+): PerformanceFinding;
+function fixedModeFinding(
+  code: "fixture_mode_intent_forbidden",
+  intentIndex: number,
+): PerformanceFinding;
+function fixedModeFinding(
+  code:
+    | "mode_unregistered"
+    | "denominator_mismatch"
+    | "fixture_mode_intent_forbidden",
+  intentIndex?: number,
+): PerformanceFinding {
+  if (code === "fixture_mode_intent_forbidden") {
+    if (
+      typeof intentIndex !== "number" ||
+      !Number.isSafeInteger(intentIndex) ||
+      intentIndex < 0
+    )
+      throw new TypeError("fixture_mode_finding_location");
+    return { class: "violation", code, intent_index: intentIndex };
+  }
+  if (intentIndex !== undefined)
+    throw new TypeError("fixture_mode_finding_location");
+  return { class: "violation", code };
+}
 /** Public evaluator owns grammar and all seven ordinary predicates. Only the fixed M01 rule differs. */
 export function evaluateConnectedFixture105Performance(
   facts: unknown,
@@ -63,11 +91,11 @@ export function evaluateConnectedFixture105Performance(
     if (index === 2) {
       const historical: PerformanceFinding[] = [];
       if (!["normal_post_event", "roundup", "sombre"].includes(mode))
-        historical.push({ class: "violation", code: "mode_unregistered" });
+        historical.push(fixedModeFinding("mode_unregistered"));
       if (intents.length !== 1)
-        historical.push({ class: "violation", code: "denominator_mismatch" });
+        historical.push(fixedModeFinding("denominator_mismatch"));
       if (intents.length !== intentRows.length)
-        historical.push({ class: "violation", code: "denominator_mismatch" });
+        historical.push(fixedModeFinding("denominator_mismatch"));
       findings = sortPerformanceFindings(21, historical);
       intents.forEach((intent, intent_index) => {
         if (
@@ -78,11 +106,9 @@ export function evaluateConnectedFixture105Performance(
           intent.strength !== "light" ||
           intent.timing_anchor !== null
         )
-          findings.push({
-            class: "violation",
-            code: "fixture_mode_intent_forbidden",
-            intent_index,
-          });
+          findings.push(
+            fixedModeFinding("fixture_mode_intent_forbidden", intent_index),
+          );
       });
       rowFacts = {
         examined: intents.length,

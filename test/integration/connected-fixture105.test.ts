@@ -1768,15 +1768,26 @@ suite("connected fixture105 native ownership", () => {
       "rolls back package creation when a foreign observation identity wins late",
       async () => {
         const env = await fresh();
+        const attempt = (connectedFixture105Data().identities.ids as Obj)
+          .attempt;
+        const digest = sha256(
+          Buffer.from(
+            `connected-fixture105-storage/2\n${String(attempt)}\nobservation`,
+            "utf8",
+          ),
+        );
+        const observationId = `${digest.slice(0, 8)}-${digest.slice(8, 12)}-4${digest.slice(13, 16)}-a${digest.slice(17, 20)}-${digest.slice(20, 32)}`;
+        expect(observationId).toBe("cfabc9d0-a817-4971-a868-342f3692b5bd");
         await fault(
           "fixture105_after_package_before_observation",
           async () => {
             await inspect(env, async (pool) => {
               await pool.query(
-                "INSERT INTO artifacts (artifact_id,artifact_type,schema_version,content_hash,canonical_payload,storage_uri,byte_size,created_at) VALUES ('09021730-fd91-4cd3-aa01-e456262af7af','fixture105-construction-observation/1','fixture105-construction-observation/1',$1,'{}'::jsonb,NULL,2,$2)",
+                "INSERT INTO artifacts (artifact_id,artifact_type,schema_version,content_hash,canonical_payload,storage_uri,byte_size,created_at) VALUES ($3::uuid,'fixture105-construction-observation/1','fixture105-construction-observation/1',$1,'{}'::jsonb,NULL,2,$2)",
                 [
                   "0".repeat(64),
                   connectedFixture105Data().identities.authored_fiction_time,
+                  observationId,
                 ],
               );
             });
@@ -1786,7 +1797,10 @@ suite("connected fixture105 native ownership", () => {
               await runConnectedFixture105();
               throw new Error("expected observation collision");
             } catch (error) {
-              expect(error).toMatchObject({ code: "23505" });
+              expect(error).toMatchObject({
+                code: "23505",
+                constraint: "artifacts_pkey",
+              });
             }
           },
         );
@@ -1801,7 +1815,7 @@ suite("connected fixture105 native ownership", () => {
         await inspect(env, async (pool) => {
           expect(
             (await pool.query("SELECT artifact_id::text FROM artifacts")).rows,
-          ).toEqual([{ artifact_id: "09021730-fd91-4cd3-aa01-e456262af7af" }]);
+          ).toEqual([{ artifact_id: observationId }]);
         });
       },
     ),
@@ -2595,54 +2609,107 @@ suite("connected fixture105 native ownership", () => {
     caseBody(
       "preserves an unrelated package failure object and releases its transaction",
       async () => {
-        const env = await fresh();
-        await packagePrerequisites(env, false);
-        const primary = new Error("controlled unrelated package failure");
-        let reached = 0;
-        const descriptor = Object.getOwnPropertyDescriptor(
-          pg.Client.prototype,
-          "query",
-        );
-        if (descriptor === undefined) throw new Error("driver unavailable");
-        const original = driverQuery(descriptor);
-        Object.defineProperty(pg.Client.prototype, "query", {
-          ...descriptor,
-          value: async function (
-            this: pg.Client,
-            text: string,
-            values?: unknown[],
-          ): Promise<pg.QueryResult> {
-            if (text.includes("INSERT INTO artifacts")) {
-              reached++;
-              throw primary;
-            }
-            return original.call(this, text, values);
-          },
-        });
-        try {
-          await inspect(env, async (pool) => {
-            await expect(
-              persistEvidencePackage(pool, packageInput()),
-            ).rejects.toBe(primary);
-            expect(pool.waitingCount).toBe(0);
-            expect(pool.idleCount).toBe(pool.totalCount);
+        for (const seam of ["direct", "savepoint"] as const) {
+          const env = await fresh();
+          await packagePrerequisites(env, false);
+          const primary = new Error("controlled unrelated package failure");
+          let armed = false;
+          let reached = 0;
+          let rollbacks = 0;
+          let savepointRollbacks = 0;
+          let savepointReleases = 0;
+          const descriptor = Object.getOwnPropertyDescriptor(
+            pg.Client.prototype,
+            "query",
+          );
+          if (descriptor === undefined) throw new Error("driver unavailable");
+          const original = driverQuery(descriptor);
+          Object.defineProperty(pg.Client.prototype, "query", {
+            ...descriptor,
+            value: async function (
+              this: pg.Client,
+              text: string,
+              values?: unknown[],
+            ): Promise<pg.QueryResult> {
+              if (armed) {
+                if (text === "ROLLBACK") rollbacks++;
+                if (/^ROLLBACK TO SAVEPOINT sp_[0-9]+$/u.test(text))
+                  savepointRollbacks++;
+                if (/^RELEASE SAVEPOINT sp_[0-9]+$/u.test(text))
+                  savepointReleases++;
+                const selected =
+                  seam === "direct"
+                    ? text.startsWith("SELECT a.artifact_id::text,") &&
+                      text.endsWith(" WHERE p.package_hash = $1")
+                    : text.includes("INSERT INTO artifacts");
+                if (selected) {
+                  reached++;
+                  throw primary;
+                }
+              }
+              return original.call(this, text, values);
+            },
           });
-        } finally {
-          Object.defineProperty(pg.Client.prototype, "query", descriptor);
+          try {
+            await inspect(env, async (pool) => {
+              armed = true;
+              try {
+                if (seam === "direct") {
+                  await expect(
+                    persistEvidencePackage(pool, packageInput()),
+                  ).rejects.toBe(primary);
+                } else {
+                  let caught: unknown;
+                  try {
+                    await persistEvidencePackage(pool, packageInput());
+                  } catch (error) {
+                    caught = error;
+                  }
+                  expect(caught).toBeInstanceOf(Error);
+                  expect(caught).not.toBe(primary);
+                  if (!(caught instanceof Error))
+                    throw new Error("expected normalized package failure");
+                  expect(caught.message).toBe(primary.message);
+                  expect(Object.hasOwn(caught, "code")).toBe(true);
+                  expect(Object.hasOwn(caught, "constraint")).toBe(true);
+                  expect(Object.keys(caught).sort()).toEqual([
+                    "code",
+                    "constraint",
+                  ]);
+                  expect(
+                    (caught as Error & { code?: unknown }).code,
+                  ).toBeUndefined();
+                  expect(
+                    (caught as Error & { constraint?: unknown }).constraint,
+                  ).toBeUndefined();
+                }
+              } finally {
+                armed = false;
+              }
+              expect(pool.waitingCount).toBe(0);
+              expect(pool.idleCount).toBe(pool.totalCount);
+            });
+          } finally {
+            Object.defineProperty(pg.Client.prototype, "query", descriptor);
+          }
+          expect(reached).toBe(1);
+          expect(rollbacks).toBe(1);
+          expect(savepointRollbacks).toBe(seam === "savepoint" ? 1 : 0);
+          expect(savepointReleases).toBe(seam === "savepoint" ? 1 : 0);
+          await inspect(env, async (pool) => {
+            expect(
+              (await pool.query("SELECT artifact_id FROM artifacts")).rows,
+            ).toEqual([]);
+            expect(
+              (
+                await pool.query(
+                  "SELECT evidence_package_id FROM evidence_packages",
+                )
+              ).rows,
+            ).toEqual([]);
+          });
+          await env.close();
         }
-        expect(reached).toBe(1);
-        await inspect(env, async (pool) => {
-          expect(
-            (await pool.query("SELECT artifact_id FROM artifacts")).rows,
-          ).toEqual([]);
-          expect(
-            (
-              await pool.query(
-                "SELECT evidence_package_id FROM evidence_packages",
-              )
-            ).rows,
-          ).toEqual([]);
-        });
       },
     ),
     LIMIT,

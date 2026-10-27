@@ -1935,7 +1935,63 @@ def cmd_collect(scope):
     return 0
 
 
-FINAL_OUTCOMES = ('CONTROLS_UPLOAD_OUTCOME', 'UPLOAD_OUTCOME', 'AUDIT_OUTCOME', 'GITLEAKS_OUTCOME')
+FINAL_OUTCOMES = ('CONTROLS_UPLOAD_OUTCOME', 'UPLOAD_OUTCOME', 'AUDIT_OUTCOME', 'GITLEAKS_OUTCOME', 'SECURITY_UPLOAD_OUTCOME')
+
+
+def security_report_findings(data):
+    value = json.loads(data)
+    if (not isinstance(value, dict) or value.get('version') != '2.1.0'
+            or not isinstance(value.get('runs'), list) or len(value['runs']) != 1):
+        raise RuntimeError('unexpected security report schema')
+    run = value['runs'][0]
+    if (not isinstance(run, dict) or not isinstance(run.get('tool'), dict)
+            or not isinstance(run['tool'].get('driver'), dict) or run['tool']['driver'].get('name') != 'gitleaks'
+            or not isinstance(run.get('results'), list) or any(not isinstance(row, dict) for row in run['results'])):
+        raise RuntimeError('unexpected security report run')
+    return len(run['results'])
+
+
+def retain_security_report(base, root, binding, pre, outcome):
+    """Move only the pinned action's generated report, never exempt it from source integrity."""
+    if outcome not in ('success', 'failure') or 'results.sarif' in pre['members']:
+        raise RuntimeError('security report ownership/outcome mismatch')
+    source = root / 'results.sarif'
+    data = fixture_read(source, COPY_LIMIT, False)
+    before = os.lstat(source)
+    findings = security_report_findings(data)
+    destination = base / 'security-report'
+    destination.mkdir(mode=0o700)  # Exclusive private directory; never overwrite a prior capture.
+    retained = destination / 'results.sarif'
+    os.rename(source, retained)
+    after = os.lstat(retained)
+    if ((before.st_dev, before.st_ino) != (after.st_dev, after.st_ino)
+            or fixture_read(retained, COPY_LIMIT, False) != data or os.path.lexists(source)):
+        raise RuntimeError('security report changed during retention')
+    record = {'schema': 'ci-security-report/1', 'binding': binding, 'outcome': outcome,
+              'findings': findings, 'bytes': len(data), 'sha256': fixture_hash(data)}
+    fixture_write(destination / 'manifest.json', record)
+    return record
+
+
+def verify_security_report(base, binding):
+    directory = base / 'security-report'
+    fixture_identity(directory)
+    if sorted(os.listdir(directory)) != ['manifest.json', 'results.sarif']:
+        raise RuntimeError('security report population mismatch')
+    record = json.loads(fixture_read(directory / 'manifest.json', JSON_LIMIT))
+    data = fixture_read(directory / 'results.sarif', COPY_LIMIT, False)
+    expected = {'schema': 'ci-security-report/1', 'binding': binding, 'outcome': 'success',
+                'findings': 0, 'bytes': len(data), 'sha256': fixture_hash(data)}
+    if record != expected or security_report_findings(data) != 0:
+        raise RuntimeError('security report is not an unchanged successful scan')
+
+
+def cmd_retain_security():
+    binding = check_partition_binding()
+    record = retain_security_report(ci_dir(), ROOT, binding, load_pre(ci_dir() / 'evidence'),
+                                    os.environ.get('GITLEAKS_OUTCOME'))
+    print(json.dumps({'security_report_retained': True, 'bytes': record['bytes'], 'sha256': record['sha256']}))
+    return 0
 
 
 def final_verdict(finals, outcomes):
@@ -2102,6 +2158,7 @@ def cmd_final():
     if not reasons and partition_label() != 'all':
         try:
             binding = check_partition_binding()
+            verify_security_report(ci_dir(), binding)
             identity, members = proof_identity_now(True)
             if partition_binding(binding['partition'], identity, members) != binding:
                 raise RuntimeError('source changed before final proof')
@@ -2140,11 +2197,14 @@ def main(argv=None):
     f.add_argument('stage', choices=STAGES)
     sub.add_parser('final')
     sub.add_parser('joint')
+    sub.add_parser('retain-security')
     args = parser.parse_args(argv)
     if args.command == 'joint':
         return cmd_joint()
     if args.command not in ('init', 'collect'):
         check_partition_binding()
+    if args.command == 'retain-security':
+        return cmd_retain_security()
     if args.command == 'fixture-binding':
         return cmd_fixture_binding(args.stage)
     if args.command == 'init':

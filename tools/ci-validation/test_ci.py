@@ -184,7 +184,7 @@ def collect(tmp, scope, env=None):
     return json.loads((Path(tmp) / 'ci' / ('upload-' + scope) / 'final.json').read_text())
 
 
-OK_OUTCOMES = {'CONTROLS_UPLOAD_OUTCOME': 'success', 'UPLOAD_OUTCOME': 'success', 'AUDIT_OUTCOME': 'success',
+OK_OUTCOMES = {'CONTROLS_UPLOAD_OUTCOME': 'success', 'UPLOAD_OUTCOME': 'success', 'AUDIT_OUTCOME': 'success', 'SECURITY_UPLOAD_OUTCOME': 'success',
                'GITLEAKS_OUTCOME': 'success'}
 
 
@@ -1878,6 +1878,11 @@ class Partition155Tests(unittest.TestCase):
                    'GITHUB_OUTPUT': str(output), **OK_OUTCOMES}
             write_json(ev / 'identity.json', identity); write_json(ev / 'snapshot-pre.json', {'members': members})
             write_json(ev / 'bind-pre.json', {'ok': True}); write_json(ev / 'partition.json', binding)
+            security = base / 'security-report'; security.mkdir(mode=0o700)
+            security_bytes = ci.fixture_bytes({'version': '2.1.0', 'runs': [{'tool': {'driver': {'name': 'gitleaks'}}, 'results': []}]})
+            (security / 'results.sarif').write_bytes(security_bytes)
+            ci.fixture_write(security / 'manifest.json', {'schema': 'ci-security-report/1', 'binding': binding,
+                'outcome': 'success', 'findings': 0, 'bytes': len(security_bytes), 'sha256': ci.fixture_hash(security_bytes)})
             selected = binding['selection']
             write_json(ev / 'verdict-all.json', {'ok': True, 'stage': 'all', 'partition': label, 'facts': {
                 'selected_files': selected, 'file_results': {p: [{'tests': self.counts[p], 'failed': 0, 'skipped': 0, 'todo': 0}] for p in selected}}})
@@ -2011,6 +2016,87 @@ class Partition155Tests(unittest.TestCase):
         self.assertIn('/bin/bash -c "$CHILD" _ "$PROFILE" "$CEILING"', wrapper)
         self.assertEqual(workflow.count('id: gitleaks'), 2)
         self.assertEqual(workflow.count('id: audit'), 2)
+
+
+
+class SecurityReport156Tests(unittest.TestCase):
+    @contextlib.contextmanager
+    def world(self, results=None):
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp) / 'ci'; root = Path(tmp) / 'checkout'
+            base.mkdir(mode=0o700); root.mkdir(mode=0o700)
+            (root / 'owned.ts').write_text('// source\n')
+            pre = ci.take_snapshot(['owned.ts'], root=root, allow_dist=False)
+            binding = {'partition': 'writer', 'identity': {'commit': 'a' * 40}}
+            data = ci.fixture_bytes({'version': '2.1.0', 'runs': [{'tool': {'driver': {'name': 'gitleaks'}}, 'results': results or []}]})
+            (root / 'results.sarif').write_bytes(data)
+            yield base, root, binding, pre, data
+
+    def test_report_moves_without_source_exemption(self):
+        with self.world() as (base, root, binding, pre, data):
+            self.assertEqual(ci.take_snapshot(['owned.ts'], root=root, allow_dist=False)['extra'], ['results.sarif'])
+            record = ci.retain_security_report(base, root, binding, pre, 'success')
+            self.assertEqual(record['sha256'], ci.fixture_hash(data))
+            self.assertFalse((root / 'results.sarif').exists())
+            self.assertEqual((base / 'security-report/results.sarif').read_bytes(), data)
+            self.assertEqual(ci.snapshot_errors(ci.take_snapshot(['owned.ts'], root=root, allow_dist=False), pre=pre), [])
+            ci.verify_security_report(base, binding)
+            (root / 'unexpected.txt').write_text('x')
+            self.assertTrue(ci.snapshot_errors(ci.take_snapshot(['owned.ts'], root=root, allow_dist=False), pre=pre))
+
+    def test_missing_tracked_linked_and_malformed_report_refuse(self):
+        for mutation in ('missing', 'tracked', 'symlink', 'hardlink', 'malformed', 'oversize', 'unknown-outcome'):
+            with self.subTest(mutation=mutation), self.world() as (base, root, binding, pre, data):
+                path = root / 'results.sarif'; outcome = 'success'
+                if mutation == 'missing': path.unlink()
+                elif mutation == 'tracked': pre['members']['results.sarif'] = [len(data), ci.fixture_hash(data)]
+                elif mutation == 'symlink':
+                    path.unlink(); path.symlink_to(root / 'owned.ts')
+                elif mutation == 'hardlink': os.link(path, root / 'extra-link')
+                elif mutation == 'malformed': path.write_text('{}')
+                elif mutation == 'oversize': path.write_bytes(b'x' * (ci.COPY_LIMIT + 1))
+                else: outcome = 'skipped'
+                with self.assertRaises((RuntimeError, OSError, ValueError)):
+                    ci.retain_security_report(base, root, binding, pre, outcome)
+                self.assertFalse((base / 'security-report').exists())
+
+    def test_previous_capture_not_overwritten(self):
+        with self.world() as (base, root, binding, pre, data):
+            destination = base / 'security-report'; destination.mkdir(mode=0o700)
+            sentinel = destination / 'results.sarif'; sentinel.write_text('preserve')
+            with self.assertRaises(FileExistsError): ci.retain_security_report(base, root, binding, pre, 'success')
+            self.assertEqual(sentinel.read_text(), 'preserve')
+            self.assertEqual((root / 'results.sarif').read_bytes(), data)
+
+    def test_failed_scan_evidence_is_retained_but_never_accepted(self):
+        with self.world([{'ruleId': 'synthetic-not-a-secret'}]) as (base, root, binding, pre, data):
+            ci.retain_security_report(base, root, binding, pre, 'failure')
+            self.assertEqual((base / 'security-report/results.sarif').read_bytes(), data)
+            with self.assertRaises(RuntimeError): ci.verify_security_report(base, binding)
+        with self.world([{'ruleId': 'synthetic-not-a-secret'}]) as (base, root, binding, pre, data):
+            ci.retain_security_report(base, root, binding, pre, 'success')
+            with self.assertRaises(RuntimeError): ci.verify_security_report(base, binding)
+
+    def test_changed_report_binding_manifest_population_refuse(self):
+        for mutation in ('bytes', 'binding', 'manifest', 'extra'):
+            with self.world() as (base, root, binding, pre, data):
+                ci.retain_security_report(base, root, binding, pre, 'success')
+                if mutation == 'bytes': (base / 'security-report/results.sarif').write_bytes(data + b' ')
+                elif mutation == 'binding': binding = {'partition': 'rest'}
+                elif mutation == 'manifest': edit_json(base / 'security-report/manifest.json', lambda r: r.update(outcome='failure'))
+                else: (base / 'security-report/extra').write_text('x')
+                with self.assertRaises(RuntimeError): ci.verify_security_report(base, binding)
+
+    def test_report_upload_required_and_unique(self):
+        workflow = (ci.ROOT / '.github/workflows/ci.yml').read_text()
+        self.assertEqual(workflow.count('GITLEAKS_ENABLE_UPLOAD_ARTIFACT: "false"'), 2)
+        self.assertEqual(workflow.count('tools/ci-validation/ci.py retain-security'), 2)
+        self.assertEqual(workflow.count('SECURITY_UPLOAD_OUTCOME: ${{ steps.upload-security.outcome }}'), 2)
+        for label in ('writer', 'rest'):
+            self.assertIn('name: ci-security-' + label + '-${{ github.run_id }}-${{ github.run_attempt }}', workflow)
+        finals = {scope: {'all_stages_ok': True, 'evidence_status': 'complete'} for scope in ci.SCOPES}
+        for outcome in ('failure', 'skipped', 'cancelled', None):
+            self.assertTrue(ci.final_verdict(finals, {**OK_OUTCOMES, 'SECURITY_UPLOAD_OUTCOME': outcome}))
 
 
 if __name__ == '__main__':

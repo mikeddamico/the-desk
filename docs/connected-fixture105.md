@@ -133,3 +133,25 @@ passing partition does not establish acceptance. New verifier negative tests
 remain in the Python harness, outside the frozen TypeScript test inventory.
 Complement duration is not yet proven. No test deadline, semantic assertion,
 fixture content, application admission or audio clearance is changed.
+
+## CI156: fixture compatibility corrections
+
+The first rest partition completed all 3,651 cases within its unchanged limit,
+with four failures. The correction keeps the collision test on the current
+independently derived observation ID, validates connected Claims findings
+against the pinned successor anchor population while preserving the historical
+anchor grammar, distinguishes direct-query error identity from the unchanged
+savepoint normalization contract, and constructs private Performance findings
+without adding them to the public command outcome catalog. Existing case counts,
+fixture bytes, historical command/package/Performance owners, scanner rules and
+execution limits remain unchanged. Failed Claims findings remain honest failed
+results, never semantic or audio admission. Native receipts and full acceptance
+remain subject to the complete hosted checks.
+
+The pinned secret-scanner action generates `results.sarif` in the checkout.
+After scanning, the harness moves that bounded, regular, single-link report into
+an exclusive private evidence directory, preserves its bytes and source/run
+binding, and uploads it under a partition-specific name. The action's duplicate
+built-in upload is replaced, not its scan or failure status. Final acceptance
+requires the unchanged successful report, its successful upload and the original
+strict source snapshot with no report exemption or untracked-file whitelist.

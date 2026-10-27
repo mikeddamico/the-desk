@@ -28,6 +28,9 @@ import {
   evaluateConnectedFixture105Component,
   connectedFixture105ClaimsResultHash,
   isClosedConnectedFixture105ClaimsResult,
+  isClosedFinding,
+  isClosedResult,
+  GATE_PIN,
   evaluateGateComponent,
   isOwnedGateEvaluation,
   type ComponentInputs,
@@ -815,6 +818,26 @@ describe("connected fixture105 components", () => {
         check: "performance.script_binding",
       }),
     ).toBe(false);
+    const invalid = [
+      { class: "violation", code: "fixture_mode_intent_forbidden" },
+      ...[-1, 0.5, "0"].map((intent_index) => ({
+        class: "violation",
+        code: "fixture_mode_intent_forbidden",
+        intent_index,
+      })),
+      ...["mode_unregistered", "denominator_mismatch"].map((code) => ({
+        class: "violation",
+        code,
+        intent_index: 0,
+      })),
+    ];
+    for (const finding of invalid)
+      expect(
+        isClosedConnectedFixture105PerformanceResult({
+          ...row,
+          findings: [finding],
+        }),
+      ).toBe(false);
     expect(
       isClosedConnectedFixture105PerformanceResult({
         ...row,
@@ -836,6 +859,92 @@ describe("connected fixture105 components", () => {
         schema: "claims-writing-gate-result/1",
       }),
     ).toBe(false);
+    const input = component();
+    const failed = evaluateConnectedFixture105Component({
+      ...input,
+      statics: { ...input.statics, profiles: {} },
+    });
+    expect(connectedFixture105ClaimsResultHash(failed)).toMatch(
+      /^[0-9a-f]{64}$/u,
+    );
+    const fixed = connectedFixture105Data();
+    const results = failed.rows.map((row) => ({
+      actor_id: (fixed.identities.ids as Obj).actor,
+      actor_kind: "policy",
+      check: row.key,
+      facts: row.facts,
+      findings: row.findings,
+      fingerprint_stage: "claims_writing",
+      schema: "connected-fixture105-claims-result/1",
+      subject_refs: [fixed.identities["texture-version"]],
+    }));
+    expect(results.every(isClosedConnectedFixture105ClaimsResult)).toBe(true);
+    const result = results.find((row) =>
+      row.findings.some((finding) => Object.hasOwn(finding, "anchor")),
+    );
+    if (result === undefined) throw new Error("failed anchor witness missing");
+    const finding = result.findings.find((item) =>
+      Object.hasOwn(item, "anchor"),
+    );
+    if (finding === undefined) throw new Error("failed finding missing");
+    const exact = { ...result, findings: [finding] };
+    const anchor = finding.anchor;
+    expect(anchor).toBe("estuary109_t01");
+    expect(isClosedFinding(finding, result.check)).toBe(false);
+    expect(isClosedFinding({ ...finding, anchor: "t01" }, result.check)).toBe(
+      true,
+    );
+    const legacy = {
+      ...exact,
+      actor_id: GATE_PIN.actor_id,
+      schema: GATE_PIN.result_schema,
+      subject_refs: [GATE_PIN.child_script_version_id],
+      findings: [{ ...finding, anchor: "t01" }],
+    };
+    expect(isClosedResult(legacy)).toBe(true);
+    expect(isClosedResult({ ...legacy, findings: [finding] })).toBe(false);
+    for (const badAnchor of ["t01", "foreign_t01", "estuary109_t99", 1, null])
+      expect(
+        isClosedConnectedFixture105ClaimsResult({
+          ...exact,
+          findings: [{ ...finding, anchor: badAnchor }],
+        }),
+      ).toBe(false);
+    for (const badFinding of [
+      { ...finding, class: "proof_gap" },
+      { ...finding, code: "unknown_finding" },
+      { ...finding, raw_text: "not admitted" },
+      { ...finding, span: [0, "1"] },
+      { ...finding, use_index: "0" },
+    ])
+      expect(
+        isClosedConnectedFixture105ClaimsResult({
+          ...exact,
+          findings: [badFinding],
+        }),
+      ).toBe(false);
+    for (const changed of [
+      { ...exact, check: "unknown.check" },
+      { ...exact, facts: { ...exact.facts, extra: 0 } },
+      { ...exact, facts: { ...exact.facts, examined: "0" } },
+      { ...exact, actor_id: GATE_PIN.actor_id },
+      { ...exact, schema: GATE_PIN.result_schema },
+      { ...exact, subject_refs: [] },
+    ])
+      expect(isClosedConnectedFixture105ClaimsResult(changed)).toBe(false);
+    expect(() => connectedFixture105ClaimsResultHash(clone(failed))).toThrow(
+      "fixture_claims_result_provenance",
+    );
+    const foreign = component();
+    requiredAt(foreign.C.turns as Obj[], 0).semantic_turn_id = "foreign_t01";
+    requiredAt(foreign.rows.turns, 0).semantic_turn_id = "foreign_t01";
+    const offProfile = evaluateConnectedFixture105Component({
+      ...foreign,
+      statics: { ...foreign.statics, profiles: {} },
+    });
+    expect(() => connectedFixture105ClaimsResultHash(offProfile)).toThrow(
+      "fixture_claims_result_shape",
+    );
   });
 
   it("checks construction outer domain and raw row-array subdigest directly", () => {

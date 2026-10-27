@@ -3886,6 +3886,15 @@ export function isClosedFinding(
   value: unknown,
   check: GateDefinitionKey,
 ): boolean {
+  return isClosedFindingWithAnchor(value, check, (anchor) =>
+    ANCHOR.test(anchor),
+  );
+}
+function isClosedFindingWithAnchor(
+  value: unknown,
+  check: GateDefinitionKey,
+  acceptsAnchor: (anchor: string) => boolean,
+): boolean {
   const name: unknown = check;
   if (!isStr(name) || !Object.hasOwn(FINDING_RULES, name)) return false;
   if (
@@ -3910,7 +3919,7 @@ export function isClosedFinding(
     const item = value[key];
     switch (key) {
       case "anchor":
-        if (!(isStr(item) && ANCHOR.test(item))) return false;
+        if (!(isStr(item) && acceptsAnchor(item))) return false;
         break;
       case "span":
         if (!(isArr(item) && item.length === 2 && item.every(isInt)))
@@ -3938,6 +3947,12 @@ export function isClosedFinding(
 }
 /** True iff a stored `result` is exactly the closed eight-key object with the definition's exact integer fact keys and its closed findings. */
 export function isClosedResult(value: unknown): boolean {
+  return isClosedResultWithAnchor(value, (anchor) => ANCHOR.test(anchor));
+}
+function isClosedResultWithAnchor(
+  value: unknown,
+  acceptsAnchor: (anchor: string) => boolean,
+): boolean {
   if (!isObj(value)) return false;
   const keys = Object.keys(value);
   if (
@@ -3963,7 +3978,9 @@ export function isClosedResult(value: unknown): boolean {
     ]) &&
     Object.values(value.facts).every(isInt) &&
     isArr(value.findings) &&
-    value.findings.every((item) => isClosedFinding(item, definition)) &&
+    value.findings.every((item) =>
+      isClosedFindingWithAnchor(item, definition, acceptsAnchor),
+    ) &&
     value.fingerprint_stage === GATE_PIN.fingerprint_stage &&
     value.schema === GATE_PIN.result_schema &&
     sameJson(value.subject_refs, [GATE_PIN.child_script_version_id])
@@ -5158,6 +5175,25 @@ function reconstructConnected105Derivation(inp: ComponentInputs): boolean {
 }
 /** Pure proposed-profile evaluation only. Never accepted by the durable legacy writer. */
 const CONNECTED105_RESULTS = new WeakSet<object>();
+/** Fixed pinned corpus only; no caller can supply an anchor profile. */
+function connectedClaimsAnchors(): ReadonlySet<string> {
+  const turns = connectedFixture105Data().child.turns;
+  if (!isArr(turns) || turns.length === 0)
+    throw new TypeError("fixture_claims_anchor_profile");
+  const anchors = new Set<string>();
+  for (const turn of turns) {
+    if (
+      !isObj(turn) ||
+      !Object.hasOwn(turn, "semantic_turn_id") ||
+      !isStr(turn.semantic_turn_id) ||
+      !/^[A-Za-z0-9_]{1,128}$/u.test(turn.semantic_turn_id) ||
+      anchors.has(turn.semantic_turn_id)
+    )
+      throw new TypeError("fixture_claims_anchor_profile");
+    anchors.add(turn.semantic_turn_id);
+  }
+  return anchors;
+}
 export function evaluateConnectedFixture105Component(
   inp: ComponentInputs,
 ): ComponentEvaluation {
@@ -5194,6 +5230,18 @@ export function connectedFixture105ClaimsResultHash(
     )
   )
     throw new TypeError("fixture_claims_result_aggregate");
+  const anchors = connectedClaimsAnchors();
+  if (
+    result.rows.some((row) =>
+      row.findings.some(
+        (finding) =>
+          !isClosedFindingWithAnchor(finding, row.key, (anchor) =>
+            anchors.has(anchor),
+          ),
+      ),
+    )
+  )
+    throw new TypeError("fixture_claims_result_shape");
   const projection = {
     rows: result.rows,
     aggregate: result.aggregate,
@@ -5219,12 +5267,16 @@ export function isClosedConnectedFixture105ClaimsResult(
     return false;
   // This temporary projection reuses only the old shape validator. It is never
   // returned, persisted, registered or passed to the historical admission path.
-  return isClosedResult({
-    ...value,
-    actor_id: GATE_PIN.actor_id,
-    schema: GATE_PIN.result_schema,
-    subject_refs: [GATE_PIN.child_script_version_id],
-  });
+  const anchors = connectedClaimsAnchors();
+  return isClosedResultWithAnchor(
+    {
+      ...value,
+      actor_id: GATE_PIN.actor_id,
+      schema: GATE_PIN.result_schema,
+      subject_refs: [GATE_PIN.child_script_version_id],
+    },
+    (anchor) => anchors.has(anchor),
+  );
 }
 
 /** The fixed host's live borrowed write; never accepts a caller-built evaluation. */

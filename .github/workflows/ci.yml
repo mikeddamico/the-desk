@@ -118,6 +118,24 @@ jobs:
         timeout-minutes: 5
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITLEAKS_ENABLE_UPLOAD_ARTIFACT: "false"
+      - name: Retain generated security report outside the checkout
+        id: retain-security
+        if: ${{ always() && steps.gitleaks.outcome != 'skipped' }}
+        run: /usr/bin/python3 -I -B tools/ci-validation/ci.py retain-security
+        timeout-minutes: 1
+        env:
+          GITLEAKS_OUTCOME: ${{ steps.gitleaks.outcome }}
+      - name: Upload partition security report
+        id: upload-security
+        if: ${{ always() && steps.retain-security.outcome == 'success' }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        timeout-minutes: 2
+        with:
+          name: ci-security-writer-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/ci/security-report
+          if-no-files-found: error
+          retention-days: 30
       - name: Final evidence gate
         id: final
         if: ${{ always() && steps.init.outcome != 'skipped' }}
@@ -128,6 +146,7 @@ jobs:
           UPLOAD_OUTCOME: ${{ steps.upload-full.outcome }}
           AUDIT_OUTCOME: ${{ steps.audit.outcome }}
           GITLEAKS_OUTCOME: ${{ steps.gitleaks.outcome }}
+          SECURITY_UPLOAD_OUTCOME: ${{ steps.upload-security.outcome }}
 
   verify-rest:
     runs-on: ubuntu-24.04
@@ -238,6 +257,24 @@ jobs:
         timeout-minutes: 5
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITLEAKS_ENABLE_UPLOAD_ARTIFACT: "false"
+      - name: Retain generated security report outside the checkout
+        id: retain-security
+        if: ${{ always() && steps.gitleaks.outcome != 'skipped' }}
+        run: /usr/bin/python3 -I -B tools/ci-validation/ci.py retain-security
+        timeout-minutes: 1
+        env:
+          GITLEAKS_OUTCOME: ${{ steps.gitleaks.outcome }}
+      - name: Upload partition security report
+        id: upload-security
+        if: ${{ always() && steps.retain-security.outcome == 'success' }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        timeout-minutes: 2
+        with:
+          name: ci-security-rest-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/ci/security-report
+          if-no-files-found: error
+          retention-days: 30
       - name: Final evidence gate
         id: final
         if: ${{ always() && steps.init.outcome != 'skipped' }}
@@ -248,6 +285,7 @@ jobs:
           UPLOAD_OUTCOME: ${{ steps.upload-full.outcome }}
           AUDIT_OUTCOME: ${{ steps.audit.outcome }}
           GITLEAKS_OUTCOME: ${{ steps.gitleaks.outcome }}
+          SECURITY_UPLOAD_OUTCOME: ${{ steps.upload-security.outcome }}
 
   verify:
     needs: [verify-writer, verify-rest, container]
