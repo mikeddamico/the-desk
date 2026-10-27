@@ -3,7 +3,7 @@ import {
   connectedFixture105Data,
   connectedFixture105Id,
 } from "./connected-fixture151-data.js";
-import { connectedFixture105ArtifactHash } from "../identity/artifacts.js";
+import { connectedFixture151ArtifactHash as connectedFixture105ArtifactHash } from "../identity/artifacts.js";
 import { canonicalJson, sha256 } from "../identity/canonical-json.js";
 import {
   evaluatePerformanceGates,

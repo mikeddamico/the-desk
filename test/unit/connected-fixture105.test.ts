@@ -2,7 +2,8 @@
 import { describe, expect, it } from "vitest";
 import { canonicalJson, sha256 } from "../../src/identity/canonical-json.js";
 import {
-  connectedFixture105ArtifactHash,
+  connectedFixture151ArtifactHash as connectedFixture105ArtifactHash,
+  connectedFixture105ArtifactHash as predecessorArtifactHash,
   connectedFixture105OperationId,
   scriptHash,
 } from "../../src/identity/artifacts.js";
@@ -839,6 +840,22 @@ describe("connected fixture105 components", () => {
 
   it("checks construction outer domain and raw row-array subdigest directly", () => {
     const { observation } = projectedArtifacts();
+    const predecessorSchema = requiredAt(predecessorData().schemas, 0);
+    const predecessor = {
+      ...observation,
+      subject: constantsOf(
+        (predecessorSchema.properties as Obj).subject as Obj,
+      ),
+    };
+    expect(predecessorArtifactHash("construction", predecessor)).toBe(
+      domainHash("fixture105-construction-observation-v1", predecessor),
+    );
+    expect(() =>
+      predecessorArtifactHash("construction", observation),
+    ).toThrow();
+    expect(() =>
+      connectedFixture105ArtifactHash("construction", predecessor),
+    ).toThrow();
     expect(connectedFixture105ArtifactHash("construction", observation)).toBe(
       domainHash("fixture105-construction-observation-v1", observation),
     );

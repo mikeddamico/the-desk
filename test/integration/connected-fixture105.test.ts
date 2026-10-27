@@ -39,7 +39,7 @@ import {
 } from "../../src/runtime/package.js";
 import * as packageOwner from "../../src/runtime/package.js";
 import { admissionOf } from "../../src/runtime/performance-direction.js";
-import { connectedFixture105ArtifactHash } from "../../src/identity/artifacts.js";
+import { connectedFixture151ArtifactHash as connectedFixture105ArtifactHash } from "../../src/identity/artifacts.js";
 import {
   CommandConnectionError,
   faultPoint,

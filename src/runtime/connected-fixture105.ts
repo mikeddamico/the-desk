@@ -35,7 +35,7 @@ import { loadConfig, type Config } from "../config.js";
 
 import {
   scriptHash,
-  connectedFixture105ArtifactHash,
+  connectedFixture151ArtifactHash as connectedFixture105ArtifactHash,
 } from "../identity/artifacts.js";
 import { freezeClaims } from "../knowledge/claim-log.js";
 import type { UsageClass } from "../knowledge/claim-state.js";
