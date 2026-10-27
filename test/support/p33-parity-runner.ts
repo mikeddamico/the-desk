@@ -241,8 +241,11 @@ function fixtureGraph(
   kind: "source" | "tools",
 ): FixtureRootObject {
   const result: FixtureRootObject = {};
+  let visited = 0;
   function visit(path: string, relative: string): void {
-    if (Object.keys(result).length > 20000)
+    // Each prior visit can add at most one own key. Keep the exact key-count
+    // bound near the limit without repeatedly enumerating the growing graph.
+    if (visited++ > 20000 && Object.keys(result).length > 20000)
       throw new Error("fixture_inventory_bound");
     const info = fixtureFs.lstatSync(path);
     if (info.isSymbolicLink()) {
