@@ -1,0 +1,72 @@
+{
+  "claims_writing": {
+    "outer_keys": [
+      "rows",
+      "aggregate",
+      "warnings",
+      "coverage",
+      "preconditions"
+    ],
+    "definition_order": [
+      "claims.presence",
+      "claims.use_permission",
+      "claims.silent_non_leak",
+      "claims.value_support",
+      "claims.quote_permission",
+      "claims.paraphrase_permission",
+      "claims.speaker_attribution",
+      "claims.claim_state",
+      "claims.program_history",
+      "claims.desk_derivation",
+      "claims.incident_status",
+      "claims.span_integrity",
+      "writing.participant_validity",
+      "writing.planned_block_membership",
+      "writing.required_blocks",
+      "writing.provider_markup_lint",
+      "writing.diff_lock",
+      "writing.context_complete"
+    ],
+    "coverage_order": [
+      "C13",
+      "C14",
+      "H01",
+      "H04",
+      "H13",
+      "H14",
+      "X01",
+      "X02",
+      "W01",
+      "W02",
+      "W03",
+      "W04",
+      "W05",
+      "W06",
+      "W07",
+      "W08",
+      "W09",
+      "W10",
+      "W11",
+      "W12"
+    ],
+    "row_keys": ["key", "facts", "findings"],
+    "projection_owner": "evaluateGateComponent complete return; no ownership brand serialized"
+  },
+  "performance": {
+    "outer_keys": ["rows", "aggregate", "coverage"],
+    "definition_order": [
+      "performance.intent_ref_integrity",
+      "performance.script_binding",
+      "performance.mode_intent_allowed",
+      "performance.protected_nonverbal",
+      "performance.overlap_protected_span",
+      "performance.no_spoken_text_mutation",
+      "performance.no_provider_syntax"
+    ],
+    "definition_positions": [19, 20, 21, 22, 23, 24, 25],
+    "coverage_order": ["M01", "S01", "B01", "Q01", "Q02", "T01", "T02", "A01"],
+    "row_keys": ["key", "gate_definition_id", "outcome", "result"]
+  },
+  "hash": "raw SHA256 of exact canonical UTF8 projection, no LF/domain",
+  "rules_file": "INNER-DIGEST-RULES.md"
+}

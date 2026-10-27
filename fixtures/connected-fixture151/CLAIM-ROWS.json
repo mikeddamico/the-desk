@@ -1,0 +1,177 @@
+[
+  {
+    "claim_id": "a50f7424-47ba-559a-a0de-f011fe3784b1",
+    "content_hash": "c846eba74cfa0a3b4fa36f3df1bd399da0a87a191eaefcec3fa3bc7e84925e50",
+    "claim_kind": "event_fact",
+    "origin": "first_party",
+    "subject_domain": "football",
+    "subject": {
+      "entity_ref": "Bellhaven Athletic"
+    },
+    "predicate": "result",
+    "value": {
+      "home": "Bellhaven Athletic",
+      "away": "Quartz Vale",
+      "home_goals": 1,
+      "away_goals": 0
+    },
+    "initial_status": "confirmed",
+    "initial_usage_class": "assertable",
+    "asserted_at": "2024-06-26T18:00:00Z",
+    "supersedes_claim_id": null,
+    "created_at": "2024-06-26T18:00:00Z"
+  },
+  {
+    "claim_id": "9d40e3c5-e145-5bc1-ad1c-55ce09dd66c7",
+    "content_hash": "98c86544eb1c76379c410da75011a1ae1bad69e37f9748087b23e2848d7f452d",
+    "claim_kind": "reported_fact",
+    "origin": "first_party",
+    "subject_domain": "football",
+    "subject": {
+      "entity_ref": "Bellhaven Athletic"
+    },
+    "predicate": "instruction",
+    "value": "Leave the centre covered.",
+    "initial_status": "confirmed",
+    "initial_usage_class": "assertable",
+    "asserted_at": "2024-06-26T18:00:00Z",
+    "supersedes_claim_id": null,
+    "created_at": "2024-06-26T18:00:00Z"
+  },
+  {
+    "claim_id": "6cd06f82-a9ad-5e46-8e52-b16e7d44b998",
+    "content_hash": "b1bab70591a551c70fd7bc8fa278e7cf252ea0e8f44ac795a2aba709fb10e29e",
+    "claim_kind": "analysis",
+    "origin": "first_party",
+    "subject_domain": "football",
+    "subject": {
+      "entity_ref": "Bellhaven Athletic"
+    },
+    "predicate": "possible_retreat_cause",
+    "value": "fatigue",
+    "initial_status": "confirmed",
+    "initial_usage_class": "hedged_only",
+    "asserted_at": "2024-06-26T18:00:00Z",
+    "supersedes_claim_id": null,
+    "created_at": "2024-06-26T18:00:00Z"
+  },
+  {
+    "claim_id": "acf27cee-53eb-5fbd-a67b-114f94ca795d",
+    "content_hash": "f4607c5697e58186d43d3ec0bc571e8c3177b57409f5f2d83fdfbbe4182e09c9",
+    "claim_kind": "mood",
+    "origin": "first_party",
+    "subject_domain": "football",
+    "subject": {
+      "entity_ref": "Bellhaven Athletic"
+    },
+    "predicate": "selected_supporter_response",
+    "value": {
+      "selected_sources": 2,
+      "response": "relief with one stated concern"
+    },
+    "initial_status": "confirmed",
+    "initial_usage_class": "assertable",
+    "asserted_at": "2024-06-26T18:00:00Z",
+    "supersedes_claim_id": null,
+    "created_at": "2024-06-26T18:00:00Z"
+  },
+  {
+    "claim_id": "13280589-4ad9-5109-9f1f-d7d4d6079116",
+    "content_hash": "fe951400bdd54741fe57c9d4ba870e52e18adf042b6592e20f2c55bd4d5ceeff",
+    "claim_kind": "lore",
+    "origin": "first_party",
+    "subject_domain": "football",
+    "subject": {
+      "entity_ref": "Bellhaven Athletic"
+    },
+    "predicate": "clearance_phrase",
+    "value": "a borrowed breath",
+    "initial_status": "confirmed",
+    "initial_usage_class": "assertable",
+    "asserted_at": "2024-06-26T18:00:00Z",
+    "supersedes_claim_id": null,
+    "created_at": "2024-06-26T18:00:00Z"
+  },
+  {
+    "claim_id": "0ee3cc88-74c6-5815-8b18-b86772fee142",
+    "content_hash": "622e52c027ed3569c93a7776e0d786c954b240e7df85905c5063bc13793e6c48",
+    "claim_kind": "desk_derived",
+    "origin": "desk_derived",
+    "subject_domain": "football",
+    "subject": {
+      "entity_ref": "Bellhaven Athletic"
+    },
+    "predicate": "late_concession_match_count",
+    "value": {
+      "count": 2,
+      "sample_size": 5,
+      "after_minute": 80
+    },
+    "initial_status": "confirmed",
+    "initial_usage_class": "assertable",
+    "asserted_at": "2024-06-26T18:00:00Z",
+    "supersedes_claim_id": null,
+    "created_at": "2024-06-26T18:00:00Z"
+  },
+  {
+    "claim_id": "af00a068-d5ba-52e7-83bf-ebb583588b42",
+    "content_hash": "3c1053dcb9e48656206c6e1c86c86868fe6507cac18b6df4fced970f4b02daea",
+    "claim_kind": "observation",
+    "origin": "first_party",
+    "subject_domain": "football",
+    "subject": {
+      "entity_ref": "Bellhaven Athletic"
+    },
+    "predicate": "excerpt_R",
+    "value": {
+      "near_midfielder": "central",
+      "second_ball": "opponent_collected",
+      "central_lane_pass": false
+    },
+    "initial_status": "confirmed",
+    "initial_usage_class": "assertable",
+    "asserted_at": "2024-06-26T18:00:00Z",
+    "supersedes_claim_id": null,
+    "created_at": "2024-06-26T18:00:00Z"
+  },
+  {
+    "claim_id": "a5807836-8468-5b76-9467-4785cdf3b6c0",
+    "content_hash": "3b27024effb987432190666332602b93cc09e77389510a25643f4cf8c53a1f2e",
+    "claim_kind": "observation",
+    "origin": "first_party",
+    "subject_domain": "football",
+    "subject": {
+      "entity_ref": "Bellhaven Athletic"
+    },
+    "predicate": "excerpt_S",
+    "value": {
+      "near_midfielder": "towards_second_ball",
+      "second_ball": "contested",
+      "central_lane_pass": true
+    },
+    "initial_status": "confirmed",
+    "initial_usage_class": "assertable",
+    "asserted_at": "2024-06-26T18:00:00Z",
+    "supersedes_claim_id": null,
+    "created_at": "2024-06-26T18:00:00Z"
+  },
+  {
+    "claim_id": "46050fc9-ec1b-5e5f-9346-2be287d6a5cc",
+    "content_hash": "3ed6143a59c225445cf4851fd444f75830573b8d00232775cc14cd634fcea7fb",
+    "claim_kind": "status",
+    "origin": "first_party",
+    "subject_domain": "football",
+    "subject": {
+      "entity_ref": "Bellhaven Athletic"
+    },
+    "predicate": "silent_calibration",
+    "value": {
+      "scalar": "17"
+    },
+    "initial_status": "confirmed",
+    "initial_usage_class": "silent",
+    "asserted_at": "2024-06-26T18:00:00Z",
+    "supersedes_claim_id": null,
+    "created_at": "2024-06-26T18:00:00Z"
+  }
+]

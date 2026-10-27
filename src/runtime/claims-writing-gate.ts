@@ -13,7 +13,7 @@
 // to plan rows. An unowned throwable propagates with its identity; only the finite gate stop mapping below is returned as data.
 import type { Pool, PoolClient } from "pg";
 
-import { connectedFixture105Data } from "./connected-fixture105-data.js";
+import { connectedFixture105Data } from "./connected-fixture151-data.js";
 
 import { codePointLength } from "../fixture/code-points.js";
 import { GATE_SET_VERSION } from "../fixture/derive.js";
@@ -2521,9 +2521,12 @@ export function checkContextComplete(inp: ComponentInputs): DefinitionResult {
       context.model_context_limit;
   if (!within) findings.push(finding("context_budget_exceeded"));
   const writerHash = sha256(canonicalBytes(inp.writer));
+  const expectedWriterHash = connected105(inp)
+    ? connectedFixture105Data().context.serialized_input_hash
+    : PASS1_PIN.w_raw_sha256;
   const bound =
     context.serialized_input_hash === writerHash &&
-    writerHash === PASS1_PIN.w_raw_sha256;
+    writerHash === expectedWriterHash;
   if (!bound) findings.push(finding("context_hash_mismatch"));
   const refs = strings(context.required_claim_refs);
   const known = new Set(

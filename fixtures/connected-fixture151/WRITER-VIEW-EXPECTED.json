@@ -1,0 +1,437 @@
+{
+  "purpose": "evaluation",
+  "showrunner_brief_version_id": "0e196925-50d3-5ff7-9baf-501a9a748adc",
+  "brief_hash": "8067cb4e58d9a6a82b7dcf6c581ad01f6f346eba3f6e36e3802d6dca0e3b5c9f",
+  "evidence_package_id": "fabfeb44-c361-5e82-9b8f-3a960d211cfa",
+  "package_hash": "288664c91f63508197091e4d2522a62962e6c8eb8484e7f4359dc1d2be01b8ae",
+  "show_version": "estuary-fixture109/1",
+  "writing_policy_version": "writing-0.2.3",
+  "writing_craft_policy_version": "writing-craft-0.1",
+  "character_profile_versions": {
+    "mara_ives": "mara-ives-fixture109/1",
+    "jonah_reed": "jonah-reed-fixture109/1",
+    "nia_calder": "nia-calder-fixture109/1"
+  },
+  "locale": "en-GB",
+  "runtime_and_block_budgets": {
+    "runtime_seconds": 280,
+    "blocks": [
+      {
+        "program_block_id": "6d50514e-bb43-5b2b-a565-9e25d58d7f0c",
+        "seconds": 20
+      },
+      {
+        "program_block_id": "2d59c16c-e9b0-53ff-8ee0-88c11ba827bd",
+        "seconds": 10
+      },
+      {
+        "program_block_id": "09b1aad1-7ae2-56c9-9741-b3e578c4d5ce",
+        "seconds": 35
+      },
+      {
+        "program_block_id": "cd755392-009f-51eb-a97c-acfa29cfeaa7",
+        "seconds": 65
+      },
+      {
+        "program_block_id": "02adc00e-063d-5e29-bd01-466a2c260b0d",
+        "seconds": 20
+      },
+      {
+        "program_block_id": "844de2ac-6bbf-57aa-a558-bd6df22e3747",
+        "seconds": 35
+      },
+      {
+        "program_block_id": "f8ca0b87-0aee-5820-8095-18db9c5af17e",
+        "seconds": 40
+      },
+      {
+        "program_block_id": "2cda05cf-b36f-5dcb-b321-94fe9061fbf5",
+        "seconds": 45
+      },
+      {
+        "program_block_id": "21e7afe3-7ff1-5afe-895a-ce93e04ba27c",
+        "seconds": 10
+      }
+    ]
+  },
+  "program_block_refs": [
+    "6d50514e-bb43-5b2b-a565-9e25d58d7f0c",
+    "2d59c16c-e9b0-53ff-8ee0-88c11ba827bd",
+    "09b1aad1-7ae2-56c9-9741-b3e578c4d5ce",
+    "cd755392-009f-51eb-a97c-acfa29cfeaa7",
+    "02adc00e-063d-5e29-bd01-466a2c260b0d",
+    "844de2ac-6bbf-57aa-a558-bd6df22e3747",
+    "f8ca0b87-0aee-5820-8095-18db9c5af17e",
+    "2cda05cf-b36f-5dcb-b321-94fe9061fbf5",
+    "21e7afe3-7ff1-5afe-895a-ce93e04ba27c"
+  ],
+  "selected_claims": [
+    {
+      "claim_id": "a50f7424-47ba-559a-a0de-f011fe3784b1",
+      "claim_content_hash": "c846eba74cfa0a3b4fa36f3df1bd399da0a87a191eaefcec3fa3bc7e84925e50",
+      "frozen_state": "confirmed",
+      "frozen_state_hash": "0830c994d42d989b180059ab410f0c4301408e8b6438969b29988df84f6fc127",
+      "kind": "event_fact",
+      "subject_domain": "football",
+      "subject_ref": "Bellhaven Athletic",
+      "predicate": "result",
+      "value": {
+        "home": "Bellhaven Athletic",
+        "away": "Quartz Vale",
+        "home_goals": 1,
+        "away_goals": 0
+      },
+      "value_type": "structured_text",
+      "origin": "first_party",
+      "effective_usage_class": "assertable",
+      "attribution_requirement": {
+        "required": true,
+        "approved_prefix": "The fictional ledger"
+      },
+      "approved_representation": "The fictional ledger records a Bellhaven win.",
+      "support_refs": [
+        {
+          "ref": "da25102a-f352-5601-b3b5-f76b77dd8590",
+          "role": "supports_value",
+          "type": "evidence"
+        }
+      ]
+    },
+    {
+      "claim_id": "9d40e3c5-e145-5bc1-ad1c-55ce09dd66c7",
+      "claim_content_hash": "98c86544eb1c76379c410da75011a1ae1bad69e37f9748087b23e2848d7f452d",
+      "frozen_state": "confirmed",
+      "frozen_state_hash": "f43a4b9a4e1988d6fb4581211d0f4a1d38b8b5bd00a3d770000858b2ef5ba653",
+      "kind": "reported_fact",
+      "subject_domain": "football",
+      "subject_ref": "Bellhaven Athletic",
+      "predicate": "instruction",
+      "value": "Leave the centre covered.",
+      "value_type": "text",
+      "origin": "first_party",
+      "effective_usage_class": "assertable",
+      "attribution_requirement": {
+        "required": true,
+        "approved_prefix": "The fictional training note"
+      },
+      "approved_representation": "The fictional training note asks the near midfielder to stay central during the second-ball contest.",
+      "support_refs": [
+        {
+          "ref": "9d8b96b4-5089-5d5e-9259-0d576551271b",
+          "role": "supports_value",
+          "type": "evidence"
+        }
+      ]
+    },
+    {
+      "claim_id": "6cd06f82-a9ad-5e46-8e52-b16e7d44b998",
+      "claim_content_hash": "b1bab70591a551c70fd7bc8fa278e7cf252ea0e8f44ac795a2aba709fb10e29e",
+      "frozen_state": "confirmed",
+      "frozen_state_hash": "23cc23380675247c56837f4ec9fa59c3713c191894407f1dcb8c7acd6c713789",
+      "kind": "analysis",
+      "subject_domain": "football",
+      "subject_ref": "Bellhaven Athletic",
+      "predicate": "possible_retreat_cause",
+      "value": "fatigue",
+      "value_type": "text",
+      "origin": "first_party",
+      "effective_usage_class": "hedged_only",
+      "attribution_requirement": {
+        "required": true,
+        "approved_prefix": "The fictional Estuary Analyst"
+      },
+      "approved_representation": "The fictional Estuary Analyst suggests fatigue could explain a late retreat.",
+      "support_refs": [
+        {
+          "ref": "e82736cb-4702-56a5-9fb7-ac8c9629ab81",
+          "role": "supports_value",
+          "type": "evidence"
+        }
+      ]
+    },
+    {
+      "claim_id": "acf27cee-53eb-5fbd-a67b-114f94ca795d",
+      "claim_content_hash": "f4607c5697e58186d43d3ec0bc571e8c3177b57409f5f2d83fdfbbe4182e09c9",
+      "frozen_state": "confirmed",
+      "frozen_state_hash": "b7e909a68d7c9f3037494be3f06f89877b97feb85bde12d25a5be375a7859c50",
+      "kind": "mood",
+      "subject_domain": "football",
+      "subject_ref": "Bellhaven Athletic",
+      "predicate": "selected_supporter_response",
+      "value": {
+        "selected_sources": 2,
+        "response": "relief with one stated concern"
+      },
+      "value_type": "structured_text",
+      "origin": "first_party",
+      "effective_usage_class": "assertable",
+      "attribution_requirement": {
+        "required": true,
+        "approved_prefix": "The fictional ledger"
+      },
+      "approved_representation": "The fictional ledger records relief in two selected supporter notes, with a concern in one.",
+      "support_refs": [
+        {
+          "ref": "ae3ba8e4-5657-586b-9bb9-84dce9fbd198",
+          "role": "supports_value",
+          "type": "evidence"
+        }
+      ]
+    },
+    {
+      "claim_id": "13280589-4ad9-5109-9f1f-d7d4d6079116",
+      "claim_content_hash": "fe951400bdd54741fe57c9d4ba870e52e18adf042b6592e20f2c55bd4d5ceeff",
+      "frozen_state": "confirmed",
+      "frozen_state_hash": "aada891798a442480794b27727254d2a0549f4ccdafdd0ddc95a3e8c75fa3c4e",
+      "kind": "lore",
+      "subject_domain": "football",
+      "subject_ref": "Bellhaven Athletic",
+      "predicate": "clearance_phrase",
+      "value": "a borrowed breath",
+      "value_type": "text",
+      "origin": "first_party",
+      "effective_usage_class": "assertable",
+      "attribution_requirement": {
+        "required": true,
+        "approved_prefix": "The fictional pamphlet"
+      },
+      "approved_representation": "The fictional pamphlet calls a hurried clearance a borrowed breath.",
+      "support_refs": [
+        {
+          "ref": "03fc1029-4eda-5556-87b1-62056f1c53e8",
+          "role": "supports_value",
+          "type": "evidence"
+        }
+      ]
+    },
+    {
+      "claim_id": "0ee3cc88-74c6-5815-8b18-b86772fee142",
+      "claim_content_hash": "622e52c027ed3569c93a7776e0d786c954b240e7df85905c5063bc13793e6c48",
+      "frozen_state": "confirmed",
+      "frozen_state_hash": "56be73a107f845543dbeecc5253b019ea2db476271f3c6d09ea20434d0426949",
+      "kind": "desk_derived",
+      "subject_domain": "football",
+      "subject_ref": "Bellhaven Athletic",
+      "predicate": "late_concession_match_count",
+      "value": { "count": 2, "sample_size": 5, "after_minute": 80 },
+      "value_type": "count_window",
+      "origin": "desk_derived",
+      "effective_usage_class": "assertable",
+      "attribution_requirement": {
+        "required": true,
+        "approved_prefix": "The fictional ledger"
+      },
+      "approved_representation": "The fictional match ledger yields two late-concession matches in the selected five.",
+      "support_refs": [
+        {
+          "ref": "3cfc6236-f202-5b18-9515-3d163b39580a",
+          "role": "supports_value",
+          "type": "derivation"
+        }
+      ]
+    },
+    {
+      "claim_id": "af00a068-d5ba-52e7-83bf-ebb583588b42",
+      "claim_content_hash": "3c1053dcb9e48656206c6e1c86c86868fe6507cac18b6df4fced970f4b02daea",
+      "frozen_state": "confirmed",
+      "frozen_state_hash": "31522d4cf09ff61b349f40e5c3dddf5d73e5f6335caf6bdc121565c10d3e4d0b",
+      "kind": "observation",
+      "subject_domain": "football",
+      "subject_ref": "Bellhaven Athletic",
+      "predicate": "excerpt_R",
+      "value": {
+        "near_midfielder": "central",
+        "second_ball": "opponent_collected",
+        "central_lane_pass": false
+      },
+      "value_type": "structured_text",
+      "origin": "first_party",
+      "effective_usage_class": "assertable",
+      "attribution_requirement": {
+        "required": true,
+        "approved_prefix": "The fictional ledger"
+      },
+      "approved_representation": "The fictional ledger describes excerpt R with central cover and no central pass in that excerpt.",
+      "support_refs": [
+        {
+          "ref": "bdfa859a-f7f1-5aec-88b0-d98ca1982fc2",
+          "role": "supports_value",
+          "type": "evidence"
+        }
+      ]
+    },
+    {
+      "claim_id": "a5807836-8468-5b76-9467-4785cdf3b6c0",
+      "claim_content_hash": "3b27024effb987432190666332602b93cc09e77389510a25643f4cf8c53a1f2e",
+      "frozen_state": "confirmed",
+      "frozen_state_hash": "b76cc0b9bb12b8dcb4626c93e6f40b2f90c47b858f0f2306d29c73274efbcd95",
+      "kind": "observation",
+      "subject_domain": "football",
+      "subject_ref": "Bellhaven Athletic",
+      "predicate": "excerpt_S",
+      "value": {
+        "near_midfielder": "towards_second_ball",
+        "second_ball": "contested",
+        "central_lane_pass": true
+      },
+      "value_type": "structured_text",
+      "origin": "first_party",
+      "effective_usage_class": "assertable",
+      "attribution_requirement": {
+        "required": true,
+        "approved_prefix": "The fictional ledger"
+      },
+      "approved_representation": "The fictional ledger describes excerpt S with vacated central cover and a central pass in that excerpt.",
+      "support_refs": [
+        {
+          "ref": "097a46c4-a115-5650-badb-324b7e9fc15b",
+          "role": "supports_value",
+          "type": "evidence"
+        }
+      ]
+    }
+  ],
+  "selected_evidence": [
+    {
+      "evidence_unit_id": "da25102a-f352-5601-b3b5-f76b77dd8590",
+      "content_hash": "132f8b7d572b4d23a8eac1704a3171c3f0adbba604188ed1a9c761c708d0fe3f",
+      "evidence_type": "fact",
+      "modality": "text",
+      "origin": "first_party",
+      "source_role": "authored_synthetic",
+      "locator": {
+        "member": "EVIDENCE-ROWS.json",
+        "evidence_unit_id": "da25102a-f352-5601-b3b5-f76b77dd8590"
+      },
+      "quote_permission": true,
+      "paraphrase_permission": true,
+      "rights_policy_version": "0e7f75a6-e7f2-5414-8e6a-b35e9ded3444",
+      "authorized_representation": "The fictional result ledger records Bellhaven Athletic beating Quartz Vale 1-0 in the Estuary Cup on 25 June 2024.",
+      "consumer_exposure": { "writer": "exact_excerpt" }
+    },
+    {
+      "evidence_unit_id": "9d8b96b4-5089-5d5e-9259-0d576551271b",
+      "content_hash": "02efeea313a355375919acab8d5810e2543dc66943519a91f66dad058ea770ed",
+      "evidence_type": "quote",
+      "modality": "text",
+      "origin": "first_party",
+      "source_role": "authored_synthetic",
+      "locator": {
+        "member": "EVIDENCE-ROWS.json",
+        "evidence_unit_id": "9d8b96b4-5089-5d5e-9259-0d576551271b"
+      },
+      "quote_permission": true,
+      "paraphrase_permission": true,
+      "rights_policy_version": "0e7f75a6-e7f2-5414-8e6a-b35e9ded3444",
+      "authorized_representation": "The fictional Bellhaven training note says: \"Leave the centre covered.\" Its instruction is for the near midfielder to stay in the central lane while a teammate contests the second ball.",
+      "consumer_exposure": { "writer": "exact_excerpt" }
+    },
+    {
+      "evidence_unit_id": "e82736cb-4702-56a5-9fb7-ac8c9629ab81",
+      "content_hash": "d3e36ff5e91571e528b9272ba45887eb4a0b0f41381d3e20f7bc209a4b56cad0",
+      "evidence_type": "analysis",
+      "modality": "text",
+      "origin": "first_party",
+      "source_role": "authored_synthetic",
+      "locator": {
+        "member": "EVIDENCE-ROWS.json",
+        "evidence_unit_id": "e82736cb-4702-56a5-9fb7-ac8c9629ab81"
+      },
+      "quote_permission": true,
+      "paraphrase_permission": true,
+      "rights_policy_version": "0e7f75a6-e7f2-5414-8e6a-b35e9ded3444",
+      "authorized_representation": "The fictional Estuary Analyst suggests fatigue could explain a late retreat. This is a hypothesis, not a measured cause.",
+      "consumer_exposure": { "writer": "exact_excerpt" }
+    },
+    {
+      "evidence_unit_id": "ae3ba8e4-5657-586b-9bb9-84dce9fbd198",
+      "content_hash": "7c9b7103f8355e256e19deeca391507cd5665ba388aa690c915db686dcac0e84",
+      "evidence_type": "sentiment",
+      "modality": "text",
+      "origin": "first_party",
+      "source_role": "authored_synthetic",
+      "locator": {
+        "member": "EVIDENCE-ROWS.json",
+        "evidence_unit_id": "ae3ba8e4-5657-586b-9bb9-84dce9fbd198"
+      },
+      "quote_permission": true,
+      "paraphrase_permission": true,
+      "rights_policy_version": "0e7f75a6-e7f2-5414-8e6a-b35e9ded3444",
+      "authorized_representation": "Two fictional supporter notes were selected: Orin felt relieved by the result; Pella was relieved but remained worried by the final clearance. This is only this selected pair.",
+      "consumer_exposure": { "writer": "exact_excerpt" }
+    },
+    {
+      "evidence_unit_id": "03fc1029-4eda-5556-87b1-62056f1c53e8",
+      "content_hash": "a452780557a5aa8dadc4ea512794111a576d92f714fc8e9e006c413288b222ad",
+      "evidence_type": "context",
+      "modality": "text",
+      "origin": "first_party",
+      "source_role": "authored_synthetic",
+      "locator": {
+        "member": "EVIDENCE-ROWS.json",
+        "evidence_unit_id": "03fc1029-4eda-5556-87b1-62056f1c53e8"
+      },
+      "quote_permission": true,
+      "paraphrase_permission": true,
+      "rights_policy_version": "0e7f75a6-e7f2-5414-8e6a-b35e9ded3444",
+      "authorized_representation": "The fictional Bellhaven supporters' pamphlet calls a hurried clearance \"a borrowed breath\". This is authored lore, not a real supporter tradition.",
+      "consumer_exposure": { "writer": "exact_excerpt" }
+    },
+    {
+      "evidence_unit_id": "bdfa859a-f7f1-5aec-88b0-d98ca1982fc2",
+      "content_hash": "036d505e1a8a0bc0b06b137f16716e88a24c8cbbb449165132da49b4a69b362f",
+      "evidence_type": "observation",
+      "modality": "text",
+      "origin": "first_party",
+      "source_role": "authored_synthetic",
+      "locator": {
+        "member": "EVIDENCE-ROWS.json",
+        "evidence_unit_id": "bdfa859a-f7f1-5aec-88b0-d98ca1982fc2"
+      },
+      "quote_permission": true,
+      "paraphrase_permission": true,
+      "rights_policy_version": "0e7f75a6-e7f2-5414-8e6a-b35e9ded3444",
+      "authorized_representation": "Fictional excerpt R: a teammate contested the second ball while the near midfielder stayed central; the opponent collected the loose ball but did not pass through the central lane in this excerpt.",
+      "consumer_exposure": { "writer": "exact_excerpt" }
+    },
+    {
+      "evidence_unit_id": "097a46c4-a115-5650-badb-324b7e9fc15b",
+      "content_hash": "85bfa7c4198f81abc27c5e25a4c205649398e34ee95f3169dcfcb1376135f011",
+      "evidence_type": "observation",
+      "modality": "text",
+      "origin": "first_party",
+      "source_role": "authored_synthetic",
+      "locator": {
+        "member": "EVIDENCE-ROWS.json",
+        "evidence_unit_id": "097a46c4-a115-5650-badb-324b7e9fc15b"
+      },
+      "quote_permission": true,
+      "paraphrase_permission": true,
+      "rights_policy_version": "0e7f75a6-e7f2-5414-8e6a-b35e9ded3444",
+      "authorized_representation": "Fictional excerpt S: a teammate contested the second ball while the near midfielder moved towards it; an opponent then passed through the vacated central lane in this excerpt.",
+      "consumer_exposure": { "writer": "exact_excerpt" }
+    }
+  ],
+  "context_selections": [
+    {
+      "context_selection_id": "ff8d77c1-a1fb-515e-a4c8-f42206519973",
+      "context_id": "fixture109-clearance-lore",
+      "function": "interpretation",
+      "program_block_id": "844de2ac-6bbf-57aa-a558-bd6df22e3747"
+    }
+  ],
+  "comprehension_targets": [
+    {
+      "target_id": "fixture109-comparison",
+      "claim_refs": [
+        "9d40e3c5-e145-5bc1-ad1c-55ce09dd66c7",
+        "af00a068-d5ba-52e7-83bf-ebb583588b42",
+        "a5807836-8468-5b76-9467-4785cdf3b6c0"
+      ],
+      "job": "Distinguish the instruction, its two examples and the untested causal alternative."
+    }
+  ],
+  "compact_writing_standard": "The Writer receives the compact principles needed for generation. It should not receive the full craft archive on every episode.\n\nThe launch standard is:\n\n- Write a conversation in which participants affect what comes next.\n- Prefer consequential insight over recitation.\n- Let evidence do argumentative work.\n- Make forward implication matter, but do not manufacture certainty.\n- Reinforce only the few ideas worth retaining, and reinforce by changing their conversational function.\n- Make comprehension design invisible.\n- Let personality create pleasure, not merely perform a functional role.\n- Allow restraint. Not every turn needs a joke, stat, argument, analogy, or conclusion.\n- End beats when their value is extracted.\n- Do not imitate prior surface forms merely because they worked.",
+  "recent_pattern_signals": {},
+  "live_search": false
+}

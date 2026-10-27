@@ -1,0 +1,101 @@
+[
+  {
+    "claim_id": "a50f7424-47ba-559a-a0de-f011fe3784b1",
+    "claim_support_id": "fe9c8b3e-1b6b-5810-91f7-2566ade2e410",
+    "support_kind": "evidence",
+    "support_role": "supports_value",
+    "evidence_unit_id": "da25102a-f352-5601-b3b5-f76b77dd8590",
+    "derivation_run_id": null,
+    "external_support_identity": null,
+    "support_hash": "132f8b7d572b4d23a8eac1704a3171c3f0adbba604188ed1a9c761c708d0fe3f",
+    "created_at": "2024-06-26T18:00:00Z"
+  },
+  {
+    "claim_id": "9d40e3c5-e145-5bc1-ad1c-55ce09dd66c7",
+    "claim_support_id": "4285a943-811f-5925-b904-0c8feecb0bac",
+    "support_kind": "evidence",
+    "support_role": "supports_value",
+    "evidence_unit_id": "9d8b96b4-5089-5d5e-9259-0d576551271b",
+    "derivation_run_id": null,
+    "external_support_identity": null,
+    "support_hash": "02efeea313a355375919acab8d5810e2543dc66943519a91f66dad058ea770ed",
+    "created_at": "2024-06-26T18:00:00Z"
+  },
+  {
+    "claim_id": "6cd06f82-a9ad-5e46-8e52-b16e7d44b998",
+    "claim_support_id": "ef80e135-9119-5c36-861c-52ea7123b8c2",
+    "support_kind": "evidence",
+    "support_role": "supports_value",
+    "evidence_unit_id": "e82736cb-4702-56a5-9fb7-ac8c9629ab81",
+    "derivation_run_id": null,
+    "external_support_identity": null,
+    "support_hash": "d3e36ff5e91571e528b9272ba45887eb4a0b0f41381d3e20f7bc209a4b56cad0",
+    "created_at": "2024-06-26T18:00:00Z"
+  },
+  {
+    "claim_id": "acf27cee-53eb-5fbd-a67b-114f94ca795d",
+    "claim_support_id": "80a0b10f-f491-5e4d-b8f6-4ae06252d3ec",
+    "support_kind": "evidence",
+    "support_role": "supports_value",
+    "evidence_unit_id": "ae3ba8e4-5657-586b-9bb9-84dce9fbd198",
+    "derivation_run_id": null,
+    "external_support_identity": null,
+    "support_hash": "7c9b7103f8355e256e19deeca391507cd5665ba388aa690c915db686dcac0e84",
+    "created_at": "2024-06-26T18:00:00Z"
+  },
+  {
+    "claim_id": "13280589-4ad9-5109-9f1f-d7d4d6079116",
+    "claim_support_id": "0a8633b6-4491-5471-af2d-d0e24bde1ef6",
+    "support_kind": "evidence",
+    "support_role": "supports_value",
+    "evidence_unit_id": "03fc1029-4eda-5556-87b1-62056f1c53e8",
+    "derivation_run_id": null,
+    "external_support_identity": null,
+    "support_hash": "a452780557a5aa8dadc4ea512794111a576d92f714fc8e9e006c413288b222ad",
+    "created_at": "2024-06-26T18:00:00Z"
+  },
+  {
+    "claim_id": "0ee3cc88-74c6-5815-8b18-b86772fee142",
+    "claim_support_id": "ef334790-f779-5afa-a41e-c1c6844f8f53",
+    "support_kind": "derivation",
+    "support_role": "supports_value",
+    "evidence_unit_id": null,
+    "derivation_run_id": "3cfc6236-f202-5b18-9515-3d163b39580a",
+    "external_support_identity": null,
+    "support_hash": "31beac346bf8884a5ff96b1d5b8f55d8304a6e86a10aa87d02bcd4341670bc2f",
+    "created_at": "2024-06-26T18:00:00Z"
+  },
+  {
+    "claim_id": "af00a068-d5ba-52e7-83bf-ebb583588b42",
+    "claim_support_id": "b8e5949f-fb1e-5476-bfe0-2a1bf0453bc9",
+    "support_kind": "evidence",
+    "support_role": "supports_value",
+    "evidence_unit_id": "bdfa859a-f7f1-5aec-88b0-d98ca1982fc2",
+    "derivation_run_id": null,
+    "external_support_identity": null,
+    "support_hash": "036d505e1a8a0bc0b06b137f16716e88a24c8cbbb449165132da49b4a69b362f",
+    "created_at": "2024-06-26T18:00:00Z"
+  },
+  {
+    "claim_id": "a5807836-8468-5b76-9467-4785cdf3b6c0",
+    "claim_support_id": "73d2982b-9de6-504c-9d6a-0be505fded78",
+    "support_kind": "evidence",
+    "support_role": "supports_value",
+    "evidence_unit_id": "097a46c4-a115-5650-badb-324b7e9fc15b",
+    "derivation_run_id": null,
+    "external_support_identity": null,
+    "support_hash": "85bfa7c4198f81abc27c5e25a4c205649398e34ee95f3169dcfcb1376135f011",
+    "created_at": "2024-06-26T18:00:00Z"
+  },
+  {
+    "claim_id": "46050fc9-ec1b-5e5f-9346-2be287d6a5cc",
+    "claim_support_id": "0b4ca64a-548b-572d-b891-965dc7c4daab",
+    "support_kind": "evidence",
+    "support_role": "supports_value",
+    "evidence_unit_id": "49b62d29-aade-5121-bd87-bd1b53d511d8",
+    "derivation_run_id": null,
+    "external_support_identity": null,
+    "support_hash": "0e52a51c56cc53a2ea82f7c62ace48cd9d2bfc88be136a0d1ef53e5dcbeaf2ee",
+    "created_at": "2024-06-26T18:00:00Z"
+  }
+]

@@ -1,0 +1,252 @@
+{
+  "derivation_run_id": "3cfc6236-f202-5b18-9515-3d163b39580a",
+  "rule_version": "late-concession-count/v1",
+  "parameters": {
+    "after_minute": 80,
+    "window_matches": 5
+  },
+  "exact_input_refs": [
+    {
+      "evidence_unit_id": "f1090000-0000-4000-8000-000000000012",
+      "content_hash": "bc36e9840ddf0b77d7afbe48f190d75c2bca10b6136e9fde0fa8e8d287bd867c",
+      "selected_provenance": {
+        "window_order": 1,
+        "event_identity": "bellhaven-quartz-20240625",
+        "competition_identity": "Fictional Estuary Cup109",
+        "entity_identity": "Bellhaven Athletic",
+        "as_of": "2024-06-26T18:00:00Z",
+        "window_identity": "fixture109-five-completed-cup-matches"
+      },
+      "window_proof": {
+        "competition_identity": "Fictional Estuary Cup109",
+        "entity_identity": "Bellhaven Athletic",
+        "as_of": "2024-06-26T18:00:00Z",
+        "window_identity": "fixture109-five-completed-cup-matches",
+        "selected_event_identities": [
+          "bellhaven-quartz-20240625",
+          "bellhaven-larch-quay-20240618",
+          "bellhaven-ternstead-20240611",
+          "bellhaven-mallow-heath-20240604",
+          "bellhaven-alder-fen-20240601"
+        ],
+        "ordered_prior_schedule": [
+          {
+            "event_identity": "bellhaven-quartz-20240625",
+            "completed_at": "2024-06-25T17:00:00Z"
+          },
+          {
+            "event_identity": "bellhaven-larch-quay-20240618",
+            "completed_at": "2024-06-18T17:00:00Z"
+          },
+          {
+            "event_identity": "bellhaven-ternstead-20240611",
+            "completed_at": "2024-06-11T17:00:00Z"
+          },
+          {
+            "event_identity": "bellhaven-mallow-heath-20240604",
+            "completed_at": "2024-06-04T17:00:00Z"
+          },
+          {
+            "event_identity": "bellhaven-alder-fen-20240601",
+            "completed_at": "2024-06-01T17:00:00Z"
+          }
+        ]
+      }
+    },
+    {
+      "evidence_unit_id": "f1090000-0000-4000-8000-000000000013",
+      "content_hash": "913ce4940f7b04ad37f5f94b3b0e3aa9dcbdd71057d2c3838bd66b39526c09ac",
+      "selected_provenance": {
+        "window_order": 2,
+        "event_identity": "bellhaven-larch-quay-20240618",
+        "competition_identity": "Fictional Estuary Cup109",
+        "entity_identity": "Bellhaven Athletic",
+        "as_of": "2024-06-26T18:00:00Z",
+        "window_identity": "fixture109-five-completed-cup-matches"
+      },
+      "window_proof": {
+        "competition_identity": "Fictional Estuary Cup109",
+        "entity_identity": "Bellhaven Athletic",
+        "as_of": "2024-06-26T18:00:00Z",
+        "window_identity": "fixture109-five-completed-cup-matches",
+        "selected_event_identities": [
+          "bellhaven-quartz-20240625",
+          "bellhaven-larch-quay-20240618",
+          "bellhaven-ternstead-20240611",
+          "bellhaven-mallow-heath-20240604",
+          "bellhaven-alder-fen-20240601"
+        ],
+        "ordered_prior_schedule": [
+          {
+            "event_identity": "bellhaven-quartz-20240625",
+            "completed_at": "2024-06-25T17:00:00Z"
+          },
+          {
+            "event_identity": "bellhaven-larch-quay-20240618",
+            "completed_at": "2024-06-18T17:00:00Z"
+          },
+          {
+            "event_identity": "bellhaven-ternstead-20240611",
+            "completed_at": "2024-06-11T17:00:00Z"
+          },
+          {
+            "event_identity": "bellhaven-mallow-heath-20240604",
+            "completed_at": "2024-06-04T17:00:00Z"
+          },
+          {
+            "event_identity": "bellhaven-alder-fen-20240601",
+            "completed_at": "2024-06-01T17:00:00Z"
+          }
+        ]
+      }
+    },
+    {
+      "evidence_unit_id": "f1090000-0000-4000-8000-000000000014",
+      "content_hash": "e56f1ba04d6f975b817a6674814e9b154470f1bc0712f99fe2ca59b72ca47c5b",
+      "selected_provenance": {
+        "window_order": 3,
+        "event_identity": "bellhaven-ternstead-20240611",
+        "competition_identity": "Fictional Estuary Cup109",
+        "entity_identity": "Bellhaven Athletic",
+        "as_of": "2024-06-26T18:00:00Z",
+        "window_identity": "fixture109-five-completed-cup-matches"
+      },
+      "window_proof": {
+        "competition_identity": "Fictional Estuary Cup109",
+        "entity_identity": "Bellhaven Athletic",
+        "as_of": "2024-06-26T18:00:00Z",
+        "window_identity": "fixture109-five-completed-cup-matches",
+        "selected_event_identities": [
+          "bellhaven-quartz-20240625",
+          "bellhaven-larch-quay-20240618",
+          "bellhaven-ternstead-20240611",
+          "bellhaven-mallow-heath-20240604",
+          "bellhaven-alder-fen-20240601"
+        ],
+        "ordered_prior_schedule": [
+          {
+            "event_identity": "bellhaven-quartz-20240625",
+            "completed_at": "2024-06-25T17:00:00Z"
+          },
+          {
+            "event_identity": "bellhaven-larch-quay-20240618",
+            "completed_at": "2024-06-18T17:00:00Z"
+          },
+          {
+            "event_identity": "bellhaven-ternstead-20240611",
+            "completed_at": "2024-06-11T17:00:00Z"
+          },
+          {
+            "event_identity": "bellhaven-mallow-heath-20240604",
+            "completed_at": "2024-06-04T17:00:00Z"
+          },
+          {
+            "event_identity": "bellhaven-alder-fen-20240601",
+            "completed_at": "2024-06-01T17:00:00Z"
+          }
+        ]
+      }
+    },
+    {
+      "evidence_unit_id": "f1090000-0000-4000-8000-000000000015",
+      "content_hash": "96ef96209f843fd920659e3693458e10aa7fdeee717f765be6a1bcee8661e684",
+      "selected_provenance": {
+        "window_order": 4,
+        "event_identity": "bellhaven-mallow-heath-20240604",
+        "competition_identity": "Fictional Estuary Cup109",
+        "entity_identity": "Bellhaven Athletic",
+        "as_of": "2024-06-26T18:00:00Z",
+        "window_identity": "fixture109-five-completed-cup-matches"
+      },
+      "window_proof": {
+        "competition_identity": "Fictional Estuary Cup109",
+        "entity_identity": "Bellhaven Athletic",
+        "as_of": "2024-06-26T18:00:00Z",
+        "window_identity": "fixture109-five-completed-cup-matches",
+        "selected_event_identities": [
+          "bellhaven-quartz-20240625",
+          "bellhaven-larch-quay-20240618",
+          "bellhaven-ternstead-20240611",
+          "bellhaven-mallow-heath-20240604",
+          "bellhaven-alder-fen-20240601"
+        ],
+        "ordered_prior_schedule": [
+          {
+            "event_identity": "bellhaven-quartz-20240625",
+            "completed_at": "2024-06-25T17:00:00Z"
+          },
+          {
+            "event_identity": "bellhaven-larch-quay-20240618",
+            "completed_at": "2024-06-18T17:00:00Z"
+          },
+          {
+            "event_identity": "bellhaven-ternstead-20240611",
+            "completed_at": "2024-06-11T17:00:00Z"
+          },
+          {
+            "event_identity": "bellhaven-mallow-heath-20240604",
+            "completed_at": "2024-06-04T17:00:00Z"
+          },
+          {
+            "event_identity": "bellhaven-alder-fen-20240601",
+            "completed_at": "2024-06-01T17:00:00Z"
+          }
+        ]
+      }
+    },
+    {
+      "evidence_unit_id": "f1090000-0000-4000-8000-000000000016",
+      "content_hash": "8e017ca9ee27727ae86382f956aa800e3f4762d5e1db30d3e016b622bebfc73f",
+      "selected_provenance": {
+        "window_order": 5,
+        "event_identity": "bellhaven-alder-fen-20240601",
+        "competition_identity": "Fictional Estuary Cup109",
+        "entity_identity": "Bellhaven Athletic",
+        "as_of": "2024-06-26T18:00:00Z",
+        "window_identity": "fixture109-five-completed-cup-matches"
+      },
+      "window_proof": {
+        "competition_identity": "Fictional Estuary Cup109",
+        "entity_identity": "Bellhaven Athletic",
+        "as_of": "2024-06-26T18:00:00Z",
+        "window_identity": "fixture109-five-completed-cup-matches",
+        "selected_event_identities": [
+          "bellhaven-quartz-20240625",
+          "bellhaven-larch-quay-20240618",
+          "bellhaven-ternstead-20240611",
+          "bellhaven-mallow-heath-20240604",
+          "bellhaven-alder-fen-20240601"
+        ],
+        "ordered_prior_schedule": [
+          {
+            "event_identity": "bellhaven-quartz-20240625",
+            "completed_at": "2024-06-25T17:00:00Z"
+          },
+          {
+            "event_identity": "bellhaven-larch-quay-20240618",
+            "completed_at": "2024-06-18T17:00:00Z"
+          },
+          {
+            "event_identity": "bellhaven-ternstead-20240611",
+            "completed_at": "2024-06-11T17:00:00Z"
+          },
+          {
+            "event_identity": "bellhaven-mallow-heath-20240604",
+            "completed_at": "2024-06-04T17:00:00Z"
+          },
+          {
+            "event_identity": "bellhaven-alder-fen-20240601",
+            "completed_at": "2024-06-01T17:00:00Z"
+          }
+        ]
+      }
+    }
+  ],
+  "output": {
+    "count": 2,
+    "sample_size": 5,
+    "after_minute": 80
+  },
+  "output_hash": "31beac346bf8884a5ff96b1d5b8f55d8304a6e86a10aa87d02bcd4341670bc2f",
+  "created_at": "2024-06-26T18:00:00Z"
+}

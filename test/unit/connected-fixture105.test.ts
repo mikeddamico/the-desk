@@ -7,6 +7,8 @@ import {
   scriptHash,
 } from "../../src/identity/artifacts.js";
 import {
+  ACTIVE_FIXTURE_CORPUS_ID,
+  PREDECESSOR_FIXTURE_CORPUS_ID,
   connectedFixture105Data,
   connectedFixture105Id,
   assertConnectedFixture105Context,
@@ -21,6 +23,7 @@ import {
   TextureRefusal,
 } from "../../src/runtime/speech-texture.js";
 import {
+  checkIncidentStatus,
   evaluateConnectedFixture105Component,
   connectedFixture105ClaimsResultHash,
   isClosedConnectedFixture105ClaimsResult,
@@ -35,6 +38,8 @@ import {
 } from "../../src/runtime/performance-direction-fixture105.js";
 import { evaluatePerformanceGates } from "../../src/runtime/performance-direction.js";
 import type { TextureSpecimen } from "../../src/fixture/speech-texture-specimen.js";
+
+import { connectedFixture105Data as predecessorData } from "../../src/runtime/connected-fixture105-data.js";
 
 type Obj = Record<string, unknown>;
 const clone = <T>(x: T): T => structuredClone(x);
@@ -399,6 +404,37 @@ describe("connected fixture105 components", () => {
     );
   });
   it("computes eighteen rows with retained incomplete semantic coverage", () => {
+    expect(ACTIVE_FIXTURE_CORPUS_ID).toBe("connected-fixture151");
+    expect(PREDECESSOR_FIXTURE_CORPUS_ID).toBe("connected-fixture105");
+    const old = predecessorData();
+    expect(old.pkg.id).toBe("cca1c334-d3aa-509d-bbfb-f43f7bb8d645");
+    expect(old.pkg.package_hash).toBe(
+      "c60a91ac6383a791011f533d4b4d2dfd428b3dbe9e15b5113f4cd60ea03c539e",
+    );
+    expect(connectedFixture105Data().pkg.id).not.toBe(old.pkg.id);
+    const predecessor = { ...component(), pkg: clone(old.pkg.manifest as Obj) };
+    expect(checkIncidentStatus(predecessor).findings).toContainEqual({
+      class: "proof_gap",
+      code: "incident_witness_missing",
+    });
+    for (const missing of ["availability", "sensitivity"] as const) {
+      const changed = component();
+      if (missing === "availability")
+        delete (changed.pkg.availability as Obj).serious_incident;
+      else changed.pkg.sensitivities = [];
+      expect(checkIncidentStatus(changed).findings).toContainEqual({
+        class: "proof_gap",
+        code: "incident_witness_missing",
+      });
+    }
+    const incident = component();
+    const claims = incident.pkg.claims as Obj[];
+    requiredAt(claims, 0).kind = "incident";
+    expect(
+      checkIncidentStatus(incident).findings.some(
+        (f) => f.code === "incident_claim_used",
+      ),
+    ).toBe(true);
     const result = evaluateConnectedFixture105Component(component());
     expect(result.rows).toHaveLength(18);
     expect(result.rows.flatMap((r) => r.findings)).toEqual([]);
@@ -421,6 +457,24 @@ describe("connected fixture105 components", () => {
         .flatMap((r) => r.findings)
         .some((f) => f.code === "required_proof_not_established"),
     ).toBe(true);
+    expect(
+      result.rows.find((row) => row.key === "writing.context_complete")
+        ?.findings,
+    ).toContainEqual({ class: "violation", code: "context_hash_mismatch" });
+    for (const variant of ["writer-and-hash", "hash-only"] as const) {
+      const changed = component();
+      if (variant === "writer-and-hash") {
+        changed.writer.locale = "en-US";
+        changed.context.serialized_input_hash = sha256(
+          Buffer.from(canonicalJson(changed.writer), "utf8"),
+        );
+      } else changed.context.serialized_input_hash = "0".repeat(64);
+      expect(
+        evaluateConnectedFixture105Component(changed).rows.find(
+          (row) => row.key === "writing.context_complete",
+        )?.findings,
+      ).toContainEqual({ class: "violation", code: "context_hash_mismatch" });
+    }
   });
   it("refuses changed derivation body rather than accepting expected count", () => {
     const c = component();

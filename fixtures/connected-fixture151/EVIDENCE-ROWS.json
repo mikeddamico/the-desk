@@ -1,0 +1,132 @@
+[
+  {
+    "evidence_unit_id": "da25102a-f352-5601-b3b5-f76b77dd8590",
+    "content_hash": "132f8b7d572b4d23a8eac1704a3171c3f0adbba604188ed1a9c761c708d0fe3f",
+    "evidence_type": "fact",
+    "usage_class": "assertable",
+    "canonical_content": "The fictional result ledger records Bellhaven Athletic beating Quartz Vale 1-0 in the Estuary Cup on 25 June 2024.",
+    "rights_version_id": "0e7f75a6-e7f2-5414-8e6a-b35e9ded3444",
+    "supersedes_evidence_unit_id": null,
+    "created_at": "2024-06-26T18:00:00Z"
+  },
+  {
+    "evidence_unit_id": "9d8b96b4-5089-5d5e-9259-0d576551271b",
+    "content_hash": "02efeea313a355375919acab8d5810e2543dc66943519a91f66dad058ea770ed",
+    "evidence_type": "quote",
+    "usage_class": "assertable",
+    "canonical_content": "The fictional Bellhaven training note says: \"Leave the centre covered.\" Its instruction is for the near midfielder to stay in the central lane while a teammate contests the second ball.",
+    "rights_version_id": "0e7f75a6-e7f2-5414-8e6a-b35e9ded3444",
+    "supersedes_evidence_unit_id": null,
+    "created_at": "2024-06-26T18:00:00Z"
+  },
+  {
+    "evidence_unit_id": "e82736cb-4702-56a5-9fb7-ac8c9629ab81",
+    "content_hash": "d3e36ff5e91571e528b9272ba45887eb4a0b0f41381d3e20f7bc209a4b56cad0",
+    "evidence_type": "analysis",
+    "usage_class": "hedged_only",
+    "canonical_content": "The fictional Estuary Analyst suggests fatigue could explain a late retreat. This is a hypothesis, not a measured cause.",
+    "rights_version_id": "0e7f75a6-e7f2-5414-8e6a-b35e9ded3444",
+    "supersedes_evidence_unit_id": null,
+    "created_at": "2024-06-26T18:00:00Z"
+  },
+  {
+    "evidence_unit_id": "ae3ba8e4-5657-586b-9bb9-84dce9fbd198",
+    "content_hash": "7c9b7103f8355e256e19deeca391507cd5665ba388aa690c915db686dcac0e84",
+    "evidence_type": "sentiment",
+    "usage_class": "assertable",
+    "canonical_content": "Two fictional supporter notes were selected: Orin felt relieved by the result; Pella was relieved but remained worried by the final clearance. This is only this selected pair.",
+    "rights_version_id": "0e7f75a6-e7f2-5414-8e6a-b35e9ded3444",
+    "supersedes_evidence_unit_id": null,
+    "created_at": "2024-06-26T18:00:00Z"
+  },
+  {
+    "evidence_unit_id": "03fc1029-4eda-5556-87b1-62056f1c53e8",
+    "content_hash": "a452780557a5aa8dadc4ea512794111a576d92f714fc8e9e006c413288b222ad",
+    "evidence_type": "context",
+    "usage_class": "assertable",
+    "canonical_content": "The fictional Bellhaven supporters' pamphlet calls a hurried clearance \"a borrowed breath\". This is authored lore, not a real supporter tradition.",
+    "rights_version_id": "0e7f75a6-e7f2-5414-8e6a-b35e9ded3444",
+    "supersedes_evidence_unit_id": null,
+    "created_at": "2024-06-26T18:00:00Z"
+  },
+  {
+    "evidence_unit_id": "bdfa859a-f7f1-5aec-88b0-d98ca1982fc2",
+    "content_hash": "036d505e1a8a0bc0b06b137f16716e88a24c8cbbb449165132da49b4a69b362f",
+    "evidence_type": "observation",
+    "usage_class": "assertable",
+    "canonical_content": "Fictional excerpt R: a teammate contested the second ball while the near midfielder stayed central; the opponent collected the loose ball but did not pass through the central lane in this excerpt.",
+    "rights_version_id": "0e7f75a6-e7f2-5414-8e6a-b35e9ded3444",
+    "supersedes_evidence_unit_id": null,
+    "created_at": "2024-06-26T18:00:00Z"
+  },
+  {
+    "evidence_unit_id": "097a46c4-a115-5650-badb-324b7e9fc15b",
+    "content_hash": "85bfa7c4198f81abc27c5e25a4c205649398e34ee95f3169dcfcb1376135f011",
+    "evidence_type": "observation",
+    "usage_class": "assertable",
+    "canonical_content": "Fictional excerpt S: a teammate contested the second ball while the near midfielder moved towards it; an opponent then passed through the vacated central lane in this excerpt.",
+    "rights_version_id": "0e7f75a6-e7f2-5414-8e6a-b35e9ded3444",
+    "supersedes_evidence_unit_id": null,
+    "created_at": "2024-06-26T18:00:00Z"
+  },
+  {
+    "evidence_unit_id": "49b62d29-aade-5121-bd87-bd1b53d511d8",
+    "content_hash": "0e52a51c56cc53a2ea82f7c62ace48cd9d2bfc88be136a0d1ef53e5dcbeaf2ee",
+    "evidence_type": "context",
+    "usage_class": "silent",
+    "canonical_content": "Fictional calibration value: 17. This is a newly authored silent test sentinel, not a forecast or fact to narrate.",
+    "rights_version_id": "0e7f75a6-e7f2-5414-8e6a-b35e9ded3444",
+    "supersedes_evidence_unit_id": null,
+    "created_at": "2024-06-26T18:00:00Z"
+  },
+  {
+    "evidence_unit_id": "f1090000-0000-4000-8000-000000000012",
+    "content_hash": "bc36e9840ddf0b77d7afbe48f190d75c2bca10b6136e9fde0fa8e8d287bd867c",
+    "evidence_type": "fact",
+    "usage_class": "assertable",
+    "canonical_content": "{\"authored_fiction\":true,\"competition_identity\":\"Fictional Estuary Cup109\",\"completed_at\":\"2024-06-25T17:00:00Z\",\"conceded_minutes\":[],\"entity_identity\":\"Bellhaven Athletic\",\"event_identity\":\"bellhaven-quartz-20240625\",\"window_order\":1}",
+    "rights_version_id": "0e7f75a6-e7f2-5414-8e6a-b35e9ded3444",
+    "supersedes_evidence_unit_id": null,
+    "created_at": "2024-06-26T18:00:00Z"
+  },
+  {
+    "evidence_unit_id": "f1090000-0000-4000-8000-000000000013",
+    "content_hash": "913ce4940f7b04ad37f5f94b3b0e3aa9dcbdd71057d2c3838bd66b39526c09ac",
+    "evidence_type": "fact",
+    "usage_class": "assertable",
+    "canonical_content": "{\"authored_fiction\":true,\"competition_identity\":\"Fictional Estuary Cup109\",\"completed_at\":\"2024-06-18T17:00:00Z\",\"conceded_minutes\":[84],\"entity_identity\":\"Bellhaven Athletic\",\"event_identity\":\"bellhaven-larch-quay-20240618\",\"window_order\":2}",
+    "rights_version_id": "0e7f75a6-e7f2-5414-8e6a-b35e9ded3444",
+    "supersedes_evidence_unit_id": null,
+    "created_at": "2024-06-26T18:00:00Z"
+  },
+  {
+    "evidence_unit_id": "f1090000-0000-4000-8000-000000000014",
+    "content_hash": "e56f1ba04d6f975b817a6674814e9b154470f1bc0712f99fe2ca59b72ca47c5b",
+    "evidence_type": "fact",
+    "usage_class": "assertable",
+    "canonical_content": "{\"authored_fiction\":true,\"competition_identity\":\"Fictional Estuary Cup109\",\"completed_at\":\"2024-06-11T17:00:00Z\",\"conceded_minutes\":[80],\"entity_identity\":\"Bellhaven Athletic\",\"event_identity\":\"bellhaven-ternstead-20240611\",\"window_order\":3}",
+    "rights_version_id": "0e7f75a6-e7f2-5414-8e6a-b35e9ded3444",
+    "supersedes_evidence_unit_id": null,
+    "created_at": "2024-06-26T18:00:00Z"
+  },
+  {
+    "evidence_unit_id": "f1090000-0000-4000-8000-000000000015",
+    "content_hash": "96ef96209f843fd920659e3693458e10aa7fdeee717f765be6a1bcee8661e684",
+    "evidence_type": "fact",
+    "usage_class": "assertable",
+    "canonical_content": "{\"authored_fiction\":true,\"competition_identity\":\"Fictional Estuary Cup109\",\"completed_at\":\"2024-06-04T17:00:00Z\",\"conceded_minutes\":[91],\"entity_identity\":\"Bellhaven Athletic\",\"event_identity\":\"bellhaven-mallow-heath-20240604\",\"window_order\":4}",
+    "rights_version_id": "0e7f75a6-e7f2-5414-8e6a-b35e9ded3444",
+    "supersedes_evidence_unit_id": null,
+    "created_at": "2024-06-26T18:00:00Z"
+  },
+  {
+    "evidence_unit_id": "f1090000-0000-4000-8000-000000000016",
+    "content_hash": "8e017ca9ee27727ae86382f956aa800e3f4762d5e1db30d3e016b622bebfc73f",
+    "evidence_type": "fact",
+    "usage_class": "assertable",
+    "canonical_content": "{\"authored_fiction\":true,\"competition_identity\":\"Fictional Estuary Cup109\",\"completed_at\":\"2024-06-01T17:00:00Z\",\"conceded_minutes\":[27],\"entity_identity\":\"Bellhaven Athletic\",\"event_identity\":\"bellhaven-alder-fen-20240601\",\"window_order\":5}",
+    "rights_version_id": "0e7f75a6-e7f2-5414-8e6a-b35e9ded3444",
+    "supersedes_evidence_unit_id": null,
+    "created_at": "2024-06-26T18:00:00Z"
+  }
+]

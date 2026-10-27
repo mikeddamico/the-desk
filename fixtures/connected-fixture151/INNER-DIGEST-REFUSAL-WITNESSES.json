@@ -1,0 +1,104 @@
+[
+  {
+    "id": "row-pk",
+    "mutation": "Change envelope PK only; leave decoded row and row hash intact.",
+    "expected": "primary-key mismatch",
+    "status": "prospective unexecuted; construct all earlier prerequisites valid for intended target"
+  },
+  {
+    "id": "row-column",
+    "mutation": "Add claim_state_hash to a SQL use-row projection.",
+    "expected": "extra SQL column",
+    "status": "prospective unexecuted; construct all earlier prerequisites valid for intended target"
+  },
+  {
+    "id": "row-null",
+    "mutation": "Omit a nullable column instead of explicit null.",
+    "expected": "missing SQL column",
+    "status": "prospective unexecuted; construct all earlier prerequisites valid for intended target"
+  },
+  {
+    "id": "row-canonical",
+    "mutation": "Add insignificant whitespace to canonical_row and recompute raw row hash.",
+    "expected": "canonical byte inequality",
+    "status": "prospective unexecuted; construct all earlier prerequisites valid for intended target"
+  },
+  {
+    "id": "row-hash",
+    "mutation": "Change one decoded governed value and retain old row digest.",
+    "expected": "row hash mismatch",
+    "status": "prospective unexecuted; construct all earlier prerequisites valid for intended target"
+  },
+  {
+    "id": "row-order",
+    "mutation": "Swap two otherwise valid rows from the same table.",
+    "expected": "noncanonical array order",
+    "status": "prospective unexecuted; construct all earlier prerequisites valid for intended target"
+  },
+  {
+    "id": "row-extra",
+    "mutation": "Append one different valid PK row within cap.",
+    "expected": "extra population member",
+    "status": "prospective unexecuted; construct all earlier prerequisites valid for intended target"
+  },
+  {
+    "id": "row-duplicate",
+    "mutation": "Repeat an otherwise valid row.",
+    "expected": "duplicate table/PK",
+    "status": "prospective unexecuted; construct all earlier prerequisites valid for intended target"
+  },
+  {
+    "id": "row-missing",
+    "mutation": "Remove one otherwise expected row.",
+    "expected": "missing population member",
+    "status": "prospective unexecuted; construct all earlier prerequisites valid for intended target"
+  },
+  {
+    "id": "array-hash",
+    "mutation": "Supply raw hash of only row hashes rather than full envelopes.",
+    "expected": "observed array digest mismatch",
+    "status": "prospective unexecuted; construct all earlier prerequisites valid for intended target"
+  },
+  {
+    "id": "claims-result",
+    "mutation": "Omit one actual finding while retaining actual component/readback result.",
+    "expected": "full result projection mismatch",
+    "status": "prospective unexecuted; construct all earlier prerequisites valid for intended target"
+  },
+  {
+    "id": "claims-aggregate",
+    "mutation": "Replace honest incomplete aggregate with complete_defined_set.",
+    "expected": "aggregate mismatch",
+    "status": "prospective unexecuted; construct all earlier prerequisites valid for intended target"
+  },
+  {
+    "id": "performance-result",
+    "mutation": "Replace actual seven results with seven pass summaries.",
+    "expected": "result schema/projection mismatch",
+    "status": "prospective unexecuted; construct all earlier prerequisites valid for intended target"
+  },
+  {
+    "id": "operation-id",
+    "mutation": "Hash the five-key operation projection without its required identity domain.",
+    "expected": "operation identity mismatch",
+    "status": "prospective unexecuted; construct all earlier prerequisites valid for intended target"
+  },
+  {
+    "id": "operation-link",
+    "mutation": "Place operation_id into audit.operation_sha256 instead of full envelope hash.",
+    "expected": "audit operation link mismatch",
+    "status": "prospective unexecuted; construct all earlier prerequisites valid for intended target"
+  },
+  {
+    "id": "operation-conflict",
+    "mutation": "Associate same operation_id with a different result/envelope.",
+    "expected": "immutable operation conflict",
+    "status": "prospective unexecuted; construct all earlier prerequisites valid for intended target"
+  },
+  {
+    "id": "self-reference",
+    "mutation": "Include operation artifact row in its owned_rows.",
+    "expected": "self-row/population refusal",
+    "status": "prospective unexecuted; construct all earlier prerequisites valid for intended target"
+  }
+]
