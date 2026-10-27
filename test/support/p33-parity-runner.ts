@@ -476,19 +476,11 @@ async function childMain(): Promise<void> {
     resultPath = process.env.DESK_P33_RESULT;
   if (!nonce || !resultPath) throw Error("Missing P33 child handshake");
   if (!/^[0-9a-f]{48}$/u.test(nonce)) throw Error("Invalid P33 child nonce");
-  const phase = (name: string): void => {
-    process.stderr.write(`P33_PHASE ${name} ${String(performance.now())}\n`);
-  };
-  phase("root_validation_begin");
   const execution = fixtureExecutionRoot(
     fileURLToPath(new URL("../../", import.meta.url)).replace(/\/$/u, ""),
   );
-  phase("root_validation_end");
-  phase("vitest_import_begin");
   const { startVitest } = await import("vitest/node");
-  phase("vitest_import_end");
   const result = { finished: false };
-  phase("vitest_start_begin");
   const ctx = await startVitest(
     "test",
     [],
@@ -503,7 +495,6 @@ async function childMain(): Promise<void> {
       reporters: [
         {
           onTestRunEnd(modules, errors, reason) {
-            phase("test_run_end");
             const tests = modules.flatMap((m) => [...m.children.allTests()]);
             result.finished =
               reason === "passed" &&
@@ -519,9 +510,7 @@ async function childMain(): Promise<void> {
     },
     { cacheDir: `${execution.root}/tool-cache/p33/${nonce}` },
   );
-  phase("vitest_start_end");
   await ctx.close();
-  phase("vitest_close_end");
   if (
     !result.finished ||
     (process.exitCode !== undefined && process.exitCode !== 0)

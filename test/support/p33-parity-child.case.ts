@@ -304,9 +304,6 @@ async function subject() {
 }
 
 it("P33 multidisk", async () => {
-  process.stderr.write(
-    `P33_PHASE child_case_enter ${String(performance.now())}\n`,
-  );
   const bytes = wire([STORED], 1);
   expect(sha(bytes)).toBe(
     "523320d8f338525c70f462b1e2d71f14f6d39e3e065a73bd63c54c185fbc6ab6",

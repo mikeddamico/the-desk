@@ -83,9 +83,6 @@ jobs:
           path: ${{ runner.temp }}/ci/upload-controls
           if-no-files-found: error
           retention-days: 30
-      - name: Temporary connected diagnostic (always holds aggregate)
-        run: /bin/bash tools/ci-validation/run-stage.sh connected-diagnostic
-        timeout-minutes: 11
       - name: Guard P33 aggregate (all)
         run: /bin/bash tools/ci-validation/run-stage.sh all
         timeout-minutes: 122
