@@ -2045,87 +2045,38 @@ class Partition155Tests(unittest.TestCase):
         self.assertNotIn('matrix:', workflow)
         wrapper = (ci.ROOT / 'tools/ci-validation/run-stage.sh').read_text()
         self.assertIn('all) CEILING=7200', wrapper)
-        self.assertIn('if [ "$PROFILE" = rest ] || [ "$PROFILE" = native117 ]; then DB_FEED=$TEST_DATABASE_URL; else DB_FEED=""; fi', wrapper)
+        self.assertIn('if [ "$PROFILE" = rest ]; then DB_FEED=$TEST_DATABASE_URL; else DB_FEED=""; fi', wrapper)
         self.assertIn('/bin/bash -c "$CHILD" _ "$PROFILE" "$CEILING"', wrapper)
         self.assertEqual(workflow.count('id: gitleaks'), 2)
         self.assertEqual(workflow.count('id: audit'), 2)
 
 
-class Diagnostic117ShapeTests(unittest.TestCase):
-    """Temporary CI117 diagnostic route: static proofs only, never aggregate acceptance."""
+class FixtureTargetObserverShapeTests(unittest.TestCase):
+    """Retained first-invocation observer shape, not a runtime or isolation proof."""
 
-    def test_both_jobs_hold_before_unchanged_aggregate(self):
-        workflow = (ci.ROOT / '.github/workflows/ci.yml').read_text()
-        self.assertEqual(workflow.count('run-stage.sh diagnostic117'), 2)
-        self.assertEqual(workflow.count('run-stage.sh all'), 2)
-        for job in workflow.split('  verify-')[1:3]:
-            self.assertLess(job.index('run-stage.sh diagnostic117'), job.index('run-stage.sh all'))
-            step = job[job.index('name: Temporary CI117'):job.index('name: Guard P33 aggregate')]
-            self.assertNotIn('if:', step)
-            self.assertNotIn('continue-on-error', step)
-            self.assertIn('timeout-minutes: 4', step)
-            self.assertLess(job.index('id: upload-controls'), job.index('name: Temporary CI117'))
-        self.assertNotIn('continue-on-error', workflow)
-
-    def test_wrapper_selection_ceiling_and_hold_are_closed(self):
-        wrapper = (HERE / 'run-stage.sh').read_text()
-        self.assertIn('all) CEILING=7200 ;;', wrapper)
-        self.assertIn('diagnostic117) STAGE=all; CEILING=180; DIAGNOSTIC_ONLY=1 ;;', wrapper)
-        self.assertEqual(wrapper.count('PROFILE=native117'), 1)
-        self.assertEqual(wrapper.count('CEILING=180'), 1)
-        self.assertIn('*) echo "unknown stage" >&2; exit 64', wrapper)
-        # The writer partition exits before any evidence, limit, or guard work: nothing is launched for it.
-        self.assertIn('if [ "$DESK_CI_PARTITION" = writer ]; then\n    echo "HOLD: diagnostic117 writer partition launches nothing', wrapper)
-        self.assertLess(wrapper.index('diagnostic117 writer partition launches nothing'), wrapper.index('HERE=$(cd'))
-        self.assertLess(wrapper.index('diagnostic117 writer partition launches nothing'), wrapper.index('/bin/bash -c "$CHILD"'))
-        self.assertIn('if [ "$1" = rest ] || [ "$1" = native117 ]; then', wrapper)
-        self.assertIn('/bin/bash -c "$CHILD" _ "$PROFILE" "$CEILING"', wrapper)
-        # The real exit is recorded first; the diagnostic then always holds with status 78.
-        self.assertLess(wrapper.index('> "$STAGE_DIR/exit"'), wrapper.index('HOLD: diagnostic117 only'))
-        self.assertIn('exit 78\nfi\nexit "$RC"', wrapper)
-        self.assertEqual(wrapper.count('exit "$RC"'), 1)
-
-    def test_guard_selector_is_one_fixed_anchored_case(self):
-        guard = (ci.ROOT / 'test/support/p33-parity-supervisor.py').read_text()
-        self.assertIn("'native117': ['test/integration/connected-fixture105.test.ts', '--testNamePattern',", guard)
-        self.assertIn("'^connected fixture105 native ownership closes continuation when the acquisition-cut await throws before consumption$'", guard)
-        self.assertIn("'all', 'writer', 'rest', 'native117'])", guard)
-        self.assertEqual(guard.count("'--testNamePattern'"), 2)  # the existing p33 selector and this one only
-        self.assertIn("*filters[args.profile]]", guard)
-
-    def test_native_observer_is_gated_bounded_and_restores_before_output(self):
+    def test_observer_is_first_invocation_only_bounded_and_restores_before_output(self):
         native = (ci.ROOT / 'test/integration/connected-fixture105.test.ts').read_text()
         self.assertIn('const LIMIT = 120000;', native)
-        self.assertEqual(native.count('process.env.DESK_P33_PROFILE === "native117"'), 1)
+        self.assertNotIn('native117', native)
+        self.assertEqual(native.count('await new TargetObserver(env.name).around(firstInvocation);'), 1)
         self.assertIn('const TARGET_OBSERVER_CAP = 64;', native)
-        # The exact original descriptor is restored first; only then is the bounded summary emitted.
-        self.assertIn('Object.defineProperty(pg.Client.prototype, "query", descriptor);\n        this.emit();', native)
-        # One await of the original with the original receiver and arguments; the rejection is rethrown unchanged.
-        self.assertEqual(native.count('await Reflect.apply('), 1)
-        self.assertIn('rejected(ordinal);\n        throw error;', native)
-        self.assertIn('observe(ordinal, result);\n      return result;', native)
         observer = native[native.index('class TargetObserver'):native.index('// pg-pool attaches release')]
-        self.assertIn('this.emit();\n        return Promise.resolve();', observer)
-        # No target observation or a rejected query cannot establish failed target predicates.
+        self.assertIn('Object.defineProperty(pg.Client.prototype, "query", descriptor);\n        this.emit();\n        return Promise.resolve();', observer)
+        self.assertEqual(observer.count('await Reflect.apply('), 1)
+        self.assertIn('rejected(ordinal);\n        throw error;', observer)
+        self.assertIn('observe(ordinal, result);\n      return result;', observer)
         self.assertIn('this.count === 0 ||', observer)
         self.assertIn('this.vectors.some((vector) => vector.outcome === "rejected") ||', observer)
         self.assertEqual(observer.count('process.stderr.write'), 2)
         self.assertNotIn('console.', observer)
         self.assertNotIn('.query(', observer)
-        # The existing assertions and the original case body remain.
+        case = native[native.index('const primary = new Error("controlled acquisition cut");'):]
+        self.assertLess(case.index('await new TargetObserver(env.name).around(firstInvocation);'), case.index('expect(await counts(env))'))
+        self.assertLess(case.index('expect(await counts(env))'), case.index('"fixture_execution_already_present"'))
+        self.assertIn('await expect(runConnectedFixture105()).rejects.toBe(primary);', case)
         self.assertIn('expect(seen).toBe(1); // A witness that never reaches its intended cut fails.', native)
         self.assertEqual(native.count('"closes continuation when the acquisition-cut await throws before consumption",'), 3)
         self.assertIn('harnessCases.length === CASE_EXPECTATIONS.length', native)
-
-    def test_acceptance_inventory_and_gates_are_unchanged(self):
-        self.assertEqual(ci.EXPECTED_ALL_TESTS, 8688)
-        self.assertEqual(ci.PARTITION_COUNTS, {'writer': (1, 4908, 0), 'rest': (79, 3780, 29)})
-        self.assertNotIn('native117', (ci.ROOT / 'tools/ci-validation/ci.py').read_text())
-        workflow = (ci.ROOT / '.github/workflows/ci.yml').read_text()
-        self.assertEqual(workflow.count('id: gitleaks'), 2)
-        self.assertEqual(workflow.count('id: audit'), 2)
-        self.assertEqual(workflow.count('ci.py check all'), 2)
-        self.assertEqual(workflow.count('timeout-minutes: 122'), 2)
 
 
 class P33NativeLoaderTests(unittest.TestCase):

@@ -131,9 +131,11 @@ function driverQuery(
   ) => Promise<pg.QueryResult<Obj>>;
 }
 
-// Temporary CI117 single-case diagnostic. Active only under the closed native117 profile; every other run keeps the
-// case exactly as written. It records which of the ten target-isolation facts failed on which target query without
-// changing any query outcome. Output is primitive facts only: no names, URLs, SQL text or error objects.
+// Bounded test instrumentation retained from the CI117 isolation investigation. It wraps only the first
+// acquisition-cut invocation, buffering target predicate failures until the original query descriptor is restored.
+// It adds async overhead and can fail during post-restoration output; it is not behavior-neutral. The 117 output
+// markers identify provenance, not an active test profile. Output is primitive facts only: no names, URLs, SQL text
+// or error objects.
 const TARGET_PREFIX = "SELECT current_database() AS database,";
 const TARGET_OBSERVER_CAP = 64;
 type TargetVector =
@@ -2473,10 +2475,8 @@ suite("connected fixture105 native ownership", () => {
             },
           );
         };
-        // CI117: observe only the first host invocation, and only under the closed native117 profile.
-        if (process.env.DESK_P33_PROFILE === "native117")
-          await new TargetObserver(env.name).around(firstInvocation);
-        else await firstInvocation();
+        // CI117 provenance: observe only this first invocation; counts and re-entry remain outside the wrapper.
+        await new TargetObserver(env.name).around(firstInvocation);
         expect(await counts(env)).toEqual({
           packages: 1,
           directions: 0,
