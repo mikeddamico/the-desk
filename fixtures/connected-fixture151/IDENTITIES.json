@@ -1,0 +1,39 @@
+{
+  "ids": {
+    "actor": "ef83ab5a-3d75-553c-924e-b18604e61e16",
+    "show": "7ef80c54-5645-5925-a5f1-d8b5b7ad2a30",
+    "config": "9e1252b5-f582-5aab-ad2a-e067fa571b04",
+    "run": "a8c6f0e2-4eef-589f-95d2-ed6ae393dcda",
+    "attempt": "bd1de358-0db4-5229-9c1d-4fc8d6b967a1",
+    "rights": "0e7f75a6-e7f2-5414-8e6a-b35e9ded3444",
+    "package": "fabfeb44-c361-5e82-9b8f-3a960d211cfa",
+    "package-artifact": "0cf73158-6dbc-50e9-b604-578a49ccab9f",
+    "brief": "0e196925-50d3-5ff7-9baf-501a9a748adc",
+    "brief-artifact": "7f5e83c9-a3bf-5c9d-9a1c-2e7314bf5587",
+    "derivation": "3cfc6236-f202-5b18-9515-3d163b39580a"
+  },
+  "uuid_rule": "Upstream source/config UUIDs retained; 129 descendant/storage UUIDs = UUIDv5(7c7ef33f-262c-5ada-a319-9e6a025bd12f, original UUID). Prediction labels and semantic anchors retained. See SUCCESSOR-PROVENANCE.json.",
+  "authored_fiction_time": "2024-06-26T18:00:00Z",
+  "package_hash": "288664c91f63508197091e4d2522a62962e6c8eb8484e7f4359dc1d2be01b8ae",
+  "brief_hash": "8067cb4e58d9a6a82b7dcf6c581ad01f6f346eba3f6e36e3802d6dca0e3b5c9f",
+  "config_hash": "18eec4ddf5be87cbfd6317bc067f152ec400394eda18454d9bbd9bd22a76ff2d",
+  "substantive_script_hash": "8d4f3db317b14ed71ee4aae9a032bd390167a933a20aba9ba94fb5238c740647",
+  "texture_script_hash": "877c409ae0c3262432fa12ebd39eeca32a8dd7909f5bc4e8ecc7bf9d5af20a75",
+  "held_fields": [
+    "runtime construction observation",
+    "completed source ledger",
+    "fixed release digest",
+    "ROOT adoption pin",
+    "actual evaluated gate result digest",
+    "observed operation/audit identities"
+  ],
+  "no_execution": true,
+  "substantive-artifact": "1fe9b9aa-4941-5cb9-8000-ebeb8c169ab4",
+  "substantive-version": "48b7a57a-4569-522d-9834-7531711b0ebe",
+  "texture-artifact": "aa810bf5-6864-530a-b1c8-7504269f063a",
+  "texture-version": "55706b84-d31e-5d32-9a21-8824c988914b",
+  "direction-artifact": "24cb2e65-a9de-5551-8630-3164340208ac",
+  "direction-version": "04e3be3c-f720-5806-ab48-3427c2e93052",
+  "intent": "f070ee09-4745-5ace-a279-4c617b24eef7",
+  "performance_direction_hash": "127e47140121f28b25c826ae816312d045f60939b488de0f1eae0a166d87e1fc"
+}

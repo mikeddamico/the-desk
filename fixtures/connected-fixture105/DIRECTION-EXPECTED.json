@@ -1,0 +1,18 @@
+{
+  "payload": {
+    "script_hash": "699c4837646679b9470d272ecdd07590449dec21a4c6e708ddfdd792a01dcb6c",
+    "direction_spec_version": "performance-render-0.1.4",
+    "performance_intents": [
+      {
+        "scope_type": "turn",
+        "scope_ref": "26637007-3d84-5a21-9597-1977c630fc9e",
+        "intent_type": "pace",
+        "value": "slower",
+        "strength": "light",
+        "timing_anchor": null
+      }
+    ]
+  },
+  "content_hash": "edd94e00ec1e07bbe0a2efde4c3ca67f39e5f25835f83aed2b29df09eaa5ee2e",
+  "status": "authored desired direction only; no evaluated gate results or persisted row"
+}

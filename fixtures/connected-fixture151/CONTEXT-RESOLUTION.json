@@ -1,0 +1,23 @@
+{
+  "status": "authored expected completeness only; must be reconstructed by fixed host before gate",
+  "writer_profile": "fixture105 closed data using existing nineteen/15-key v1 mechanics; not an invocation or modification of writer-fixture-input/1 or /2",
+  "context_material": {
+    "fixture109-clearance-lore": {
+      "claim_id": "13280589-4ad9-5109-9f1f-d7d4d6079116",
+      "evidence_unit_id": "03fc1029-4eda-5556-87b1-62056f1c53e8",
+      "representation": "The fictional pamphlet calls a hurried clearance a borrowed breath."
+    }
+  },
+  "omissions": [
+    "silent calibration claim/value",
+    "silent calibration evidence",
+    "five match bodies from writer view (derivation host only)"
+  ],
+  "exclusions_count_rule": "six evidence units omitted: calibration plus five match bodies; silent claim is separately excluded and not added to this evidence-unit count",
+  "capacity": "65536 is a fixed conformance budget fixture value, NOT a model/provider capacity attestation. No writer/model invoked. Estimated count is UTF8 bytes as deliberately conservative fixture arithmetic, not tokenizer measurement.",
+  "identities": {
+    "writer_domain_hash": "fc7cf4447f3972c33b71a2011ec90c2a907416651689870e4437226707be1693",
+    "writer_raw_hash": "7a649d44c453d1c5f8b09f2221370887aea38ffcf168f53b5049b7c54e42646d",
+    "context_domain_hash": "447479f049127cecd6c7696db6c74c02e605b9fab184ffe600019b55c6f8717d"
+  }
+}

@@ -16,6 +16,8 @@
 // Session scope: a trusted, exclusively owned disposable fixture session (see docs/g1-speech-texture.md).
 import type { Pool, PoolClient } from "pg";
 
+import { connectedFixture105Data } from "./connected-fixture151-data.js";
+
 import { codePointLength } from "../fixture/code-points.js";
 import {
   TEXTURE_SCRIPT_HASH,
@@ -903,8 +905,15 @@ export function applyTextureRewrite(
   text: string,
   anchor: string,
 ): string | null {
+  return applyFixedTextureRewrite(text, anchor, TEXTURE_REWRITE_TABLE);
+}
+function applyFixedTextureRewrite(
+  text: string,
+  anchor: string,
+  rows: readonly TextureRewriteRow[],
+): string | null {
   let result = text;
-  for (const row of TEXTURE_REWRITE_TABLE) {
+  for (const row of rows) {
     if (row.anchor !== anchor) continue;
     if (result.split(row.old).length !== 2) return null;
     result = result.replace(row.old, () => row.new);
@@ -983,6 +992,15 @@ export function admitTextureAgainst(
   spec: TextureSpecimen,
   b: TextureBindings,
 ): void {
+  admitTextureAgainstFixed(spec, b, TEXTURE_REWRITE_TABLE, REWRITE_ANCHORS);
+}
+
+function admitTextureAgainstFixed(
+  spec: TextureSpecimen,
+  b: TextureBindings,
+  rewrites: readonly TextureRewriteRow[],
+  rewriteAnchors: readonly string[],
+): void {
   const p = b.parent;
   // 3 subject binding
   if (spec.writing_policy_version !== p.writing_policy_version)
@@ -1017,7 +1035,7 @@ export function admitTextureAgainst(
   const changed = spec.turns
     .filter((turn, index) => turn.spoken_text !== pTurns[index]?.spoken_text)
     .map((turn) => turn.semantic_turn_id);
-  if (!sameJson(changed, REWRITE_ANCHORS))
+  if (!sameJson(changed, rewriteAnchors))
     refuse("texture_scope_exceeded", { field: "turn_scope" });
   // 6 uses: identical in everything but span coordinates (count, order, ids, modes, hashes)
   const pClaims = records(p.turn_claim_uses);
@@ -1098,7 +1116,7 @@ export function admitTextureAgainst(
   for (const turn of pTurns)
     for (const char of punctuationClasses(String(turn.spoken_text)))
       allowed.add(char);
-  for (const anchor of REWRITE_ANCHORS) {
+  for (const anchor of rewriteAnchors) {
     const problem = checkTextureTokens(
       parentText.get(anchor) ?? "",
       childText.get(anchor) ?? "",
@@ -1122,10 +1140,13 @@ export function admitTextureAgainst(
   if (scanTextureSurfaces({ specimen: spec }, b.originals) !== null)
     refuse("texture_withheld_text_relocated", { surface: "specimen" });
   // 12 rewrite-table equality: each changed turn is exactly its parent with the R rows applied
-  for (const anchor of REWRITE_ANCHORS)
+  for (const anchor of rewriteAnchors)
     if (
-      applyTextureRewrite(parentText.get(anchor) ?? "", anchor) !==
-      (childText.get(anchor) ?? "")
+      applyFixedTextureRewrite(
+        parentText.get(anchor) ?? "",
+        anchor,
+        rewrites,
+      ) !== (childText.get(anchor) ?? "")
     )
       refuse("texture_protected_content_changed", { field: "rewrite_row" });
 }
@@ -3148,4 +3169,30 @@ export async function runSpeechTexture(
     not_proven: TEXTURE_NOT_PROVEN,
     durable: ctx.d,
   });
+}
+
+/** Fixed disclosed fixture only. No provider, caller-selected rewrite or admission token. */
+export function admitConnectedFixture105Texture(
+  raw: unknown,
+  bindings: TextureBindings,
+): TextureSpecimen {
+  const specimen = admitTextureStructure(raw);
+  if (!checkTextureNfc(specimen)) refuse("texture_text_not_nfc");
+  const fixed = connectedFixture105Data();
+  const rows = fixed.rewrites;
+  const anchors = rows
+    .map((row) => row.anchor)
+    .filter((x, i, a) => a.indexOf(x) === i);
+  // The complete first-refusal sequence runs before final whole-object equality.
+  admitTextureAgainstFixed(specimen, bindings, rows, anchors);
+  if (
+    !sameJson(bindings.parent, fixed.parent) ||
+    bindings.parent_hash !== fixed.parent.script_hash ||
+    !sameJson(bindings.originals, [])
+  )
+    refuse("texture_subject_mismatch", { field: "parent_script_hash" });
+  if (!sameJson(specimen, fixed.carrier))
+    refuse("texture_protected_content_changed", { field: "rewrite_row" });
+  // Both fixed stored payloads are independently hash-checked by the resource owner.
+  return specimen;
 }

@@ -1,0 +1,50 @@
+{
+  "canonical_algorithm": "NFC, Unicode-codepoint key order, UTF8 canonical JSON, safe integer numeric values, no trailing LF; SHA256(domain + LF + canonical_json(full closed payload))",
+  "profiles": [
+    {
+      "schema": "fixture105-construction-observation/1",
+      "artifact_type": "fixture_construction_observation",
+      "domain": "fixture105-construction-observation-v1",
+      "owner": "fixed construction host + existing identity owner",
+      "admission": "actual query population plus same-transaction comparison; later commit/settlement receipt external, then fresh current equality; no authored instance admitted"
+    },
+    {
+      "schema": "fixture105-operation/1",
+      "artifact_type": "fixture_operation",
+      "domain": "fixture105-operation-v1",
+      "owner": "Performance owner + existing identity owner",
+      "admission": "settled owned Claims acquisition + actual seven Performance results + exact owned transaction/readback"
+    },
+    {
+      "schema": "connected-fixture105-audit-stub/1",
+      "artifact_type": "fixture_audit",
+      "domain": "connected-fixture105-audit-stub-v1",
+      "owner": "fixed post-direction audit host + existing identity owner",
+      "admission": "exact persisted direction/results; eight-key fingerprint; no model run"
+    }
+  ],
+  "future_runtime_hashes": "not authored or measured: actual projections do not yet exist",
+  "external_receipt_rule": "Construction receipt ID assigned before transaction; complete receipt (including later COMMIT/settlement) pinned externally after completion. Receipt hash is not embedded in earlier observation. No claimed observed chronology from authored timestamps.",
+  "acyclic_order": [
+    "new source data/rights",
+    "claim/evidence/support identities",
+    "package",
+    "Brief",
+    "substantive script",
+    "texture child",
+    "direction expectation",
+    "completed implementation source ledger (HELD)",
+    "release (HELD)",
+    "ROOT adoption pin (HELD)",
+    "actual construction observation",
+    "actual gate results/operation",
+    "actual audit",
+    "terminal external inventory"
+  ],
+  "normative_inner_rules": [
+    "INNER-DIGEST-RULES.md",
+    "SQL-COLUMN-MAP.json",
+    "RESULT-DIGEST-MAP.json"
+  ],
+  "operation_identity": "operation_id is fixture105-operation-identity-v1 domain hash of exact five-key projection specified in INNER-DIGEST-RULES, including actual Claims/Writing digest; audit.operation_sha256 links the distinct full envelope domain hash. No ambiguous ID or fourth artifact profile."
+}

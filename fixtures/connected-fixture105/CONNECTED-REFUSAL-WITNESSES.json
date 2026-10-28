@@ -1,0 +1,81 @@
+[
+  {
+    "id": "C01",
+    "target": "context before checkout",
+    "mutation": "each of missing/unknown/staging/production DESK_ENV, plus development against test-only release",
+    "expected": "refuse before acquisition/writes"
+  },
+  {
+    "id": "C02",
+    "target": "fixed release",
+    "mutation": "each one-field wrong release/profile/purpose/run/attempt/package/Brief/script/policy",
+    "expected": "fixed subject refusal"
+  },
+  {
+    "id": "C03",
+    "target": "construction",
+    "mutation": "authored hash/list alone; preseeded receipt; nonempty selected population",
+    "expected": "no reader-minted continuation"
+  },
+  {
+    "id": "C04",
+    "target": "construction/current comparison",
+    "mutation": "append one accepted event, alter rights, substitute support, change cursor, omit construction receipt",
+    "expected": "retain C13 historical limit; separate witness refuses"
+  },
+  {
+    "id": "C05",
+    "target": "actual derivation",
+    "mutation": "change conceded minute84 to80 in input and recompute only evidence/claim bindings needed to reach arithmetic; retain intentionally stale expected count2",
+    "expected": "count mismatch from strict greater-than80; no metadata-only pass"
+  },
+  {
+    "id": "C06",
+    "target": "actual gates",
+    "mutation": "unbound span, missing use, forbidden evidence permission or altered actual gate finding",
+    "expected": "actual applicable gate refuses; aggregate not rewritten"
+  },
+  {
+    "id": "C07",
+    "target": "Performance rule",
+    "mutation": "empty intent; wrong mode,scope,value,strength or anchor independently",
+    "expected": "actual seven evaluators and exact nonempty mode rule refuse"
+  },
+  {
+    "id": "C08",
+    "target": "one use",
+    "mutation": "clone, stale, consumed or closed acquisition",
+    "expected": "no write"
+  },
+  {
+    "id": "C09",
+    "target": "transaction",
+    "mutation": "fault after each write; commit acknowledgement lost; release/settlement failure",
+    "expected": "rollback where proved; unknown remains held; explicit reconciliation only"
+  },
+  {
+    "id": "C10",
+    "target": "reentry",
+    "mutation": "one partial/conflict/stale/foreign/extra governed row per case",
+    "expected": "refuse without overwrite or broad subtraction"
+  },
+  {
+    "id": "C11",
+    "target": "audit",
+    "mutation": "wrong eight-key input, wrong direction hash, non-null model run, altered immutable result",
+    "expected": "refuse; prior direction remains durable"
+  },
+  {
+    "id": "C12",
+    "target": "boundary",
+    "mutation": "request genuine/live/READY/Render transition from fixture admission",
+    "expected": "refuse; no semantic permission"
+  },
+  {
+    "id": "C13-silent-leak",
+    "target": "unchanged checkSilentNonLeak",
+    "mutation": "Append \" Calibration 17.\" to otherwise valid turn1 of a component negative only; keep silent typed constraint, package, rights and no silent-use rows intact. This targets the silent checker directly, not a whole chain pretending diff-lock still passes.",
+    "expected": "silent_value_reproduced at the exact17 code-point span; scalar string17 yields nonempty form; no private sentinel used",
+    "status": "prospective, unexecuted"
+  }
+]

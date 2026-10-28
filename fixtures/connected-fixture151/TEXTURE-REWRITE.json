@@ -1,0 +1,14 @@
+{
+  "profile": "connected-fixture105-texture/1",
+  "ordered_rewrites": [
+    {
+      "anchor": "estuary109_t02",
+      "kind": "contraction",
+      "old": "I would choose the ordinary handle.",
+      "new": "I'd choose the ordinary handle."
+    }
+  ],
+  "changed_anchors": ["estuary109_t02"],
+  "original_surfaces": [],
+  "original_surfaces_status": "inapplicable: no withheld source bodies in this wholly disclosed fixture; empty set is not a privacy proof"
+}

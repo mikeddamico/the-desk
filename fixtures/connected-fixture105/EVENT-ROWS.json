@@ -1,0 +1,110 @@
+[
+  {
+    "claim_state_event_id": "755a61e4-1dd9-5b50-95c3-019ad0af84a7",
+    "claim_id": "a50f7424-47ba-559a-a0de-f011fe3784b1",
+    "actor_id": "ef83ab5a-3d75-553c-924e-b18604e61e16",
+    "occurred_at": "2024-06-26T18:00:00Z",
+    "event_type": "confirm",
+    "event_sequence": 1,
+    "event_payload": {
+      "reason_code": "authored_fixture_confirmation",
+      "reason": "This confirms consistency within the newly authored fictional fixture only."
+    }
+  },
+  {
+    "claim_state_event_id": "8850824c-a2c0-52a3-86d0-3c0c04cc7aca",
+    "claim_id": "9d40e3c5-e145-5bc1-ad1c-55ce09dd66c7",
+    "actor_id": "ef83ab5a-3d75-553c-924e-b18604e61e16",
+    "occurred_at": "2024-06-26T18:00:00Z",
+    "event_type": "confirm",
+    "event_sequence": 1,
+    "event_payload": {
+      "reason_code": "authored_fixture_confirmation",
+      "reason": "This confirms consistency within the newly authored fictional fixture only."
+    }
+  },
+  {
+    "claim_state_event_id": "fcc76890-9088-5a5e-85d0-c188fdafca58",
+    "claim_id": "6cd06f82-a9ad-5e46-8e52-b16e7d44b998",
+    "actor_id": "ef83ab5a-3d75-553c-924e-b18604e61e16",
+    "occurred_at": "2024-06-26T18:00:00Z",
+    "event_type": "confirm",
+    "event_sequence": 1,
+    "event_payload": {
+      "reason_code": "authored_fixture_confirmation",
+      "reason": "This confirms consistency within the newly authored fictional fixture only."
+    }
+  },
+  {
+    "claim_state_event_id": "2f2e26b8-d13f-59de-9d0a-08c476e9665e",
+    "claim_id": "acf27cee-53eb-5fbd-a67b-114f94ca795d",
+    "actor_id": "ef83ab5a-3d75-553c-924e-b18604e61e16",
+    "occurred_at": "2024-06-26T18:00:00Z",
+    "event_type": "confirm",
+    "event_sequence": 1,
+    "event_payload": {
+      "reason_code": "authored_fixture_confirmation",
+      "reason": "This confirms consistency within the newly authored fictional fixture only."
+    }
+  },
+  {
+    "claim_state_event_id": "f10819ed-34c4-50bd-9c83-3a0a6da861c5",
+    "claim_id": "13280589-4ad9-5109-9f1f-d7d4d6079116",
+    "actor_id": "ef83ab5a-3d75-553c-924e-b18604e61e16",
+    "occurred_at": "2024-06-26T18:00:00Z",
+    "event_type": "confirm",
+    "event_sequence": 1,
+    "event_payload": {
+      "reason_code": "authored_fixture_confirmation",
+      "reason": "This confirms consistency within the newly authored fictional fixture only."
+    }
+  },
+  {
+    "claim_state_event_id": "02d663f4-d157-534a-b68c-475b4757963c",
+    "claim_id": "0ee3cc88-74c6-5815-8b18-b86772fee142",
+    "actor_id": "ef83ab5a-3d75-553c-924e-b18604e61e16",
+    "occurred_at": "2024-06-26T18:00:00Z",
+    "event_type": "confirm",
+    "event_sequence": 1,
+    "event_payload": {
+      "reason_code": "authored_fixture_confirmation",
+      "reason": "This confirms consistency within the newly authored fictional fixture only."
+    }
+  },
+  {
+    "claim_state_event_id": "7d09f7c1-a565-5265-8840-3a8636ec293b",
+    "claim_id": "af00a068-d5ba-52e7-83bf-ebb583588b42",
+    "actor_id": "ef83ab5a-3d75-553c-924e-b18604e61e16",
+    "occurred_at": "2024-06-26T18:00:00Z",
+    "event_type": "confirm",
+    "event_sequence": 1,
+    "event_payload": {
+      "reason_code": "authored_fixture_confirmation",
+      "reason": "This confirms consistency within the newly authored fictional fixture only."
+    }
+  },
+  {
+    "claim_state_event_id": "1a373ba2-182b-5f5a-9301-ebe259c113a0",
+    "claim_id": "a5807836-8468-5b76-9467-4785cdf3b6c0",
+    "actor_id": "ef83ab5a-3d75-553c-924e-b18604e61e16",
+    "occurred_at": "2024-06-26T18:00:00Z",
+    "event_type": "confirm",
+    "event_sequence": 1,
+    "event_payload": {
+      "reason_code": "authored_fixture_confirmation",
+      "reason": "This confirms consistency within the newly authored fictional fixture only."
+    }
+  },
+  {
+    "claim_state_event_id": "fd676359-9530-598f-9d4a-91f18a25513b",
+    "claim_id": "46050fc9-ec1b-5e5f-9346-2be287d6a5cc",
+    "actor_id": "ef83ab5a-3d75-553c-924e-b18604e61e16",
+    "occurred_at": "2024-06-26T18:00:00Z",
+    "event_type": "confirm",
+    "event_sequence": 1,
+    "event_payload": {
+      "reason_code": "authored_fixture_confirmation",
+      "reason": "This confirms consistency within the newly authored fictional fixture only."
+    }
+  }
+]

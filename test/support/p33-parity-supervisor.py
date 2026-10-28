@@ -519,7 +519,7 @@ def case_owner(args):
     # The ordinary test's guard handshake must not enable child recursion.
     env.pop('DESK_P33_SOCKET', None)
     env.pop('DESK_P33_TOKEN', None)
-    command = ([args.node, '--import', 'tsx', str(ROOT/'test/support/p33-parity-runner.ts'), '--p33-child']
+    command = ([args.node, str(ROOT/'test/support/p33-parity-runner.ts'), '--p33-child']
                if args.mode == 'p33' else [sys.executable, str(SELF), 'control', args.mode])
     selector = selectors.DefaultSelector()
     selector.register(link, selectors.EVENT_READ, 'parent')
@@ -535,6 +535,7 @@ def case_owner(args):
         selector.register(proc.stdout, selectors.EVENT_READ, 'output')
         reason = 'deadline'
         eof = False
+        direct_exit_seen = False
         while time.monotonic() < until and not INTERRUPTED:
             for key, _ in selector.select(min(.01, max(0, until-time.monotonic()))):
                 if key.data == 'parent':
@@ -552,9 +553,15 @@ def case_owner(args):
                 else:
                     output.extend(data)
             status = os.waitid(os.P_PID, proc.pid, os.WEXITED | os.WNOHANG | os.WNOWAIT)
+            direct_exit_seen = status is not None
             if status is not None and eof:
                 reason = 'child_exit'
                 break
+        if reason == 'deadline' and args.mode == 'p33':
+            # Fixed-size supplemental observation; never substitutes for settlement.
+            diagnostic = ('P33_DEADLINE ' + json.dumps({'directExitSeen': direct_exit_seen, 'stdoutEof': eof}) + '\n').encode()
+            if len(output) + len(diagnostic) <= OUTPUT_LIMIT:
+                output.extend(diagnostic)
         if INTERRUPTED:
             parent_lost = True
             reason = 'interrupted'
@@ -678,6 +685,8 @@ def guard(args):
     test = 'test/unit/p33-parity-harness.test.ts'
     filters = {'unit': ['--exclude', 'test/integration/**', '--exclude', test],
                'all': ['--exclude', test], 'integration': ['test/integration'],
+               'writer': ['test/unit/writer-fixture-input.test.ts'],
+               'rest': ['--exclude', test, '--exclude', 'test/unit/writer-fixture-input.test.ts'],
                'focused': [test],
                'parity': ['test/unit/fixture-pack-extraction-parity.test.ts'], 'p33': ['test/unit/fixture-pack-extraction-parity.test.ts',
                    '--testNamePattern', '^P28-P37 legacy formats, freshness and discarded faults P33 multidisk$']}
@@ -808,7 +817,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest='role', required=True)
     g = sub.add_parser('guard')
-    g.add_argument('profile', choices=['prerequisite', 'focused', 'p33', 'parity', 'unit', 'integration', 'all'])
+    g.add_argument('profile', choices=['prerequisite', 'focused', 'p33', 'parity', 'unit', 'integration', 'all', 'writer', 'rest'])
     o = sub.add_parser('owner')
     for key in ('lease', 'device', 'inode', 'link', 'guard'):
         o.add_argument('--'+key, type=int, required=True)

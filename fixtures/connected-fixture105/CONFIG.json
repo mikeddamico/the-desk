@@ -1,0 +1,30 @@
+{
+  "show_config_version_id": "9e1252b5-f582-5aab-ad2a-e067fa571b04",
+  "show_id": "7ef80c54-5645-5925-a5f1-d8b5b7ad2a30",
+  "version_number": 1,
+  "config_hash": "18eec4ddf5be87cbfd6317bc067f152ec400394eda18454d9bbd9bd22a76ff2d",
+  "schema_version": "show-config/1",
+  "canonical_payload": {
+    "autonomous_operation_policy_version": "adr-003",
+    "configured_runtime_seconds": {
+      "fixture_override": 280,
+      "min": 240,
+      "max": 360
+    },
+    "default_episode_mode": "normal_post_event",
+    "default_output_language": "en-GB",
+    "default_rundown_template_version_id": "connected-fixture105-post-event/1",
+    "name": "The Estuary Test Desk",
+    "operator_repair_policy_version": "operator-repair-0.1.1",
+    "pre_publish_review_policy": "human-review-required",
+    "pre_publish_review_required": true,
+    "pre_publish_review_timeout_seconds": 3600,
+    "publication_enabled": false,
+    "show_id": "7ef80c54-5645-5925-a5f1-d8b5b7ad2a30",
+    "show_version": "estuary-fixture109/1",
+    "writing_craft_policy_version": "writing-craft-0.1"
+  },
+  "pre_publish_review_required": true,
+  "parent_version_id": null,
+  "created_at": "2024-06-26T18:00:00Z"
+}

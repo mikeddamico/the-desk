@@ -1,0 +1,89 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "kind",
+    "version",
+    "input_projection",
+    "input_fingerprint",
+    "operation_sha256",
+    "interface_conformance",
+    "semantic_acceptance",
+    "model_run_id",
+    "render_allowed"
+  ],
+  "properties": {
+    "schema": {
+      "const": "connected-fixture105-audit-stub/1"
+    },
+    "kind": {
+      "const": "fixture_stub"
+    },
+    "version": {
+      "const": "connected-fixture105-audit-stub/1"
+    },
+    "input_projection": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "package_hash",
+        "brief_hash",
+        "script_hash",
+        "performance_direction_hash",
+        "claims_policy_version",
+        "writing_policy_version",
+        "performance_policy_version",
+        "auditor_contract_version"
+      ],
+      "properties": {
+        "package_hash": {
+          "const": "c60a91ac6383a791011f533d4b4d2dfd428b3dbe9e15b5113f4cd60ea03c539e"
+        },
+        "brief_hash": {
+          "const": "e49eb2ff86990cd5a439c68b236f99ba34f1294be02c568b635091f5b0f11a71"
+        },
+        "script_hash": {
+          "const": "699c4837646679b9470d272ecdd07590449dec21a4c6e708ddfdd792a01dcb6c"
+        },
+        "performance_direction_hash": {
+          "const": "edd94e00ec1e07bbe0a2efde4c3ca67f39e5f25835f83aed2b29df09eaa5ee2e"
+        },
+        "claims_policy_version": {
+          "const": "claims-0.1.2"
+        },
+        "writing_policy_version": {
+          "const": "writing-0.2.3"
+        },
+        "performance_policy_version": {
+          "const": "performance-render-0.1.4"
+        },
+        "auditor_contract_version": {
+          "const": "connected-fixture105-audit-stub/1"
+        }
+      }
+    },
+    "input_fingerprint": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "operation_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "interface_conformance": {
+      "const": "complete"
+    },
+    "semantic_acceptance": {
+      "const": "not_established"
+    },
+    "model_run_id": {
+      "type": "null"
+    },
+    "render_allowed": {
+      "const": false
+    }
+  },
+  "$comment": "Mandatory semantic validation: INNER-DIGEST-RULES.md, SQL-COLUMN-MAP.json and RESULT-DIGEST-MAP.json. JSON Schema validation alone cannot admit an artifact or prove linked digests."
+}

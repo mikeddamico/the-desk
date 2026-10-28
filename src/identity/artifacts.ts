@@ -1,9 +1,15 @@
+import { connectedFixture105DomainHash } from "./domains.js";
 // Artifact projections and content hashes (Hashing v0.1.5 sections 3-4, 12.4; Writing v0.2.3 5.1 and 7.1 with the
 // Writing Build 1-2 Fixture-Profile Addendum v0.1;
 // Showrunner Planning v0.1.3 6.1; Performance & Render v0.1.4 manifest hash; Evidence Package v0.2.2 semantic manifest).
 // Each projection SELECTS the governed fields from an authoritative object; none serializes a persistence row.
 // Owning authority and status for every selection: docs/identity-projection-authority.md. Pure; no I/O.
-import { canonicalBytes, canonicalTimestamp } from "./canonical-json.js";
+import {
+  canonicalBytes,
+  canonicalTimestamp,
+  canonicalJson,
+  sha256,
+} from "./canonical-json.js";
 import { governedDomainHash, rawBytesHash } from "./domains.js";
 import {
   asArray,
@@ -874,3 +880,1195 @@ export function renderManifestProjection(manifest: unknown): JsonObject {
 }
 export const renderManifestHash = (manifest: unknown): string =>
   governedDomainHash("render-manifest-v1", renderManifestProjection(manifest));
+
+// Complete fixed schemas for the three evaluation-only artifacts; not a runtime registry.
+const FIXTURE105_SCHEMAS: Record<
+  "construction" | "operation" | "audit",
+  Record<string, unknown>
+> = {
+  construction: {
+    $schema: "https://json-schema.org/draft/2020-12/schema",
+    type: "object",
+    additionalProperties: false,
+    required: [
+      "schema",
+      "record_kind",
+      "subject",
+      "release_sha256",
+      "observed_rows",
+      "observed_rows_sha256",
+      "ceilings",
+      "phase_order",
+      "construction_receipt_id",
+      "historical_visibility_limit",
+      "claim",
+    ],
+    properties: {
+      schema: {
+        const: "fixture105-construction-observation/1",
+      },
+      record_kind: {
+        const: "actual_owner_observation",
+      },
+      subject: {
+        type: "object",
+        additionalProperties: false,
+        required: [
+          "profile",
+          "purpose",
+          "environment",
+          "program_run_id",
+          "attempt_id",
+          "show_config_hash",
+          "package_hash",
+          "brief_hash",
+          "substantive_script_hash",
+          "final_script_hash",
+          "gate_set_version",
+          "program_run_authored_at",
+          "show_id",
+          "show_version",
+          "show_config_version_id",
+          "package_id",
+          "brief_version_id",
+          "substantive_script_version_id",
+          "final_script_version_id",
+          "claims_policy_version",
+          "writing_policy_version",
+          "performance_policy_version",
+        ],
+        properties: {
+          profile: {
+            const: "connected-evaluation-fixture105/1",
+          },
+          purpose: {
+            const: "evaluation",
+          },
+          environment: {
+            const: "test",
+          },
+          program_run_id: {
+            const: "23e3766c-7d71-5c0a-801f-e06d50884988",
+          },
+          attempt_id: {
+            const: "9ed84f2d-5081-5869-8800-bd53c75fa71d",
+          },
+          show_config_hash: {
+            const:
+              "18eec4ddf5be87cbfd6317bc067f152ec400394eda18454d9bbd9bd22a76ff2d",
+          },
+          package_hash: {
+            const:
+              "c60a91ac6383a791011f533d4b4d2dfd428b3dbe9e15b5113f4cd60ea03c539e",
+          },
+          brief_hash: {
+            const:
+              "e49eb2ff86990cd5a439c68b236f99ba34f1294be02c568b635091f5b0f11a71",
+          },
+          substantive_script_hash: {
+            const:
+              "ced37e3db0c2511d4f1cfb8d913f66e223cd103adf9087ae809b30511de7a116",
+          },
+          final_script_hash: {
+            const:
+              "699c4837646679b9470d272ecdd07590449dec21a4c6e708ddfdd792a01dcb6c",
+          },
+          gate_set_version: {
+            const: "build2-connected-fixture105-gates/1",
+          },
+          program_run_authored_at: {
+            const: "2024-06-26T18:00:00Z",
+          },
+          show_id: {
+            const: "7ef80c54-5645-5925-a5f1-d8b5b7ad2a30",
+          },
+          show_version: {
+            const: "estuary-fixture109/1",
+          },
+          show_config_version_id: {
+            const: "9e1252b5-f582-5aab-ad2a-e067fa571b04",
+          },
+          package_id: {
+            const: "cca1c334-d3aa-509d-bbfb-f43f7bb8d645",
+          },
+          brief_version_id: {
+            const: "a4979777-ea0e-5fba-88c2-c9e732acab50",
+          },
+          substantive_script_version_id: {
+            const: "5120be00-4908-5e55-8ea5-d28aab5947bf",
+          },
+          final_script_version_id: {
+            const: "ca1c091b-4ee5-59fb-9547-2b92eb3938ad",
+          },
+          claims_policy_version: {
+            const: "claims-0.1.2",
+          },
+          writing_policy_version: {
+            const: "writing-0.2.3",
+          },
+          performance_policy_version: {
+            const: "performance-render-0.1.4",
+          },
+        },
+      },
+      release_sha256: {
+        type: "string",
+        pattern: "^[0-9a-f]{64}$",
+      },
+      observed_rows: {
+        type: "array",
+        minItems: 1,
+        maxItems: 128,
+        items: {
+          type: "object",
+          additionalProperties: false,
+          required: ["table", "primary_key", "canonical_row", "row_sha256"],
+          properties: {
+            table: {
+              enum: [
+                "claims",
+                "claim_state_events",
+                "rights_versions",
+                "claim_supports",
+                "evidence_units",
+                "derivation_runs",
+                "evidence_packages",
+                "artifacts",
+              ],
+            },
+            primary_key: {
+              type: "string",
+              format: "uuid",
+            },
+            canonical_row: {
+              type: "string",
+              minLength: 1,
+            },
+            row_sha256: {
+              type: "string",
+              pattern: "^[0-9a-f]{64}$",
+            },
+          },
+        },
+      },
+      observed_rows_sha256: {
+        type: "string",
+        pattern: "^[0-9a-f]{64}$",
+      },
+      ceilings: {
+        const: [
+          {
+            claim_id: "a50f7424-47ba-559a-a0de-f011fe3784b1",
+            frozen_ceiling: "assertable",
+            current_ceiling: "assertable",
+            rights_version_id: "0e7f75a6-e7f2-5414-8e6a-b35e9ded3444",
+            basis:
+              "fixture109 source-specific admitted usage; no inferred general rights-to-status mapping",
+          },
+          {
+            claim_id: "9d40e3c5-e145-5bc1-ad1c-55ce09dd66c7",
+            frozen_ceiling: "assertable",
+            current_ceiling: "assertable",
+            rights_version_id: "0e7f75a6-e7f2-5414-8e6a-b35e9ded3444",
+            basis:
+              "fixture109 source-specific admitted usage; no inferred general rights-to-status mapping",
+          },
+          {
+            claim_id: "6cd06f82-a9ad-5e46-8e52-b16e7d44b998",
+            frozen_ceiling: "hedged_only",
+            current_ceiling: "hedged_only",
+            rights_version_id: "0e7f75a6-e7f2-5414-8e6a-b35e9ded3444",
+            basis:
+              "fixture109 source-specific admitted usage; no inferred general rights-to-status mapping",
+          },
+          {
+            claim_id: "acf27cee-53eb-5fbd-a67b-114f94ca795d",
+            frozen_ceiling: "assertable",
+            current_ceiling: "assertable",
+            rights_version_id: "0e7f75a6-e7f2-5414-8e6a-b35e9ded3444",
+            basis:
+              "fixture109 source-specific admitted usage; no inferred general rights-to-status mapping",
+          },
+          {
+            claim_id: "13280589-4ad9-5109-9f1f-d7d4d6079116",
+            frozen_ceiling: "assertable",
+            current_ceiling: "assertable",
+            rights_version_id: "0e7f75a6-e7f2-5414-8e6a-b35e9ded3444",
+            basis:
+              "fixture109 source-specific admitted usage; no inferred general rights-to-status mapping",
+          },
+          {
+            claim_id: "0ee3cc88-74c6-5815-8b18-b86772fee142",
+            frozen_ceiling: "assertable",
+            current_ceiling: "assertable",
+            rights_version_id: "0e7f75a6-e7f2-5414-8e6a-b35e9ded3444",
+            basis:
+              "fixture109 source-specific admitted usage; no inferred general rights-to-status mapping",
+          },
+          {
+            claim_id: "af00a068-d5ba-52e7-83bf-ebb583588b42",
+            frozen_ceiling: "assertable",
+            current_ceiling: "assertable",
+            rights_version_id: "0e7f75a6-e7f2-5414-8e6a-b35e9ded3444",
+            basis:
+              "fixture109 source-specific admitted usage; no inferred general rights-to-status mapping",
+          },
+          {
+            claim_id: "a5807836-8468-5b76-9467-4785cdf3b6c0",
+            frozen_ceiling: "assertable",
+            current_ceiling: "assertable",
+            rights_version_id: "0e7f75a6-e7f2-5414-8e6a-b35e9ded3444",
+            basis:
+              "fixture109 source-specific admitted usage; no inferred general rights-to-status mapping",
+          },
+          {
+            claim_id: "46050fc9-ec1b-5e5f-9346-2be287d6a5cc",
+            frozen_ceiling: "silent",
+            current_ceiling: "silent",
+            rights_version_id: "0e7f75a6-e7f2-5414-8e6a-b35e9ded3444",
+            basis:
+              "fixture109 source-specific admitted usage; no inferred general rights-to-status mapping",
+          },
+        ],
+      },
+      phase_order: {
+        const: ["absence", "insert", "capture", "freeze", "persist", "compare"],
+      },
+      construction_receipt_id: {
+        type: "string",
+        minLength: 1,
+      },
+      historical_visibility_limit: {
+        const: "historical_visibility_unprovable",
+      },
+      claim: {
+        const: "closed_fixture_construction_only",
+      },
+    },
+    $comment:
+      "Mandatory semantic validation: INNER-DIGEST-RULES.md, SQL-COLUMN-MAP.json and RESULT-DIGEST-MAP.json. JSON Schema validation alone cannot admit an artifact or prove linked digests.",
+  },
+  operation: {
+    $schema: "https://json-schema.org/draft/2020-12/schema",
+    type: "object",
+    additionalProperties: false,
+    required: [
+      "schema",
+      "record_kind",
+      "subject",
+      "release_sha256",
+      "construction_observation_sha256",
+      "actual_claims_writing_result_sha256",
+      "actual_performance_result_sha256",
+      "performance_direction_hash",
+      "genuine_semantic_admission",
+      "required_semantic_status",
+      "owned_rows",
+      "operation_id",
+    ],
+    properties: {
+      schema: {
+        const: "fixture105-operation/1",
+      },
+      record_kind: {
+        const: "actual_owned_operation",
+      },
+      subject: {
+        type: "object",
+        additionalProperties: false,
+        required: [
+          "profile",
+          "purpose",
+          "environment",
+          "program_run_id",
+          "attempt_id",
+          "show_config_hash",
+          "package_hash",
+          "brief_hash",
+          "substantive_script_hash",
+          "final_script_hash",
+          "gate_set_version",
+          "program_run_authored_at",
+          "show_id",
+          "show_version",
+          "show_config_version_id",
+          "package_id",
+          "brief_version_id",
+          "substantive_script_version_id",
+          "final_script_version_id",
+          "claims_policy_version",
+          "writing_policy_version",
+          "performance_policy_version",
+        ],
+        properties: {
+          profile: {
+            const: "connected-evaluation-fixture105/1",
+          },
+          purpose: {
+            const: "evaluation",
+          },
+          environment: {
+            const: "test",
+          },
+          program_run_id: {
+            const: "23e3766c-7d71-5c0a-801f-e06d50884988",
+          },
+          attempt_id: {
+            const: "9ed84f2d-5081-5869-8800-bd53c75fa71d",
+          },
+          show_config_hash: {
+            const:
+              "18eec4ddf5be87cbfd6317bc067f152ec400394eda18454d9bbd9bd22a76ff2d",
+          },
+          package_hash: {
+            const:
+              "c60a91ac6383a791011f533d4b4d2dfd428b3dbe9e15b5113f4cd60ea03c539e",
+          },
+          brief_hash: {
+            const:
+              "e49eb2ff86990cd5a439c68b236f99ba34f1294be02c568b635091f5b0f11a71",
+          },
+          substantive_script_hash: {
+            const:
+              "ced37e3db0c2511d4f1cfb8d913f66e223cd103adf9087ae809b30511de7a116",
+          },
+          final_script_hash: {
+            const:
+              "699c4837646679b9470d272ecdd07590449dec21a4c6e708ddfdd792a01dcb6c",
+          },
+          gate_set_version: {
+            const: "build2-connected-fixture105-gates/1",
+          },
+          program_run_authored_at: {
+            const: "2024-06-26T18:00:00Z",
+          },
+          show_id: {
+            const: "7ef80c54-5645-5925-a5f1-d8b5b7ad2a30",
+          },
+          show_version: {
+            const: "estuary-fixture109/1",
+          },
+          show_config_version_id: {
+            const: "9e1252b5-f582-5aab-ad2a-e067fa571b04",
+          },
+          package_id: {
+            const: "cca1c334-d3aa-509d-bbfb-f43f7bb8d645",
+          },
+          brief_version_id: {
+            const: "a4979777-ea0e-5fba-88c2-c9e732acab50",
+          },
+          substantive_script_version_id: {
+            const: "5120be00-4908-5e55-8ea5-d28aab5947bf",
+          },
+          final_script_version_id: {
+            const: "ca1c091b-4ee5-59fb-9547-2b92eb3938ad",
+          },
+          claims_policy_version: {
+            const: "claims-0.1.2",
+          },
+          writing_policy_version: {
+            const: "writing-0.2.3",
+          },
+          performance_policy_version: {
+            const: "performance-render-0.1.4",
+          },
+        },
+      },
+      release_sha256: {
+        type: "string",
+        pattern: "^[0-9a-f]{64}$",
+      },
+      construction_observation_sha256: {
+        type: "string",
+        pattern: "^[0-9a-f]{64}$",
+      },
+      actual_claims_writing_result_sha256: {
+        type: "string",
+        pattern: "^[0-9a-f]{64}$",
+      },
+      actual_performance_result_sha256: {
+        type: "string",
+        pattern: "^[0-9a-f]{64}$",
+      },
+      performance_direction_hash: {
+        const:
+          "edd94e00ec1e07bbe0a2efde4c3ca67f39e5f25835f83aed2b29df09eaa5ee2e",
+      },
+      genuine_semantic_admission: {
+        const: false,
+      },
+      required_semantic_status: {
+        const: {
+          H04: "not_established_required",
+          H13: "not_established_required",
+        },
+      },
+      owned_rows: {
+        type: "array",
+        minItems: 1,
+        maxItems: 32,
+        items: {
+          type: "object",
+          additionalProperties: false,
+          required: ["table", "primary_key", "canonical_row", "row_sha256"],
+          properties: {
+            table: {
+              enum: [
+                "artifacts",
+                "performance_direction_versions",
+                "performance_intents",
+                "gate_results",
+              ],
+            },
+            primary_key: {
+              type: "string",
+              format: "uuid",
+            },
+            canonical_row: {
+              type: "string",
+              minLength: 1,
+            },
+            row_sha256: {
+              type: "string",
+              pattern: "^[0-9a-f]{64}$",
+            },
+          },
+        },
+      },
+      operation_id: {
+        type: "string",
+        pattern: "^[0-9a-f]{64}$",
+      },
+    },
+    $comment:
+      "Mandatory semantic validation: INNER-DIGEST-RULES.md, SQL-COLUMN-MAP.json and RESULT-DIGEST-MAP.json. JSON Schema validation alone cannot admit an artifact or prove linked digests.",
+  },
+  audit: {
+    $schema: "https://json-schema.org/draft/2020-12/schema",
+    type: "object",
+    additionalProperties: false,
+    required: [
+      "schema",
+      "kind",
+      "version",
+      "input_projection",
+      "input_fingerprint",
+      "operation_sha256",
+      "interface_conformance",
+      "semantic_acceptance",
+      "model_run_id",
+      "render_allowed",
+    ],
+    properties: {
+      schema: {
+        const: "connected-fixture105-audit-stub/1",
+      },
+      kind: {
+        const: "fixture_stub",
+      },
+      version: {
+        const: "connected-fixture105-audit-stub/1",
+      },
+      input_projection: {
+        type: "object",
+        additionalProperties: false,
+        required: [
+          "package_hash",
+          "brief_hash",
+          "script_hash",
+          "performance_direction_hash",
+          "claims_policy_version",
+          "writing_policy_version",
+          "performance_policy_version",
+          "auditor_contract_version",
+        ],
+        properties: {
+          package_hash: {
+            const:
+              "c60a91ac6383a791011f533d4b4d2dfd428b3dbe9e15b5113f4cd60ea03c539e",
+          },
+          brief_hash: {
+            const:
+              "e49eb2ff86990cd5a439c68b236f99ba34f1294be02c568b635091f5b0f11a71",
+          },
+          script_hash: {
+            const:
+              "699c4837646679b9470d272ecdd07590449dec21a4c6e708ddfdd792a01dcb6c",
+          },
+          performance_direction_hash: {
+            const:
+              "edd94e00ec1e07bbe0a2efde4c3ca67f39e5f25835f83aed2b29df09eaa5ee2e",
+          },
+          claims_policy_version: {
+            const: "claims-0.1.2",
+          },
+          writing_policy_version: {
+            const: "writing-0.2.3",
+          },
+          performance_policy_version: {
+            const: "performance-render-0.1.4",
+          },
+          auditor_contract_version: {
+            const: "connected-fixture105-audit-stub/1",
+          },
+        },
+      },
+      input_fingerprint: {
+        type: "string",
+        pattern: "^[0-9a-f]{64}$",
+      },
+      operation_sha256: {
+        type: "string",
+        pattern: "^[0-9a-f]{64}$",
+      },
+      interface_conformance: {
+        const: "complete",
+      },
+      semantic_acceptance: {
+        const: "not_established",
+      },
+      model_run_id: {
+        type: "null",
+      },
+      render_allowed: {
+        const: false,
+      },
+    },
+    $comment:
+      "Mandatory semantic validation: INNER-DIGEST-RULES.md, SQL-COLUMN-MAP.json and RESULT-DIGEST-MAP.json. JSON Schema validation alone cannot admit an artifact or prove linked digests.",
+  },
+};
+
+// Explicit successor input binding; predecessor schemas above remain unchanged.
+const FIXTURE151_SCHEMAS: Record<
+  "construction" | "operation" | "audit",
+  Record<string, unknown>
+> = {
+  construction: {
+    $schema: "https://json-schema.org/draft/2020-12/schema",
+    type: "object",
+    additionalProperties: false,
+    required: [
+      "schema",
+      "record_kind",
+      "subject",
+      "release_sha256",
+      "observed_rows",
+      "observed_rows_sha256",
+      "ceilings",
+      "phase_order",
+      "construction_receipt_id",
+      "historical_visibility_limit",
+      "claim",
+    ],
+    properties: {
+      schema: { const: "fixture105-construction-observation/1" },
+      record_kind: { const: "actual_owner_observation" },
+      subject: {
+        type: "object",
+        additionalProperties: false,
+        required: [
+          "profile",
+          "purpose",
+          "environment",
+          "program_run_id",
+          "attempt_id",
+          "show_config_hash",
+          "package_hash",
+          "brief_hash",
+          "substantive_script_hash",
+          "final_script_hash",
+          "gate_set_version",
+          "program_run_authored_at",
+          "show_id",
+          "show_version",
+          "show_config_version_id",
+          "package_id",
+          "brief_version_id",
+          "substantive_script_version_id",
+          "final_script_version_id",
+          "claims_policy_version",
+          "writing_policy_version",
+          "performance_policy_version",
+        ],
+        properties: {
+          profile: { const: "connected-evaluation-fixture105/1" },
+          purpose: { const: "evaluation" },
+          environment: { const: "test" },
+          program_run_id: { const: "a8c6f0e2-4eef-589f-95d2-ed6ae393dcda" },
+          attempt_id: { const: "bd1de358-0db4-5229-9c1d-4fc8d6b967a1" },
+          show_config_hash: {
+            const:
+              "18eec4ddf5be87cbfd6317bc067f152ec400394eda18454d9bbd9bd22a76ff2d",
+          },
+          package_hash: {
+            const:
+              "288664c91f63508197091e4d2522a62962e6c8eb8484e7f4359dc1d2be01b8ae",
+          },
+          brief_hash: {
+            const:
+              "8067cb4e58d9a6a82b7dcf6c581ad01f6f346eba3f6e36e3802d6dca0e3b5c9f",
+          },
+          substantive_script_hash: {
+            const:
+              "8d4f3db317b14ed71ee4aae9a032bd390167a933a20aba9ba94fb5238c740647",
+          },
+          final_script_hash: {
+            const:
+              "877c409ae0c3262432fa12ebd39eeca32a8dd7909f5bc4e8ecc7bf9d5af20a75",
+          },
+          gate_set_version: { const: "build2-connected-fixture105-gates/1" },
+          program_run_authored_at: { const: "2024-06-26T18:00:00Z" },
+          show_id: { const: "7ef80c54-5645-5925-a5f1-d8b5b7ad2a30" },
+          show_version: { const: "estuary-fixture109/1" },
+          show_config_version_id: {
+            const: "9e1252b5-f582-5aab-ad2a-e067fa571b04",
+          },
+          package_id: { const: "fabfeb44-c361-5e82-9b8f-3a960d211cfa" },
+          brief_version_id: { const: "0e196925-50d3-5ff7-9baf-501a9a748adc" },
+          substantive_script_version_id: {
+            const: "48b7a57a-4569-522d-9834-7531711b0ebe",
+          },
+          final_script_version_id: {
+            const: "55706b84-d31e-5d32-9a21-8824c988914b",
+          },
+          claims_policy_version: { const: "claims-0.1.2" },
+          writing_policy_version: { const: "writing-0.2.3" },
+          performance_policy_version: { const: "performance-render-0.1.4" },
+        },
+      },
+      release_sha256: { type: "string", pattern: "^[0-9a-f]{64}$" },
+      observed_rows: {
+        type: "array",
+        minItems: 1,
+        maxItems: 128,
+        items: {
+          type: "object",
+          additionalProperties: false,
+          required: ["table", "primary_key", "canonical_row", "row_sha256"],
+          properties: {
+            table: {
+              enum: [
+                "claims",
+                "claim_state_events",
+                "rights_versions",
+                "claim_supports",
+                "evidence_units",
+                "derivation_runs",
+                "evidence_packages",
+                "artifacts",
+              ],
+            },
+            primary_key: { type: "string", format: "uuid" },
+            canonical_row: { type: "string", minLength: 1 },
+            row_sha256: { type: "string", pattern: "^[0-9a-f]{64}$" },
+          },
+        },
+      },
+      observed_rows_sha256: { type: "string", pattern: "^[0-9a-f]{64}$" },
+      ceilings: {
+        const: [
+          {
+            claim_id: "a50f7424-47ba-559a-a0de-f011fe3784b1",
+            frozen_ceiling: "assertable",
+            current_ceiling: "assertable",
+            rights_version_id: "0e7f75a6-e7f2-5414-8e6a-b35e9ded3444",
+            basis:
+              "fixture109 source-specific admitted usage; no inferred general rights-to-status mapping",
+          },
+          {
+            claim_id: "9d40e3c5-e145-5bc1-ad1c-55ce09dd66c7",
+            frozen_ceiling: "assertable",
+            current_ceiling: "assertable",
+            rights_version_id: "0e7f75a6-e7f2-5414-8e6a-b35e9ded3444",
+            basis:
+              "fixture109 source-specific admitted usage; no inferred general rights-to-status mapping",
+          },
+          {
+            claim_id: "6cd06f82-a9ad-5e46-8e52-b16e7d44b998",
+            frozen_ceiling: "hedged_only",
+            current_ceiling: "hedged_only",
+            rights_version_id: "0e7f75a6-e7f2-5414-8e6a-b35e9ded3444",
+            basis:
+              "fixture109 source-specific admitted usage; no inferred general rights-to-status mapping",
+          },
+          {
+            claim_id: "acf27cee-53eb-5fbd-a67b-114f94ca795d",
+            frozen_ceiling: "assertable",
+            current_ceiling: "assertable",
+            rights_version_id: "0e7f75a6-e7f2-5414-8e6a-b35e9ded3444",
+            basis:
+              "fixture109 source-specific admitted usage; no inferred general rights-to-status mapping",
+          },
+          {
+            claim_id: "13280589-4ad9-5109-9f1f-d7d4d6079116",
+            frozen_ceiling: "assertable",
+            current_ceiling: "assertable",
+            rights_version_id: "0e7f75a6-e7f2-5414-8e6a-b35e9ded3444",
+            basis:
+              "fixture109 source-specific admitted usage; no inferred general rights-to-status mapping",
+          },
+          {
+            claim_id: "0ee3cc88-74c6-5815-8b18-b86772fee142",
+            frozen_ceiling: "assertable",
+            current_ceiling: "assertable",
+            rights_version_id: "0e7f75a6-e7f2-5414-8e6a-b35e9ded3444",
+            basis:
+              "fixture109 source-specific admitted usage; no inferred general rights-to-status mapping",
+          },
+          {
+            claim_id: "af00a068-d5ba-52e7-83bf-ebb583588b42",
+            frozen_ceiling: "assertable",
+            current_ceiling: "assertable",
+            rights_version_id: "0e7f75a6-e7f2-5414-8e6a-b35e9ded3444",
+            basis:
+              "fixture109 source-specific admitted usage; no inferred general rights-to-status mapping",
+          },
+          {
+            claim_id: "a5807836-8468-5b76-9467-4785cdf3b6c0",
+            frozen_ceiling: "assertable",
+            current_ceiling: "assertable",
+            rights_version_id: "0e7f75a6-e7f2-5414-8e6a-b35e9ded3444",
+            basis:
+              "fixture109 source-specific admitted usage; no inferred general rights-to-status mapping",
+          },
+          {
+            claim_id: "46050fc9-ec1b-5e5f-9346-2be287d6a5cc",
+            frozen_ceiling: "silent",
+            current_ceiling: "silent",
+            rights_version_id: "0e7f75a6-e7f2-5414-8e6a-b35e9ded3444",
+            basis:
+              "fixture109 source-specific admitted usage; no inferred general rights-to-status mapping",
+          },
+        ],
+      },
+      phase_order: {
+        const: ["absence", "insert", "capture", "freeze", "persist", "compare"],
+      },
+      construction_receipt_id: { type: "string", minLength: 1 },
+      historical_visibility_limit: {
+        const: "historical_visibility_unprovable",
+      },
+      claim: { const: "closed_fixture_construction_only" },
+    },
+    $comment:
+      "Mandatory semantic validation: INNER-DIGEST-RULES.md, SQL-COLUMN-MAP.json and RESULT-DIGEST-MAP.json. JSON Schema validation alone cannot admit an artifact or prove linked digests.",
+  },
+  operation: {
+    $schema: "https://json-schema.org/draft/2020-12/schema",
+    type: "object",
+    additionalProperties: false,
+    required: [
+      "schema",
+      "record_kind",
+      "subject",
+      "release_sha256",
+      "construction_observation_sha256",
+      "actual_claims_writing_result_sha256",
+      "actual_performance_result_sha256",
+      "performance_direction_hash",
+      "genuine_semantic_admission",
+      "required_semantic_status",
+      "owned_rows",
+      "operation_id",
+    ],
+    properties: {
+      schema: { const: "fixture105-operation/1" },
+      record_kind: { const: "actual_owned_operation" },
+      subject: {
+        type: "object",
+        additionalProperties: false,
+        required: [
+          "profile",
+          "purpose",
+          "environment",
+          "program_run_id",
+          "attempt_id",
+          "show_config_hash",
+          "package_hash",
+          "brief_hash",
+          "substantive_script_hash",
+          "final_script_hash",
+          "gate_set_version",
+          "program_run_authored_at",
+          "show_id",
+          "show_version",
+          "show_config_version_id",
+          "package_id",
+          "brief_version_id",
+          "substantive_script_version_id",
+          "final_script_version_id",
+          "claims_policy_version",
+          "writing_policy_version",
+          "performance_policy_version",
+        ],
+        properties: {
+          profile: { const: "connected-evaluation-fixture105/1" },
+          purpose: { const: "evaluation" },
+          environment: { const: "test" },
+          program_run_id: { const: "a8c6f0e2-4eef-589f-95d2-ed6ae393dcda" },
+          attempt_id: { const: "bd1de358-0db4-5229-9c1d-4fc8d6b967a1" },
+          show_config_hash: {
+            const:
+              "18eec4ddf5be87cbfd6317bc067f152ec400394eda18454d9bbd9bd22a76ff2d",
+          },
+          package_hash: {
+            const:
+              "288664c91f63508197091e4d2522a62962e6c8eb8484e7f4359dc1d2be01b8ae",
+          },
+          brief_hash: {
+            const:
+              "8067cb4e58d9a6a82b7dcf6c581ad01f6f346eba3f6e36e3802d6dca0e3b5c9f",
+          },
+          substantive_script_hash: {
+            const:
+              "8d4f3db317b14ed71ee4aae9a032bd390167a933a20aba9ba94fb5238c740647",
+          },
+          final_script_hash: {
+            const:
+              "877c409ae0c3262432fa12ebd39eeca32a8dd7909f5bc4e8ecc7bf9d5af20a75",
+          },
+          gate_set_version: { const: "build2-connected-fixture105-gates/1" },
+          program_run_authored_at: { const: "2024-06-26T18:00:00Z" },
+          show_id: { const: "7ef80c54-5645-5925-a5f1-d8b5b7ad2a30" },
+          show_version: { const: "estuary-fixture109/1" },
+          show_config_version_id: {
+            const: "9e1252b5-f582-5aab-ad2a-e067fa571b04",
+          },
+          package_id: { const: "fabfeb44-c361-5e82-9b8f-3a960d211cfa" },
+          brief_version_id: { const: "0e196925-50d3-5ff7-9baf-501a9a748adc" },
+          substantive_script_version_id: {
+            const: "48b7a57a-4569-522d-9834-7531711b0ebe",
+          },
+          final_script_version_id: {
+            const: "55706b84-d31e-5d32-9a21-8824c988914b",
+          },
+          claims_policy_version: { const: "claims-0.1.2" },
+          writing_policy_version: { const: "writing-0.2.3" },
+          performance_policy_version: { const: "performance-render-0.1.4" },
+        },
+      },
+      release_sha256: { type: "string", pattern: "^[0-9a-f]{64}$" },
+      construction_observation_sha256: {
+        type: "string",
+        pattern: "^[0-9a-f]{64}$",
+      },
+      actual_claims_writing_result_sha256: {
+        type: "string",
+        pattern: "^[0-9a-f]{64}$",
+      },
+      actual_performance_result_sha256: {
+        type: "string",
+        pattern: "^[0-9a-f]{64}$",
+      },
+      performance_direction_hash: {
+        const:
+          "127e47140121f28b25c826ae816312d045f60939b488de0f1eae0a166d87e1fc",
+      },
+      genuine_semantic_admission: { const: false },
+      required_semantic_status: {
+        const: {
+          H04: "not_established_required",
+          H13: "not_established_required",
+        },
+      },
+      owned_rows: {
+        type: "array",
+        minItems: 1,
+        maxItems: 32,
+        items: {
+          type: "object",
+          additionalProperties: false,
+          required: ["table", "primary_key", "canonical_row", "row_sha256"],
+          properties: {
+            table: {
+              enum: [
+                "artifacts",
+                "performance_direction_versions",
+                "performance_intents",
+                "gate_results",
+              ],
+            },
+            primary_key: { type: "string", format: "uuid" },
+            canonical_row: { type: "string", minLength: 1 },
+            row_sha256: { type: "string", pattern: "^[0-9a-f]{64}$" },
+          },
+        },
+      },
+      operation_id: { type: "string", pattern: "^[0-9a-f]{64}$" },
+    },
+    $comment:
+      "Mandatory semantic validation: INNER-DIGEST-RULES.md, SQL-COLUMN-MAP.json and RESULT-DIGEST-MAP.json. JSON Schema validation alone cannot admit an artifact or prove linked digests.",
+  },
+  audit: {
+    $schema: "https://json-schema.org/draft/2020-12/schema",
+    type: "object",
+    additionalProperties: false,
+    required: [
+      "schema",
+      "kind",
+      "version",
+      "input_projection",
+      "input_fingerprint",
+      "operation_sha256",
+      "interface_conformance",
+      "semantic_acceptance",
+      "model_run_id",
+      "render_allowed",
+    ],
+    properties: {
+      schema: { const: "connected-fixture105-audit-stub/1" },
+      kind: { const: "fixture_stub" },
+      version: { const: "connected-fixture105-audit-stub/1" },
+      input_projection: {
+        type: "object",
+        additionalProperties: false,
+        required: [
+          "package_hash",
+          "brief_hash",
+          "script_hash",
+          "performance_direction_hash",
+          "claims_policy_version",
+          "writing_policy_version",
+          "performance_policy_version",
+          "auditor_contract_version",
+        ],
+        properties: {
+          package_hash: {
+            const:
+              "288664c91f63508197091e4d2522a62962e6c8eb8484e7f4359dc1d2be01b8ae",
+          },
+          brief_hash: {
+            const:
+              "8067cb4e58d9a6a82b7dcf6c581ad01f6f346eba3f6e36e3802d6dca0e3b5c9f",
+          },
+          script_hash: {
+            const:
+              "877c409ae0c3262432fa12ebd39eeca32a8dd7909f5bc4e8ecc7bf9d5af20a75",
+          },
+          performance_direction_hash: {
+            const:
+              "127e47140121f28b25c826ae816312d045f60939b488de0f1eae0a166d87e1fc",
+          },
+          claims_policy_version: { const: "claims-0.1.2" },
+          writing_policy_version: { const: "writing-0.2.3" },
+          performance_policy_version: { const: "performance-render-0.1.4" },
+          auditor_contract_version: {
+            const: "connected-fixture105-audit-stub/1",
+          },
+        },
+      },
+      input_fingerprint: { type: "string", pattern: "^[0-9a-f]{64}$" },
+      operation_sha256: { type: "string", pattern: "^[0-9a-f]{64}$" },
+      interface_conformance: { const: "complete" },
+      semantic_acceptance: { const: "not_established" },
+      model_run_id: { type: "null" },
+      render_allowed: { const: false },
+    },
+    $comment:
+      "Mandatory semantic validation: INNER-DIGEST-RULES.md, SQL-COLUMN-MAP.json and RESULT-DIGEST-MAP.json. JSON Schema validation alone cannot admit an artifact or prove linked digests.",
+  },
+};
+const FIXTURE105_PK: Readonly<Record<string, string>> = {
+  claims: "claim_id",
+  claim_state_events: "claim_state_event_id",
+  rights_versions: "rights_version_id",
+  claim_supports: "claim_support_id",
+  evidence_units: "evidence_unit_id",
+  derivation_runs: "derivation_run_id",
+  evidence_packages: "evidence_package_id",
+  artifacts: "artifact_id",
+  performance_direction_versions: "performance_direction_version_id",
+  performance_intents: "performance_intent_id",
+  gate_results: "gate_result_id",
+};
+function fixture105Invalid(): never {
+  throw new TypeError("Fixed fixture artifact invalid");
+}
+// Private recursion over the three embedded, reviewed closed schemas only. No caller schema.
+function fixture105Shape(
+  value: unknown,
+  schema: Record<string, unknown>,
+): void {
+  if (Object.hasOwn(schema, "const")) {
+    if (canonicalJson(value) !== canonicalJson(schema.const))
+      fixture105Invalid();
+    return;
+  }
+  if (Array.isArray(schema.enum) && !schema.enum.includes(value))
+    fixture105Invalid();
+  if (schema.type === "null") {
+    if (value !== null) fixture105Invalid();
+    return;
+  }
+  if (schema.type === "object") {
+    const record = asRecord(value, "fixed fixture");
+    const properties = asRecord(schema.properties, "fixed fixture properties");
+    const required = asArray(schema.required, "fixed fixture keys");
+    if (
+      Object.keys(record).length !== required.length ||
+      required.some(
+        (key) => typeof key !== "string" || !Object.hasOwn(record, key),
+      )
+    )
+      fixture105Invalid();
+    for (const [key, item] of Object.entries(record)) {
+      if (!Object.hasOwn(properties, key)) fixture105Invalid();
+      fixture105Shape(item, asRecord(properties[key], "fixed fixture field"));
+    }
+    return;
+  }
+  if (schema.type === "array") {
+    const list = asArray(value, "fixed fixture array");
+    if (
+      (typeof schema.minItems === "number" && list.length < schema.minItems) ||
+      (typeof schema.maxItems === "number" && list.length > schema.maxItems)
+    )
+      fixture105Invalid();
+    for (const item of list)
+      fixture105Shape(item, asRecord(schema.items, "fixed fixture item"));
+    return;
+  }
+  if (schema.type === "string") {
+    if (typeof value !== "string" || value.normalize("NFC") !== value)
+      fixture105Invalid();
+    if (
+      typeof schema.minLength === "number" &&
+      Array.from(value).length < schema.minLength
+    )
+      fixture105Invalid();
+    if (
+      typeof schema.pattern === "string" &&
+      !new RegExp(schema.pattern, "u").test(value)
+    )
+      fixture105Invalid();
+    if (
+      schema.format === "uuid" &&
+      !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/u.test(
+        value,
+      )
+    )
+      fixture105Invalid();
+    return;
+  }
+  if (schema.type === undefined && Array.isArray(schema.enum)) return;
+  fixture105Invalid();
+}
+function fixture105Rows(value: unknown, order: readonly string[]): void {
+  const rows = asArray(value, "fixed fixture rows");
+  let previous = -1;
+  let previousId = "";
+  for (const item of rows) {
+    const row = asRecord(item, "fixed fixture row");
+    const table = asString(row.table, "table");
+    const id = asString(row.primary_key, "primary key");
+    const rank = order.indexOf(table);
+    if (rank < 0 || rank < previous || (rank === previous && id <= previousId))
+      fixture105Invalid();
+    previous = rank;
+    previousId = id;
+    const raw = asString(row.canonical_row, "canonical row");
+    let decoded: unknown;
+    try {
+      decoded = JSON.parse(raw) as unknown;
+    } catch {
+      fixture105Invalid();
+    }
+    const data = asRecord(decoded, "decoded row");
+    const key = FIXTURE105_PK[table];
+    if (
+      key === undefined ||
+      data[key] !== id ||
+      canonicalJson(data) !== raw ||
+      sha256(Buffer.from(raw, "utf8")) !== row.row_sha256
+    )
+      fixture105Invalid();
+  }
+}
+/** Separate semantic operation identity. This is not the full operation artifact hash. */
+export function connectedFixture105OperationId(value: unknown): string {
+  const operation = asRecord(value, "fixed operation");
+  return connectedFixture105DomainHash(
+    "fixture105-operation-identity-v1",
+    selectKeys(
+      operation,
+      [
+        "subject",
+        "release_sha256",
+        "construction_observation_sha256",
+        "actual_claims_writing_result_sha256",
+        "performance_direction_hash",
+      ],
+      "fixed operation identity",
+    ),
+  );
+}
+/** Hashes typed data, not proof of acquisition, SQL population equality or settlement. */
+export function connectedFixture105ArtifactHash(
+  kind: "construction" | "operation" | "audit",
+  value: unknown,
+): string {
+  return fixtureArtifactHash(kind, value, FIXTURE105_SCHEMAS);
+}
+/** Same artifact protocol, explicitly bound to the successor151 corpus only. */
+export function connectedFixture151ArtifactHash(
+  kind: "construction" | "operation" | "audit",
+  value: unknown,
+): string {
+  return fixtureArtifactHash(kind, value, FIXTURE151_SCHEMAS);
+}
+// Only private fixed wrappers select schemas; no public caller-supplied schema.
+function fixtureArtifactHash(
+  kind: "construction" | "operation" | "audit",
+  value: unknown,
+  schemas: Record<
+    "construction" | "operation" | "audit",
+    Record<string, unknown>
+  >,
+): string {
+  const schema = schemas[kind];
+  if (!Object.hasOwn(schemas, kind)) fixture105Invalid();
+  fixture105Shape(value, schema);
+  const record = asRecord(value, "fixed fixture artifact");
+  if (kind === "construction") {
+    fixture105Rows(record.observed_rows, [
+      "claims",
+      "claim_state_events",
+      "rights_versions",
+      "claim_supports",
+      "evidence_units",
+      "derivation_runs",
+      "evidence_packages",
+      "artifacts",
+    ]);
+    if (
+      sha256(Buffer.from(canonicalJson(record.observed_rows), "utf8")) !==
+      record.observed_rows_sha256
+    )
+      fixture105Invalid();
+    return connectedFixture105DomainHash(
+      "fixture105-construction-observation-v1",
+      record,
+    );
+  }
+  if (kind === "operation") {
+    fixture105Rows(record.owned_rows, [
+      "artifacts",
+      "performance_direction_versions",
+      "performance_intents",
+      "gate_results",
+    ]);
+    if (record.operation_id !== connectedFixture105OperationId(record))
+      fixture105Invalid();
+    return connectedFixture105DomainHash("fixture105-operation-v1", record);
+  }
+  if (
+    governedDomainHash("audit-input-v1", record.input_projection) !==
+    record.input_fingerprint
+  )
+    fixture105Invalid();
+  return connectedFixture105DomainHash(
+    "connected-fixture105-audit-stub-v1",
+    record,
+  );
+}

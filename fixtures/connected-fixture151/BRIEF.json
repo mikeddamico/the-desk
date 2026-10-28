@@ -1,0 +1,231 @@
+{
+  "package_hash": "288664c91f63508197091e4d2522a62962e6c8eb8484e7f4359dc1d2be01b8ae",
+  "show_version": "estuary-fixture109/1",
+  "planning_policy_version": "showrunner-planning-0.1.3",
+  "selected_mode": "normal_post_event",
+  "rundown_template_version_id": "connected-fixture105-post-event/1",
+  "runtime_target": { "seconds": 280, "performed_timing": "not_established" },
+  "central_question": "What do these fictional excerpts show about following the central-cover instruction?",
+  "orientation_job": "Identify the fictional result and bounded selected window before the comparison.",
+  "programming_constraints": [
+    "evaluation only",
+    "no real-world claims",
+    "no causal inference from contrasting excerpts",
+    "no silent calibration narration",
+    {
+      "type": "silent_claim_non_speak",
+      "claim_id": "46050fc9-ec1b-5e5f-9346-2be287d6a5cc"
+    }
+  ],
+  "selected_beats": ["fixture109-central-cover"],
+  "program_blocks": [
+    {
+      "program_block_id": "6d50514e-bb43-5b2b-a565-9e25d58d7f0c",
+      "sequence": 1,
+      "block_type": "cold_open",
+      "editorial_job": "Offer a plainly hypothetical football irritation without asserting match history.",
+      "target_duration_seconds": 20,
+      "participant_leads": [
+        {
+          "participant_id": "nia_calder",
+          "job": "Offer a plainly hypothetical football irritation without asserting match history."
+        }
+      ],
+      "required_claim_refs": [],
+      "required_cautions": []
+    },
+    {
+      "program_block_id": "2d59c16c-e9b0-53ff-8ee0-88c11ba827bd",
+      "sequence": 2,
+      "block_type": "host_cut_in",
+      "editorial_job": "Orient to this fictional evaluation.",
+      "target_duration_seconds": 10,
+      "participant_leads": [
+        {
+          "participant_id": "mara_ives",
+          "job": "Orient to this fictional evaluation."
+        }
+      ],
+      "required_claim_refs": [],
+      "required_cautions": []
+    },
+    {
+      "program_block_id": "09b1aad1-7ae2-56c9-9741-b3e578c4d5ce",
+      "sequence": 3,
+      "block_type": "orientation",
+      "editorial_job": "Give the result and bounded five-match count.",
+      "target_duration_seconds": 35,
+      "participant_leads": [
+        {
+          "participant_id": "mara_ives",
+          "job": "Give the result and bounded five-match count."
+        }
+      ],
+      "required_claim_refs": [
+        "a50f7424-47ba-559a-a0de-f011fe3784b1",
+        "0ee3cc88-74c6-5815-8b18-b86772fee142"
+      ],
+      "required_cautions": []
+    },
+    {
+      "program_block_id": "cd755392-009f-51eb-a97c-acfa29cfeaa7",
+      "sequence": 4,
+      "block_type": "analysis",
+      "editorial_job": "Compare the instruction with excerpts R and S; distinguish observation from causal explanation.",
+      "target_duration_seconds": 65,
+      "participant_leads": [
+        {
+          "participant_id": "jonah_reed",
+          "job": "Compare the instruction with excerpts R and S; distinguish observation from causal explanation."
+        }
+      ],
+      "required_claim_refs": [
+        "9d40e3c5-e145-5bc1-ad1c-55ce09dd66c7",
+        "6cd06f82-a9ad-5e46-8e52-b16e7d44b998",
+        "af00a068-d5ba-52e7-83bf-ebb583588b42",
+        "a5807836-8468-5b76-9467-4785cdf3b6c0"
+      ],
+      "required_cautions": [
+        "Authored fictional excerpts, not real-match observations.",
+        "These excerpts do not establish whether fatigue caused retreat."
+      ]
+    },
+    {
+      "program_block_id": "02adc00e-063d-5e29-bd01-466a2c260b0d",
+      "sequence": 5,
+      "block_type": "recap_turn",
+      "editorial_job": "State a listener reaction without strengthening the causal claim.",
+      "target_duration_seconds": 20,
+      "participant_leads": [
+        {
+          "participant_id": "nia_calder",
+          "job": "State a listener reaction without strengthening the causal claim."
+        }
+      ],
+      "required_claim_refs": [],
+      "required_cautions": []
+    },
+    {
+      "program_block_id": "844de2ac-6bbf-57aa-a558-bd6df22e3747",
+      "sequence": 6,
+      "block_type": "feature_or_analysis",
+      "editorial_job": "Describe only the selected two responses and fictional lore.",
+      "target_duration_seconds": 35,
+      "participant_leads": [
+        {
+          "participant_id": "nia_calder",
+          "job": "Describe only the selected two responses and fictional lore."
+        }
+      ],
+      "required_claim_refs": [
+        "acf27cee-53eb-5fbd-a67b-114f94ca795d",
+        "13280589-4ad9-5109-9f1f-d7d4d6079116"
+      ],
+      "required_cautions": []
+    },
+    {
+      "program_block_id": "f8ca0b87-0aee-5820-8095-18db9c5af17e",
+      "sequence": 7,
+      "block_type": "wrap",
+      "editorial_job": "Conclude that the excerpts illustrate compliance and noncompliance, not cause or frequency.",
+      "target_duration_seconds": 40,
+      "participant_leads": [
+        {
+          "participant_id": "mara_ives",
+          "job": "Conclude that the excerpts illustrate compliance and noncompliance, not cause or frequency."
+        }
+      ],
+      "required_claim_refs": [
+        "9d40e3c5-e145-5bc1-ad1c-55ce09dd66c7",
+        "af00a068-d5ba-52e7-83bf-ebb583588b42",
+        "a5807836-8468-5b76-9467-4785cdf3b6c0"
+      ],
+      "required_cautions": []
+    },
+    {
+      "program_block_id": "2cda05cf-b36f-5dcb-b321-94fe9061fbf5",
+      "sequence": 8,
+      "block_type": "predictions",
+      "editorial_job": "Three explicitly conditional wording-only forecasts, one per participant.",
+      "target_duration_seconds": 45,
+      "participant_leads": [
+        {
+          "participant_id": "mara_ives",
+          "job": "Three explicitly conditional wording-only forecasts, one per participant."
+        }
+      ],
+      "required_claim_refs": [],
+      "required_cautions": []
+    },
+    {
+      "program_block_id": "21e7afe3-7ff1-5afe-895a-ce93e04ba27c",
+      "sequence": 9,
+      "block_type": "sign_off",
+      "editorial_job": "Close this fictional evaluation without a production or audio claim.",
+      "target_duration_seconds": 10,
+      "participant_leads": [
+        {
+          "participant_id": "mara_ives",
+          "job": "Close this fictional evaluation without a production or audio claim."
+        }
+      ],
+      "required_claim_refs": [],
+      "required_cautions": []
+    }
+  ],
+  "context_selections": [
+    {
+      "context_selection_id": "ff8d77c1-a1fb-515e-a4c8-f42206519973",
+      "context_id": "fixture109-clearance-lore",
+      "function": "interpretation",
+      "program_block_id": "844de2ac-6bbf-57aa-a558-bd6df22e3747"
+    }
+  ],
+  "topic_thread_mappings": [
+    {
+      "topic_thread_id": "fixture109-central-cover",
+      "program_block_ids": [
+        "6d50514e-bb43-5b2b-a565-9e25d58d7f0c",
+        "2d59c16c-e9b0-53ff-8ee0-88c11ba827bd",
+        "09b1aad1-7ae2-56c9-9741-b3e578c4d5ce",
+        "cd755392-009f-51eb-a97c-acfa29cfeaa7",
+        "02adc00e-063d-5e29-bd01-466a2c260b0d",
+        "844de2ac-6bbf-57aa-a558-bd6df22e3747",
+        "f8ca0b87-0aee-5820-8095-18db9c5af17e",
+        "2cda05cf-b36f-5dcb-b321-94fe9061fbf5",
+        "21e7afe3-7ff1-5afe-895a-ce93e04ba27c"
+      ]
+    }
+  ],
+  "feature_selections": [],
+  "continuity_instructions": [],
+  "planning_exclusions": [
+    { "claim_id": "46050fc9-ec1b-5e5f-9346-2be287d6a5cc", "reason": "silent" }
+  ],
+  "known_gaps": [
+    "The fictional observations do not identify a cause.",
+    "No performed timing or semantic acceptance exists."
+  ],
+  "comprehension_targets": [
+    {
+      "target_id": "fixture109-comparison",
+      "claim_refs": [
+        "9d40e3c5-e145-5bc1-ad1c-55ce09dd66c7",
+        "af00a068-d5ba-52e7-83bf-ebb583588b42",
+        "a5807836-8468-5b76-9467-4785cdf3b6c0"
+      ],
+      "job": "Distinguish the instruction, its two examples and the untested causal alternative."
+    }
+  ],
+  "brief_hash": "8067cb4e58d9a6a82b7dcf6c581ad01f6f346eba3f6e36e3802d6dca0e3b5c9f",
+  "showrunner_brief_version_id": "0e196925-50d3-5ff7-9baf-501a9a748adc",
+  "artifact_id": "7f5e83c9-a3bf-5c9d-9a1c-2e7314bf5587",
+  "program_run_id": "a8c6f0e2-4eef-589f-95d2-ed6ae393dcda",
+  "attempt_id": "bd1de358-0db4-5229-9c1d-4fc8d6b967a1",
+  "purpose": "evaluation",
+  "evidence_package_id": "fabfeb44-c361-5e82-9b8f-3a960d211cfa",
+  "planner_model_run_id": null,
+  "created_at": "2024-06-26T18:00:00Z",
+  "revision_parent_id": null,
+  "revision_reason": "new_authored_evaluation_fixture"
+}

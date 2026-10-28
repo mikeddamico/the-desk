@@ -78,3 +78,21 @@ export function evidenceBodyHash(body: string): string {
 export function rawBytesHash(bytes: Uint8Array): string {
   return sha256(bytes);
 }
+
+/** Separately adopted fixed evaluation profiles; never additions to the historical section3 table. */
+export const connectedFixture105Domains = [
+  "fixture105-construction-observation-v1",
+  "fixture105-operation-v1",
+  "connected-fixture105-audit-stub-v1",
+  "fixture105-operation-identity-v1",
+] as const;
+export type ConnectedFixture105Domain =
+  (typeof connectedFixture105Domains)[number];
+export function connectedFixture105DomainHash(
+  domain: ConnectedFixture105Domain,
+  projection: unknown,
+): string {
+  if (!connectedFixture105Domains.includes(domain))
+    throw new TypeError("Unknown fixed fixture domain");
+  return domainHash(domain, projection);
+}

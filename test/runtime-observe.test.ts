@@ -1620,6 +1620,9 @@ new /* class */ Rejection /* call */ (
       "audit_only_untrusted_fixture",
       "central_question",
       "supporter_consequence",
+      "mode_unregistered",
+      "denominator_mismatch",
+      "fixture_mode_intent_forbidden",
     ]) {
       expect(KNOWN_OUTCOME_CODES.has(label)).toBe(false);
       const projected = projectEvent({

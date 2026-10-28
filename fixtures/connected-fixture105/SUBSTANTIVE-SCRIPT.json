@@ -1,0 +1,547 @@
+{
+  "brief_hash": "e49eb2ff86990cd5a439c68b236f99ba34f1294be02c568b635091f5b0f11a71",
+  "package_hash": "c60a91ac6383a791011f533d4b4d2dfd428b3dbe9e15b5113f4cd60ea03c539e",
+  "writing_policy_version": "writing-0.2.3",
+  "program_block_refs": [
+    "0f0d7326-2220-5975-b2b0-7022a8bd5d64",
+    "cb6719f5-a20c-5887-81cb-6a2678775348",
+    "2ba5580e-0aa6-5c80-9de2-046489ad942b",
+    "00c5e82f-23dd-5256-b269-0c997a32cc01",
+    "30f24830-b9d6-5190-b44e-1c0d5f43bb52",
+    "92b033a2-fa37-570a-8a7e-d4dd6504761c",
+    "8fa577b5-1249-5241-b128-f570d294e17f",
+    "ca5df371-5c0b-5561-aa79-96c81783cd06",
+    "19e5a737-f97d-5ea8-a636-0a834e956a80"
+  ],
+  "turns": [
+    {
+      "turn_id": "b713c939-6599-558f-8ca0-293c489ef431",
+      "semantic_turn_id": "estuary109_t01",
+      "sequence": 1,
+      "program_block_id": "0f0d7326-2220-5975-b2b0-7022a8bd5d64",
+      "participant_id": "nia_calder",
+      "spoken_text": "Imagine a touchline umbrella with a handle so large that nobody can grip it. That seems an ambitious way to stay dry."
+    },
+    {
+      "turn_id": "77c9bb8c-c050-5a3a-a753-6aeb64f0dded",
+      "semantic_turn_id": "estuary109_t02",
+      "sequence": 2,
+      "program_block_id": "0f0d7326-2220-5975-b2b0-7022a8bd5d64",
+      "participant_id": "jonah_reed",
+      "spoken_text": "I would choose the ordinary handle."
+    },
+    {
+      "turn_id": "438c7204-f679-5924-a7e1-55d1cfb1fe83",
+      "semantic_turn_id": "estuary109_t03",
+      "sequence": 3,
+      "program_block_id": "cb6719f5-a20c-5887-81cb-6a2678775348",
+      "participant_id": "mara_ives",
+      "spoken_text": "Back to Bellhaven Athletic. This is an entirely fictional football evaluation."
+    },
+    {
+      "turn_id": "a536ae43-cb72-5c09-8824-3b39518d7808",
+      "semantic_turn_id": "estuary109_t04",
+      "sequence": 4,
+      "program_block_id": "2ba5580e-0aa6-5c80-9de2-046489ad942b",
+      "participant_id": "mara_ives",
+      "spoken_text": "The fictional ledger records a Bellhaven Athletic win over Quartz Vale."
+    },
+    {
+      "turn_id": "d467bf6f-8b8c-5ccc-9f0e-1c815590bcab",
+      "semantic_turn_id": "estuary109_t05",
+      "sequence": 5,
+      "program_block_id": "2ba5580e-0aa6-5c80-9de2-046489ad942b",
+      "participant_id": "jonah_reed",
+      "spoken_text": "The fictional ledger records two late concessions in five selected completed cup matches. That window is a description, not a diagnosis."
+    },
+    {
+      "turn_id": "8675182b-de2a-5867-b76c-9f380c4cd881",
+      "semantic_turn_id": "estuary109_t06",
+      "sequence": 6,
+      "program_block_id": "00c5e82f-23dd-5256-b269-0c997a32cc01",
+      "participant_id": "mara_ives",
+      "spoken_text": "The fictional training note says 'Leave the centre covered.' The near midfielder is asked to stay central while a teammate contests the second ball."
+    },
+    {
+      "turn_id": "86b8a3cf-1846-55a8-81a1-bdc7acc5628a",
+      "semantic_turn_id": "estuary109_t07",
+      "sequence": 7,
+      "program_block_id": "00c5e82f-23dd-5256-b269-0c997a32cc01",
+      "participant_id": "jonah_reed",
+      "spoken_text": "The fictional ledger describes excerpt R: the near midfielder stays central; the opponent collects the loose ball but makes no central pass. In excerpt S, the midfielder moves towards the second ball and an opponent passes through the vacated lane."
+    },
+    {
+      "turn_id": "447646f8-c3f5-5314-92fc-e24b3109e200",
+      "semantic_turn_id": "estuary109_t08",
+      "sequence": 8,
+      "program_block_id": "00c5e82f-23dd-5256-b269-0c997a32cc01",
+      "participant_id": "nia_calder",
+      "spoken_text": "What can that comparison establish?"
+    },
+    {
+      "turn_id": "d894ba38-83d5-5520-8643-60fe6a8d5004",
+      "semantic_turn_id": "estuary109_t09",
+      "sequence": 9,
+      "program_block_id": "00c5e82f-23dd-5256-b269-0c997a32cc01",
+      "participant_id": "jonah_reed",
+      "spoken_text": "The fictional ledger gives us central cover in R and a vacated lane in S. The fictional training note asks for central cover. R illustrates compliance with that instruction and S illustrates departure, but these excerpts alone do not establish what caused either outcome."
+    },
+    {
+      "turn_id": "4e5bca49-4f14-5fcf-aaf2-290beb76b680",
+      "semantic_turn_id": "estuary109_t10",
+      "sequence": 10,
+      "program_block_id": "00c5e82f-23dd-5256-b269-0c997a32cc01",
+      "participant_id": "jonah_reed",
+      "spoken_text": "The fictional Estuary Analyst suggests fatigue could explain a late retreat. That remains a hypothesis, separate from the positioning comparison."
+    },
+    {
+      "turn_id": "0907d795-9b2e-5f20-a7d9-05d69ba9ab8d",
+      "semantic_turn_id": "estuary109_t11",
+      "sequence": 11,
+      "program_block_id": "30f24830-b9d6-5190-b44e-1c0d5f43bb52",
+      "participant_id": "mara_ives",
+      "spoken_text": "The fictional ledger therefore leaves us with a concrete difference in positioning, not a general explanation for the result."
+    },
+    {
+      "turn_id": "21e80720-0065-5fce-8a83-dd00a9d6a123",
+      "semantic_turn_id": "estuary109_t12",
+      "sequence": 12,
+      "program_block_id": "92b033a2-fa37-570a-8a7e-d4dd6504761c",
+      "participant_id": "nia_calder",
+      "spoken_text": "The fictional ledger records relief in the selected supporter notes, with worry about the final clearance in Pella's note. I can understand that mixed reaction without calling it a whole crowd speaking."
+    },
+    {
+      "turn_id": "dd73f9b4-942e-5161-92af-6f4099cd1a4d",
+      "semantic_turn_id": "estuary109_t13",
+      "sequence": 13,
+      "program_block_id": "92b033a2-fa37-570a-8a7e-d4dd6504761c",
+      "participant_id": "mara_ives",
+      "spoken_text": "The fictional pamphlet calls a hurried clearance 'a borrowed breath'."
+    },
+    {
+      "turn_id": "e6cca573-447c-5ff6-b8b9-761bb37e5b55",
+      "semantic_turn_id": "estuary109_t14",
+      "sequence": 14,
+      "program_block_id": "92b033a2-fa37-570a-8a7e-d4dd6504761c",
+      "participant_id": "jonah_reed",
+      "spoken_text": "A useful image; it is not a measurement."
+    },
+    {
+      "turn_id": "f342d253-ce5c-5df7-811e-720b7ea35b52",
+      "semantic_turn_id": "estuary109_t15",
+      "sequence": 15,
+      "program_block_id": "8fa577b5-1249-5241-b128-f570d294e17f",
+      "participant_id": "mara_ives",
+      "spoken_text": "The fictional ledger contrasts R, where the near midfielder stays central, with S, where that player follows the second ball and the lane is used. The fictional training note asks for central cover. Keep that specific contrast; the cause remains open."
+    },
+    {
+      "turn_id": "816814a5-4a68-5f7b-b43a-741b6cc6c905",
+      "semantic_turn_id": "estuary109_t16",
+      "sequence": 16,
+      "program_block_id": "ca5df371-5c0b-5561-aa79-96c81783cd06",
+      "participant_id": "mara_ives",
+      "spoken_text": "If a later fictional instruction asks for central cover, I expect checking that lane to be a useful first question."
+    },
+    {
+      "turn_id": "2bca30d0-d5c8-51f5-b5f9-6a1ad2a3b768",
+      "semantic_turn_id": "estuary109_t17",
+      "sequence": 17,
+      "program_block_id": "ca5df371-5c0b-5561-aa79-96c81783cd06",
+      "participant_id": "jonah_reed",
+      "spoken_text": "If a later fictional report proposes a cause, I expect the quality of its measurements to matter more than its confidence."
+    },
+    {
+      "turn_id": "5ccf9d97-8126-5f1d-94ee-4450209adcb4",
+      "semantic_turn_id": "estuary109_t18",
+      "sequence": 18,
+      "program_block_id": "ca5df371-5c0b-5561-aa79-96c81783cd06",
+      "participant_id": "nia_calder",
+      "spoken_text": "If a later fictional supporter note sounds relieved, I expect to keep reading for whatever concern accompanies it."
+    },
+    {
+      "turn_id": "582098ee-03ed-507d-9ae5-fb41738dac7e",
+      "semantic_turn_id": "estuary109_t19",
+      "sequence": 19,
+      "program_block_id": "19e5a737-f97d-5ea8-a636-0a834e956a80",
+      "participant_id": "mara_ives",
+      "spoken_text": "That closes this fictional discussion. No real match or performed timing has been established."
+    }
+  ],
+  "turn_claim_uses": [
+    {
+      "turn_id": "a536ae43-cb72-5c09-8824-3b39518d7808",
+      "claim_id": "a50f7424-47ba-559a-a0de-f011fe3784b1",
+      "use_mode": "attributed",
+      "span_start": 0,
+      "span_end": 71,
+      "claim_state_hash": "0830c994d42d989b180059ab410f0c4301408e8b6438969b29988df84f6fc127",
+      "semantic_turn_id": "estuary109_t04",
+      "turn_claim_use_id": "0aaa17a0-0784-5775-8d4e-94cfea4e7831"
+    },
+    {
+      "turn_id": "d467bf6f-8b8c-5ccc-9f0e-1c815590bcab",
+      "claim_id": "0ee3cc88-74c6-5815-8b18-b86772fee142",
+      "use_mode": "attributed",
+      "span_start": 0,
+      "span_end": 136,
+      "claim_state_hash": "56be73a107f845543dbeecc5253b019ea2db476271f3c6d09ea20434d0426949",
+      "semantic_turn_id": "estuary109_t05",
+      "turn_claim_use_id": "90f9df05-1a05-5a70-868f-c2178d111e78"
+    },
+    {
+      "turn_id": "8675182b-de2a-5867-b76c-9f380c4cd881",
+      "claim_id": "9d40e3c5-e145-5bc1-ad1c-55ce09dd66c7",
+      "use_mode": "attributed",
+      "span_start": 0,
+      "span_end": 148,
+      "claim_state_hash": "f43a4b9a4e1988d6fb4581211d0f4a1d38b8b5bd00a3d770000858b2ef5ba653",
+      "semantic_turn_id": "estuary109_t06",
+      "turn_claim_use_id": "5ebf8382-35ed-57f2-95a3-3736b763c856"
+    },
+    {
+      "turn_id": "86b8a3cf-1846-55a8-81a1-bdc7acc5628a",
+      "claim_id": "af00a068-d5ba-52e7-83bf-ebb583588b42",
+      "use_mode": "attributed",
+      "span_start": 0,
+      "span_end": 248,
+      "claim_state_hash": "31522d4cf09ff61b349f40e5c3dddf5d73e5f6335caf6bdc121565c10d3e4d0b",
+      "semantic_turn_id": "estuary109_t07",
+      "turn_claim_use_id": "332d1010-0939-526e-8262-497774d99612"
+    },
+    {
+      "turn_id": "86b8a3cf-1846-55a8-81a1-bdc7acc5628a",
+      "claim_id": "a5807836-8468-5b76-9467-4785cdf3b6c0",
+      "use_mode": "attributed",
+      "span_start": 0,
+      "span_end": 248,
+      "claim_state_hash": "b76cc0b9bb12b8dcb4626c93e6f40b2f90c47b858f0f2306d29c73274efbcd95",
+      "semantic_turn_id": "estuary109_t07",
+      "turn_claim_use_id": "fb5ee997-57a4-54c1-90b1-32d6eb6c547a"
+    },
+    {
+      "turn_id": "d894ba38-83d5-5520-8643-60fe6a8d5004",
+      "claim_id": "9d40e3c5-e145-5bc1-ad1c-55ce09dd66c7",
+      "use_mode": "attributed",
+      "span_start": 74,
+      "span_end": 125,
+      "claim_state_hash": "f43a4b9a4e1988d6fb4581211d0f4a1d38b8b5bd00a3d770000858b2ef5ba653",
+      "semantic_turn_id": "estuary109_t09",
+      "turn_claim_use_id": "d214b594-3e08-5f0c-b60a-89c247ae9f3e"
+    },
+    {
+      "turn_id": "d894ba38-83d5-5520-8643-60fe6a8d5004",
+      "claim_id": "af00a068-d5ba-52e7-83bf-ebb583588b42",
+      "use_mode": "attributed",
+      "span_start": 0,
+      "span_end": 271,
+      "claim_state_hash": "31522d4cf09ff61b349f40e5c3dddf5d73e5f6335caf6bdc121565c10d3e4d0b",
+      "semantic_turn_id": "estuary109_t09",
+      "turn_claim_use_id": "24b4c8d8-8520-5825-8d87-446515ea3efe"
+    },
+    {
+      "turn_id": "d894ba38-83d5-5520-8643-60fe6a8d5004",
+      "claim_id": "a5807836-8468-5b76-9467-4785cdf3b6c0",
+      "use_mode": "attributed",
+      "span_start": 0,
+      "span_end": 271,
+      "claim_state_hash": "b76cc0b9bb12b8dcb4626c93e6f40b2f90c47b858f0f2306d29c73274efbcd95",
+      "semantic_turn_id": "estuary109_t09",
+      "turn_claim_use_id": "f29ca737-2fb5-544e-a678-0e4a9d992ac9"
+    },
+    {
+      "turn_id": "4e5bca49-4f14-5fcf-aaf2-290beb76b680",
+      "claim_id": "6cd06f82-a9ad-5e46-8e52-b16e7d44b998",
+      "use_mode": "hedged",
+      "span_start": 0,
+      "span_end": 145,
+      "claim_state_hash": "23cc23380675247c56837f4ec9fa59c3713c191894407f1dcb8c7acd6c713789",
+      "semantic_turn_id": "estuary109_t10",
+      "turn_claim_use_id": "82a5acdb-33af-5b79-a59c-caa6d1a412fe"
+    },
+    {
+      "turn_id": "0907d795-9b2e-5f20-a7d9-05d69ba9ab8d",
+      "claim_id": "af00a068-d5ba-52e7-83bf-ebb583588b42",
+      "use_mode": "attributed",
+      "span_start": 0,
+      "span_end": 125,
+      "claim_state_hash": "31522d4cf09ff61b349f40e5c3dddf5d73e5f6335caf6bdc121565c10d3e4d0b",
+      "semantic_turn_id": "estuary109_t11",
+      "turn_claim_use_id": "e892671f-0382-59aa-9517-164af801c164"
+    },
+    {
+      "turn_id": "0907d795-9b2e-5f20-a7d9-05d69ba9ab8d",
+      "claim_id": "a5807836-8468-5b76-9467-4785cdf3b6c0",
+      "use_mode": "attributed",
+      "span_start": 0,
+      "span_end": 125,
+      "claim_state_hash": "b76cc0b9bb12b8dcb4626c93e6f40b2f90c47b858f0f2306d29c73274efbcd95",
+      "semantic_turn_id": "estuary109_t11",
+      "turn_claim_use_id": "108a96fc-fd15-5968-ba9b-cf280c7f350d"
+    },
+    {
+      "turn_id": "21e80720-0065-5fce-8a83-dd00a9d6a123",
+      "claim_id": "acf27cee-53eb-5fbd-a67b-114f94ca795d",
+      "use_mode": "attributed",
+      "span_start": 0,
+      "span_end": 202,
+      "claim_state_hash": "b7e909a68d7c9f3037494be3f06f89877b97feb85bde12d25a5be375a7859c50",
+      "semantic_turn_id": "estuary109_t12",
+      "turn_claim_use_id": "ac6e867a-4a8d-540e-b95c-71d2cefb854e"
+    },
+    {
+      "turn_id": "dd73f9b4-942e-5161-92af-6f4099cd1a4d",
+      "claim_id": "13280589-4ad9-5109-9f1f-d7d4d6079116",
+      "use_mode": "attributed",
+      "span_start": 0,
+      "span_end": 69,
+      "claim_state_hash": "aada891798a442480794b27727254d2a0549f4ccdafdd0ddc95a3e8c75fa3c4e",
+      "semantic_turn_id": "estuary109_t13",
+      "turn_claim_use_id": "8ea9838c-b627-5cbf-b324-2b44102e9c99"
+    },
+    {
+      "turn_id": "f342d253-ce5c-5df7-811e-720b7ea35b52",
+      "claim_id": "9d40e3c5-e145-5bc1-ad1c-55ce09dd66c7",
+      "use_mode": "attributed",
+      "span_start": 147,
+      "span_end": 198,
+      "claim_state_hash": "f43a4b9a4e1988d6fb4581211d0f4a1d38b8b5bd00a3d770000858b2ef5ba653",
+      "semantic_turn_id": "estuary109_t15",
+      "turn_claim_use_id": "ad4c79bd-d7af-5f7a-94bf-eb8225cf6c22"
+    },
+    {
+      "turn_id": "f342d253-ce5c-5df7-811e-720b7ea35b52",
+      "claim_id": "af00a068-d5ba-52e7-83bf-ebb583588b42",
+      "use_mode": "attributed",
+      "span_start": 0,
+      "span_end": 251,
+      "claim_state_hash": "31522d4cf09ff61b349f40e5c3dddf5d73e5f6335caf6bdc121565c10d3e4d0b",
+      "semantic_turn_id": "estuary109_t15",
+      "turn_claim_use_id": "27fb7a00-f441-5d28-91cf-6ddefe9eba29"
+    },
+    {
+      "turn_id": "f342d253-ce5c-5df7-811e-720b7ea35b52",
+      "claim_id": "a5807836-8468-5b76-9467-4785cdf3b6c0",
+      "use_mode": "attributed",
+      "span_start": 0,
+      "span_end": 251,
+      "claim_state_hash": "b76cc0b9bb12b8dcb4626c93e6f40b2f90c47b858f0f2306d29c73274efbcd95",
+      "semantic_turn_id": "estuary109_t15",
+      "turn_claim_use_id": "d8d9e5b3-077c-5c37-a797-f4ae53ff5f6c"
+    }
+  ],
+  "turn_evidence_uses": [
+    {
+      "turn_id": "a536ae43-cb72-5c09-8824-3b39518d7808",
+      "evidence_unit_id": "da25102a-f352-5601-b3b5-f76b77dd8590",
+      "use_mode": "paraphrased",
+      "span_start": 0,
+      "span_end": 71,
+      "rights_policy_version": "0e7f75a6-e7f2-5414-8e6a-b35e9ded3444",
+      "semantic_turn_id": "estuary109_t04",
+      "turn_evidence_use_id": "0102bfd5-7e1a-5dfa-a47f-6e32c189f756"
+    },
+    {
+      "turn_id": "8675182b-de2a-5867-b76c-9f380c4cd881",
+      "evidence_unit_id": "9d8b96b4-5089-5d5e-9259-0d576551271b",
+      "use_mode": "paraphrased",
+      "span_start": 0,
+      "span_end": 33,
+      "rights_policy_version": "0e7f75a6-e7f2-5414-8e6a-b35e9ded3444",
+      "semantic_turn_id": "estuary109_t06",
+      "turn_evidence_use_id": "8d7527cf-ec8a-570e-8e9e-3f503abc6beb"
+    },
+    {
+      "turn_id": "8675182b-de2a-5867-b76c-9f380c4cd881",
+      "evidence_unit_id": "9d8b96b4-5089-5d5e-9259-0d576551271b",
+      "use_mode": "paraphrased",
+      "span_start": 61,
+      "span_end": 148,
+      "rights_policy_version": "0e7f75a6-e7f2-5414-8e6a-b35e9ded3444",
+      "semantic_turn_id": "estuary109_t06",
+      "turn_evidence_use_id": "4d3fdcc4-d023-55ce-8235-2d8a948d2b57"
+    },
+    {
+      "turn_id": "8675182b-de2a-5867-b76c-9f380c4cd881",
+      "evidence_unit_id": "9d8b96b4-5089-5d5e-9259-0d576551271b",
+      "use_mode": "quoted",
+      "span_start": 33,
+      "span_end": 60,
+      "rights_policy_version": "0e7f75a6-e7f2-5414-8e6a-b35e9ded3444",
+      "semantic_turn_id": "estuary109_t06",
+      "turn_evidence_use_id": "8090a021-7fa4-5c4a-a516-31cf8c1be242"
+    },
+    {
+      "turn_id": "86b8a3cf-1846-55a8-81a1-bdc7acc5628a",
+      "evidence_unit_id": "bdfa859a-f7f1-5aec-88b0-d98ca1982fc2",
+      "use_mode": "paraphrased",
+      "span_start": 0,
+      "span_end": 248,
+      "rights_policy_version": "0e7f75a6-e7f2-5414-8e6a-b35e9ded3444",
+      "semantic_turn_id": "estuary109_t07",
+      "turn_evidence_use_id": "9408714d-4b06-5ef2-934d-592da4bc5f7b"
+    },
+    {
+      "turn_id": "86b8a3cf-1846-55a8-81a1-bdc7acc5628a",
+      "evidence_unit_id": "097a46c4-a115-5650-badb-324b7e9fc15b",
+      "use_mode": "paraphrased",
+      "span_start": 0,
+      "span_end": 248,
+      "rights_policy_version": "0e7f75a6-e7f2-5414-8e6a-b35e9ded3444",
+      "semantic_turn_id": "estuary109_t07",
+      "turn_evidence_use_id": "38c3ab23-25b2-5071-8579-8ade7b8511da"
+    },
+    {
+      "turn_id": "d894ba38-83d5-5520-8643-60fe6a8d5004",
+      "evidence_unit_id": "9d8b96b4-5089-5d5e-9259-0d576551271b",
+      "use_mode": "paraphrased",
+      "span_start": 74,
+      "span_end": 125,
+      "rights_policy_version": "0e7f75a6-e7f2-5414-8e6a-b35e9ded3444",
+      "semantic_turn_id": "estuary109_t09",
+      "turn_evidence_use_id": "3a81c962-79a4-5ee7-9df6-2fb4ac54dcd6"
+    },
+    {
+      "turn_id": "d894ba38-83d5-5520-8643-60fe6a8d5004",
+      "evidence_unit_id": "bdfa859a-f7f1-5aec-88b0-d98ca1982fc2",
+      "use_mode": "paraphrased",
+      "span_start": 0,
+      "span_end": 271,
+      "rights_policy_version": "0e7f75a6-e7f2-5414-8e6a-b35e9ded3444",
+      "semantic_turn_id": "estuary109_t09",
+      "turn_evidence_use_id": "94878e3d-a965-5fc4-a71a-1f4d88c9d865"
+    },
+    {
+      "turn_id": "d894ba38-83d5-5520-8643-60fe6a8d5004",
+      "evidence_unit_id": "097a46c4-a115-5650-badb-324b7e9fc15b",
+      "use_mode": "paraphrased",
+      "span_start": 0,
+      "span_end": 271,
+      "rights_policy_version": "0e7f75a6-e7f2-5414-8e6a-b35e9ded3444",
+      "semantic_turn_id": "estuary109_t09",
+      "turn_evidence_use_id": "c5b382a1-15ee-5837-aa6c-2a5cf4723969"
+    },
+    {
+      "turn_id": "4e5bca49-4f14-5fcf-aaf2-290beb76b680",
+      "evidence_unit_id": "e82736cb-4702-56a5-9fb7-ac8c9629ab81",
+      "use_mode": "paraphrased",
+      "span_start": 0,
+      "span_end": 145,
+      "rights_policy_version": "0e7f75a6-e7f2-5414-8e6a-b35e9ded3444",
+      "semantic_turn_id": "estuary109_t10",
+      "turn_evidence_use_id": "61ad5f1d-86c8-532f-a4ff-09053d08c638"
+    },
+    {
+      "turn_id": "0907d795-9b2e-5f20-a7d9-05d69ba9ab8d",
+      "evidence_unit_id": "bdfa859a-f7f1-5aec-88b0-d98ca1982fc2",
+      "use_mode": "paraphrased",
+      "span_start": 0,
+      "span_end": 125,
+      "rights_policy_version": "0e7f75a6-e7f2-5414-8e6a-b35e9ded3444",
+      "semantic_turn_id": "estuary109_t11",
+      "turn_evidence_use_id": "e5bd1db9-60c4-53da-a7fa-e369271f1dfb"
+    },
+    {
+      "turn_id": "0907d795-9b2e-5f20-a7d9-05d69ba9ab8d",
+      "evidence_unit_id": "097a46c4-a115-5650-badb-324b7e9fc15b",
+      "use_mode": "paraphrased",
+      "span_start": 0,
+      "span_end": 125,
+      "rights_policy_version": "0e7f75a6-e7f2-5414-8e6a-b35e9ded3444",
+      "semantic_turn_id": "estuary109_t11",
+      "turn_evidence_use_id": "ed10ecec-0fab-58be-b026-85b1892ec562"
+    },
+    {
+      "turn_id": "21e80720-0065-5fce-8a83-dd00a9d6a123",
+      "evidence_unit_id": "ae3ba8e4-5657-586b-9bb9-84dce9fbd198",
+      "use_mode": "paraphrased",
+      "span_start": 0,
+      "span_end": 202,
+      "rights_policy_version": "0e7f75a6-e7f2-5414-8e6a-b35e9ded3444",
+      "semantic_turn_id": "estuary109_t12",
+      "turn_evidence_use_id": "8112663d-bc22-5436-b33b-6bf361b4ebc7"
+    },
+    {
+      "turn_id": "dd73f9b4-942e-5161-92af-6f4099cd1a4d",
+      "evidence_unit_id": "03fc1029-4eda-5556-87b1-62056f1c53e8",
+      "use_mode": "paraphrased",
+      "span_start": 0,
+      "span_end": 49,
+      "rights_policy_version": "0e7f75a6-e7f2-5414-8e6a-b35e9ded3444",
+      "semantic_turn_id": "estuary109_t13",
+      "turn_evidence_use_id": "c281a231-b9a2-51bb-9fb1-d6fcaad2ccdd"
+    },
+    {
+      "turn_id": "dd73f9b4-942e-5161-92af-6f4099cd1a4d",
+      "evidence_unit_id": "03fc1029-4eda-5556-87b1-62056f1c53e8",
+      "use_mode": "quoted",
+      "span_start": 49,
+      "span_end": 68,
+      "rights_policy_version": "0e7f75a6-e7f2-5414-8e6a-b35e9ded3444",
+      "semantic_turn_id": "estuary109_t13",
+      "turn_evidence_use_id": "95bcc52f-9215-510a-89d6-889dca1348b8"
+    },
+    {
+      "turn_id": "f342d253-ce5c-5df7-811e-720b7ea35b52",
+      "evidence_unit_id": "9d8b96b4-5089-5d5e-9259-0d576551271b",
+      "use_mode": "paraphrased",
+      "span_start": 147,
+      "span_end": 198,
+      "rights_policy_version": "0e7f75a6-e7f2-5414-8e6a-b35e9ded3444",
+      "semantic_turn_id": "estuary109_t15",
+      "turn_evidence_use_id": "59fb0f13-e358-5448-987b-f612a03aef44"
+    },
+    {
+      "turn_id": "f342d253-ce5c-5df7-811e-720b7ea35b52",
+      "evidence_unit_id": "bdfa859a-f7f1-5aec-88b0-d98ca1982fc2",
+      "use_mode": "paraphrased",
+      "span_start": 0,
+      "span_end": 251,
+      "rights_policy_version": "0e7f75a6-e7f2-5414-8e6a-b35e9ded3444",
+      "semantic_turn_id": "estuary109_t15",
+      "turn_evidence_use_id": "bafb5ad9-d1d5-509b-941e-7a9179f02a4c"
+    },
+    {
+      "turn_id": "f342d253-ce5c-5df7-811e-720b7ea35b52",
+      "evidence_unit_id": "097a46c4-a115-5650-badb-324b7e9fc15b",
+      "use_mode": "paraphrased",
+      "span_start": 0,
+      "span_end": 251,
+      "rights_policy_version": "0e7f75a6-e7f2-5414-8e6a-b35e9ded3444",
+      "semantic_turn_id": "estuary109_t15",
+      "turn_evidence_use_id": "2596a725-7b2e-5626-b0fd-4ccf9fa41267"
+    }
+  ],
+  "prediction_candidates": [
+    {
+      "prediction_candidate_id": "estuary109_prediction_mara_ives",
+      "turn_id": "816814a5-4a68-5f7b-b43a-741b6cc6c905",
+      "participant_id": "mara_ives",
+      "prediction_text": "If a later fictional instruction asks for central cover, I expect checking that lane to be a useful first question.",
+      "horizon": "next fictional evaluation, if any",
+      "topic_thread_id": "fixture109-central-cover"
+    },
+    {
+      "prediction_candidate_id": "estuary109_prediction_jonah_reed",
+      "turn_id": "2bca30d0-d5c8-51f5-b5f9-6a1ad2a3b768",
+      "participant_id": "jonah_reed",
+      "prediction_text": "If a later fictional report proposes a cause, I expect the quality of its measurements to matter more than its confidence.",
+      "horizon": "next fictional evaluation, if any",
+      "topic_thread_id": "fixture109-central-cover"
+    },
+    {
+      "prediction_candidate_id": "estuary109_prediction_nia_calder",
+      "turn_id": "5ccf9d97-8126-5f1d-94ee-4450209adcb4",
+      "participant_id": "nia_calder",
+      "prediction_text": "If a later fictional supporter note sounds relieved, I expect to keep reading for whatever concern accompanies it.",
+      "horizon": "next fictional evaluation, if any",
+      "topic_thread_id": "fixture109-central-cover"
+    }
+  ],
+  "script_hash": "ced37e3db0c2511d4f1cfb8d913f66e223cd103adf9087ae809b30511de7a116",
+  "script_version_id": "5120be00-4908-5e55-8ea5-d28aab5947bf",
+  "artifact_id": "74a11a88-6adc-53d7-92ea-6e559c367776",
+  "revision_parent_id": null,
+  "purpose": "evaluation",
+  "script_phase": "substantive_fixture",
+  "revision_reason": "new_authored_fixture"
+}

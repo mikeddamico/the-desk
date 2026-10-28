@@ -1,0 +1,98 @@
+[
+  {
+    "id": "T01",
+    "step": 1,
+    "mutation": "delete child.schema from the separately fixed specimen carrier",
+    "expected": "texture invalid shape; grammar first"
+  },
+  {
+    "id": "T02",
+    "step": 2,
+    "mutation": "replace an unprotected alphabetic token in child turn2 with decomposed e+combining acute; retain valid string/shape",
+    "expected": "texture_text_not_nfc before subject or rewrite checks"
+  },
+  {
+    "id": "T03",
+    "step": 3,
+    "mutation": "child.parent_script_hash to another valid SHA256; retain exact shape/NFC",
+    "expected": "texture_subject_mismatch parent_script_hash"
+  },
+  {
+    "id": "T04",
+    "step": 4,
+    "mutation": "swap child turn2 participant to another existing roster member",
+    "expected": "texture_protected_content_changed turn_structure"
+  },
+  {
+    "id": "T05",
+    "step": 5,
+    "mutation": "also change unprotected turn1 text, retaining structure/NFC/subject",
+    "expected": "texture_scope_exceeded turn_scope"
+  },
+  {
+    "id": "T06",
+    "step": 6,
+    "mutation": "remove first ordered claim use; preserve turns/changed anchors",
+    "expected": "texture_protected_content_changed claim_use"
+  },
+  {
+    "id": "T07",
+    "step": 7,
+    "mutation": "set first child claim use span_end beyond its turn length, retain all use identity/count fields",
+    "expected": "texture_span_out_of_range"
+  },
+  {
+    "id": "T08",
+    "step": 8,
+    "mutation": "shift first child claim span_start by one while remaining in bounds",
+    "expected": "texture_protected_content_changed use_span_text"
+  },
+  {
+    "id": "T09",
+    "step": 9,
+    "mutation": "append numeric token 9 to the unprotected changed turn2; preserve all protected spans/earlier predicates",
+    "expected": "texture_protected_content_changed numeric token field"
+  },
+  {
+    "id": "T10",
+    "step": 10,
+    "mutation": "change only first prediction horizon to another nonblank literal",
+    "expected": "texture_protected_content_changed prediction"
+  },
+  {
+    "id": "T11",
+    "step": 11,
+    "mutation": "separate fixed negative fixture binds new synthetic original \"I'd choose the ordinary handle.\"; original array is not caller-supplied production input",
+    "expected": "texture_withheld_text_relocated specimen; all earlier predicates unchanged"
+  },
+  {
+    "id": "T12",
+    "step": 12,
+    "mutation": "child turn2 \"I would choose an ordinary handle.\"; same changed anchor and token classes; no protected spans there",
+    "expected": "texture_protected_content_changed rewrite_row"
+  },
+  {
+    "id": "T13",
+    "step": "fixed binding",
+    "mutation": "substitute ordered rewrite table or changed-anchor profile while using valid subject",
+    "expected": "refuse fixed profile binding, never expose table-taking API"
+  },
+  {
+    "id": "T14",
+    "step": 12,
+    "mutation": "fixed negative parent/child pair has missing old fragment or duplicate old fragment in unprotected changed turn2; independently rebind subject hashes and preserve predicates1-11",
+    "expected": "exact-once rewrite refusal; not a cheap parent-hash failure"
+  },
+  {
+    "id": "T15",
+    "step": "priority",
+    "mutation": "combine missing schema with non-NFC; combine out-of-range span with wrong protected text; combine numeric token change with prediction change",
+    "expected": "steps1,7,9 respectively; no later predicate masks first error"
+  },
+  {
+    "id": "T16",
+    "step": "parity",
+    "mutation": "run retained historical positive and each historical negative in owner test inventory without altered expectations; exact list pinned at source-review gate",
+    "expected": "old entrypoint outcomes/detail fields unchanged; no old fixture content copied into new public fixture"
+  }
+]

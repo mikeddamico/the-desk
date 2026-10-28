@@ -1,0 +1,65 @@
+[
+  {
+    "claim_id": "a50f7424-47ba-559a-a0de-f011fe3784b1",
+    "frozen_ceiling": "assertable",
+    "current_ceiling": "assertable",
+    "rights_version_id": "0e7f75a6-e7f2-5414-8e6a-b35e9ded3444",
+    "basis": "fixture109 source-specific admitted usage; no inferred general rights-to-status mapping"
+  },
+  {
+    "claim_id": "9d40e3c5-e145-5bc1-ad1c-55ce09dd66c7",
+    "frozen_ceiling": "assertable",
+    "current_ceiling": "assertable",
+    "rights_version_id": "0e7f75a6-e7f2-5414-8e6a-b35e9ded3444",
+    "basis": "fixture109 source-specific admitted usage; no inferred general rights-to-status mapping"
+  },
+  {
+    "claim_id": "6cd06f82-a9ad-5e46-8e52-b16e7d44b998",
+    "frozen_ceiling": "hedged_only",
+    "current_ceiling": "hedged_only",
+    "rights_version_id": "0e7f75a6-e7f2-5414-8e6a-b35e9ded3444",
+    "basis": "fixture109 source-specific admitted usage; no inferred general rights-to-status mapping"
+  },
+  {
+    "claim_id": "acf27cee-53eb-5fbd-a67b-114f94ca795d",
+    "frozen_ceiling": "assertable",
+    "current_ceiling": "assertable",
+    "rights_version_id": "0e7f75a6-e7f2-5414-8e6a-b35e9ded3444",
+    "basis": "fixture109 source-specific admitted usage; no inferred general rights-to-status mapping"
+  },
+  {
+    "claim_id": "13280589-4ad9-5109-9f1f-d7d4d6079116",
+    "frozen_ceiling": "assertable",
+    "current_ceiling": "assertable",
+    "rights_version_id": "0e7f75a6-e7f2-5414-8e6a-b35e9ded3444",
+    "basis": "fixture109 source-specific admitted usage; no inferred general rights-to-status mapping"
+  },
+  {
+    "claim_id": "0ee3cc88-74c6-5815-8b18-b86772fee142",
+    "frozen_ceiling": "assertable",
+    "current_ceiling": "assertable",
+    "rights_version_id": "0e7f75a6-e7f2-5414-8e6a-b35e9ded3444",
+    "basis": "fixture109 source-specific admitted usage; no inferred general rights-to-status mapping"
+  },
+  {
+    "claim_id": "af00a068-d5ba-52e7-83bf-ebb583588b42",
+    "frozen_ceiling": "assertable",
+    "current_ceiling": "assertable",
+    "rights_version_id": "0e7f75a6-e7f2-5414-8e6a-b35e9ded3444",
+    "basis": "fixture109 source-specific admitted usage; no inferred general rights-to-status mapping"
+  },
+  {
+    "claim_id": "a5807836-8468-5b76-9467-4785cdf3b6c0",
+    "frozen_ceiling": "assertable",
+    "current_ceiling": "assertable",
+    "rights_version_id": "0e7f75a6-e7f2-5414-8e6a-b35e9ded3444",
+    "basis": "fixture109 source-specific admitted usage; no inferred general rights-to-status mapping"
+  },
+  {
+    "claim_id": "46050fc9-ec1b-5e5f-9346-2be287d6a5cc",
+    "frozen_ceiling": "silent",
+    "current_ceiling": "silent",
+    "rights_version_id": "0e7f75a6-e7f2-5414-8e6a-b35e9ded3444",
+    "basis": "fixture109 source-specific admitted usage; no inferred general rights-to-status mapping"
+  }
+]

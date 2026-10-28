@@ -31,6 +31,12 @@ case "$STAGE" in
   all) CEILING=7200 ;;
   *) echo "unknown stage" >&2; exit 64 ;;
 esac
+case "${DESK_CI_PARTITION:-}" in
+  writer|rest) ;;
+  *) echo "explicit writer/rest partition required" >&2; exit 64 ;;
+esac
+PROFILE=$STAGE
+if [ "$STAGE" = all ]; then PROFILE=$DESK_CI_PARTITION; fi
 KILL_AFTER=20          # seconds after TERM before KILL
 CAP_KIB=65536          # bash 'ulimit -f' unit is 1024-byte blocks (bash default mode): 65536 KiB
 CAP_BYTES=67108864     # 64 MiB; verified below against the kernel's own byte-denominated record
@@ -45,12 +51,13 @@ NODE_EXE=$(command -v node) || { echo "node is not on PATH" >&2; exit 70; }
 NODE_BIN=$(dirname "$NODE_EXE")
 case "$NODE_BIN" in /*) ;; *) echo "node path must be absolute" >&2; exit 70 ;; esac
 [ -x /usr/bin/python3 ] && [ -x /usr/bin/timeout ] && [ -x /usr/bin/env ] && [ -x /bin/bash ] || { echo "required system tools missing" >&2; exit 70; }
-if [ "$STAGE" = all ]; then
-  [ -n "${TEST_DATABASE_URL:-}" ] || { echo "TEST_DATABASE_URL is required for stage all" >&2; exit 71; }
+if [ "$STAGE" = all ] && [ "$DESK_CI_PARTITION" = rest ]; then
+  [ -n "${TEST_DATABASE_URL:-}" ] || { echo "TEST_DATABASE_URL is required for rest aggregate" >&2; exit 71; }
 fi
 
 # Gate: source/database binding and the predecessor verdict must already be recorded as passing.
 /usr/bin/python3 -I -B "$HERE/ci.py" precheck "$STAGE" || exit 72
+FIXTURE_BINDING=$(/usr/bin/python3 -I -B "$HERE/ci.py" fixture-binding "$STAGE") || exit 72
 mkdir -m 700 "$STAGE_DIR" || exit 73
 
 fail_prelaunch() {
@@ -99,7 +106,7 @@ fi
 # The child shell: read one line from the pipe, export it only for stage all, then exec the timeout-wrapped guard
 # with stdin from /dev/null. Single-quoted on purpose: $1/$2 are the child's positional parameters.
 CHILD='IFS= read -r DB_LINE || DB_LINE=""
-if [ "$1" = all ]; then
+if [ "$1" = rest ]; then
   [ -n "$DB_LINE" ] || exit 75
   export TEST_DATABASE_URL="$DB_LINE"
 fi
@@ -108,12 +115,12 @@ exec /usr/bin/timeout --signal=TERM --kill-after=20 "$2" /usr/bin/python3 test/s
 
 cd "$ROOT" || fail_prelaunch "cd"
 # Sanitized environment: nothing is inherited except what is listed (RUNNER_TRACKING_ID is preserved).
-if [ "$STAGE" = all ]; then DB_FEED=$TEST_DATABASE_URL; else DB_FEED=""; fi
+if [ "$PROFILE" = rest ]; then DB_FEED=$TEST_DATABASE_URL; else DB_FEED=""; fi
 printf '%s\n' "$DB_FEED" | /usr/bin/env -i \
   PATH="$NODE_BIN:/usr/bin:/bin" HOME="$CI_DIR/home" TMPDIR="$CI_DIR/tmp" \
-  LANG=C.UTF-8 LC_ALL=C.UTF-8 TZ=UTC CI=true \
+  LANG=C.UTF-8 LC_ALL=C.UTF-8 TZ=UTC CI=true DESK_FIXTURE105_BINDING="$FIXTURE_BINDING" \
   "${RUNNER_ID_ARG[@]+"${RUNNER_ID_ARG[@]}"}" \
-  /bin/bash -c "$CHILD" _ "$STAGE" "$CEILING" \
+  /bin/bash -c "$CHILD" _ "$PROFILE" "$CEILING" \
   > "$STAGE_DIR/stdout" 2> "$STAGE_DIR/stderr"
 RC=$?
 DB_FEED=""

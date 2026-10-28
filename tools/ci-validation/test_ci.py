@@ -11,7 +11,7 @@ reach the probe replaces subprocess.run (and shutil.which) with a mock, so Node 
 the repository tree. Tests that need a checkout build a
 synthetic one under a temporary directory and patch ci.ROOT / ci.tracked_files only inside mock contexts.
 
-Pinned fail-closed rules: aggregate 76 files / 8,468 tests and all 28 integration files, each selected file exactly once
+Pinned fail-closed rules: aggregate 78 files / 8,559 tests and all 29 integration files, each selected file exactly once
 with no failed/skipped/todo test, a changed tracked-test inventory, a missing or foreign TEST_DATABASE_URL, a database
 that is not PostgreSQL 17 / the_desk_test / superuser, skipped integration files, root dist output accepted only when it
 is the unchanged build output (added, modified, empty, absent, symlinked or pre-existing dist and any tracked drift,
@@ -24,6 +24,7 @@ import contextlib
 import io
 import json
 import os
+import re
 import sys
 import tempfile
 import unittest
@@ -40,12 +41,15 @@ TRACKED = sorted(
     + ['test/root%02d.test.ts' % i for i in range(35)]
     + ['test/unit/unit%02d.test.ts' % i for i in range(13)] + [ci.HARNESS_TEST]
     + ['test/integration/int%02d.test.ts' % i for i in range(28)])
+OLD_TESTS, OLD_SELECTED = ci.expected_all_files(TRACKED)
+TRACKED = sorted(TRACKED + list(ci.FIXTURE_CONNECTED_COUNTS))
 TESTS, SELECTED = ci.expected_all_files(TRACKED)
 INTEGRATION = [n for n in SELECTED if n.startswith('test/integration/')]
 URL = 'postgresql://postgres:postgres@localhost:5432/the_desk_test'
 NONCES = {'focused': ('a' * 48, 'b' * 48), 'all': ('c' * 48,)}
 ATTEMPTS = {'prerequisite': 'attempt-p', 'focused': 'attempt-f', 'all': 'attempt-3'}
-PER_FILE = {n: 8468 // 76 + (1 if i < 8468 % 76 else 0) for i, n in enumerate(SELECTED)}
+PER_FILE = {n: 8468 // 76 + (1 if i < 8468 % 76 else 0) for i, n in enumerate(OLD_SELECTED)}
+PER_FILE.update(ci.FIXTURE_CONNECTED_COUNTS)
 
 
 def file_lines(counts=None, extra=''):
@@ -55,7 +59,7 @@ def file_lines(counts=None, extra=''):
 
 SUMMARY = {
     'focused': ' Test Files  1 passed (1)\n      Tests  2 passed (2)\n',
-    'all': ' Test Files  76 passed (76)\n      Tests  8468 passed (8468)\n',
+    'all': ' Test Files  78 passed (78)\n      Tests  8559 passed (8559)\n',
 }
 
 
@@ -174,12 +178,13 @@ def build_full(tmp, stages=ci.STAGES):
 
 
 def collect(tmp, scope, env=None):
-    with mock.patch.dict(os.environ, {'RUNNER_TEMP': tmp, **(env or {})}), contextlib.redirect_stdout(io.StringIO()):
+    # Historical retention controls isolate the new seam; Fixture105Tooling exercises it directly.
+    with mock.patch.object(ci, 'fixture_collect', return_value=None), mock.patch.dict(os.environ, {'RUNNER_TEMP': tmp, **(env or {})}), contextlib.redirect_stdout(io.StringIO()):
         ci.cmd_collect(scope)
     return json.loads((Path(tmp) / 'ci' / ('upload-' + scope) / 'final.json').read_text())
 
 
-OK_OUTCOMES = {'CONTROLS_UPLOAD_OUTCOME': 'success', 'UPLOAD_OUTCOME': 'success', 'AUDIT_OUTCOME': 'success',
+OK_OUTCOMES = {'CONTROLS_UPLOAD_OUTCOME': 'success', 'UPLOAD_OUTCOME': 'success', 'AUDIT_OUTCOME': 'success', 'SECURITY_UPLOAD_OUTCOME': 'success',
                'GITLEAKS_OUTCOME': 'success'}
 
 
@@ -213,7 +218,7 @@ class SummaryAndFileLines(unittest.TestCase):
 
 class AggregateSelection(unittest.TestCase):
     def test_synthetic_inventory_matches_the_fixed_expectations(self):
-        self.assertEqual((len(TESTS), len(SELECTED), len(INTEGRATION)), (77, 76, 28))
+        self.assertEqual((len(TESTS), len(SELECTED), len(INTEGRATION)), (79, 78, 29))
         self.assertEqual(sum(PER_FILE.values()), ci.EXPECTED_ALL_TESTS)
         self.assertNotIn(ci.HARNESS_TEST, SELECTED)
 
@@ -257,7 +262,7 @@ class AggregateSelection(unittest.TestCase):
     def test_count_drift_and_duplicates(self):
         counts = dict(PER_FILE)
         counts[SELECTED[0]] -= 1
-        self.assertTrue(any('sum to 8467' in e for e in self.check(file_lines(counts))[0]))
+        self.assertTrue(any('sum to 8558' in e for e in self.check(file_lines(counts))[0]))
         dup = file_lines() + ' ✓ %s (1 tests) 1ms\n' % SELECTED[0]
         self.assertTrue(any('2 result lines' in e for e in self.check(dup)[0]))
 
@@ -269,20 +274,20 @@ class AggregateSelection(unittest.TestCase):
 
     def test_changed_tracked_inventory_is_hold_not_a_relaxed_count(self):
         grown = sorted(TRACKED + ['test/unit/extra.test.ts'])
-        self.assertTrue(any('inventory is 78' in e for e in self.check(file_lines(), grown)[0]))
+        self.assertTrue(any('inventory is 80' in e for e in self.check(file_lines(), grown)[0]))
         moved = [n for n in TRACKED if n != INTEGRATION[0]] + ['test/unit/moved.test.ts']
-        self.assertTrue(any('integration file count 27' in e for e in self.check(file_lines(), sorted(moved))[0]))
+        self.assertTrue(any('integration file count 28' in e for e in self.check(file_lines(), sorted(moved))[0]))
         shrunk = [n for n in TRACKED if n != ci.HARNESS_TEST]
         self.assertTrue(self.check(file_lines(), shrunk)[0])
 
     def test_summary_count_mismatch_with_correct_files(self):
         def change(stage_dir, attempt):
-            write(stage_dir / 'stdout', file_lines() + ' Test Files  76 passed (76)\n      Tests  8467 passed (8467)\n')
+            write(stage_dir / 'stdout', file_lines() + ' Test Files  78 passed (78)\n      Tests  8558 passed (8558)\n')
         self.assertTrue(any('Tests counts' in e for e in evaluate('all', change)))
 
     def test_skipped_summary_with_exit_zero_is_not_accepted(self):
         def change(stage_dir, attempt):
-            write(stage_dir / 'stdout', file_lines() + ' Test Files  76 passed (76)\n      Tests  8382 passed | 86 skipped (8468)\n')
+            write(stage_dir / 'stdout', file_lines() + ' Test Files  78 passed (78)\n      Tests  8473 passed | 86 skipped (8559)\n')
         self.assertTrue(any('Tests counts' in e for e in evaluate('all', change)))
 
 
@@ -681,7 +686,7 @@ class StageGateCommands(unittest.TestCase):
     def run_cmd(self, root, runner, fn, *args):
         env = {'RUNNER_TEMP': str(runner)}
         with mock.patch.dict(os.environ, env), mock.patch.object(ci, 'ROOT', root), \
-                mock.patch.object(ci, 'tracked_files', lambda: list(TRACKED)), contextlib.redirect_stdout(io.StringIO()):
+                mock.patch.object(ci, 'tracked_files', lambda: list(TRACKED)), mock.patch.object(ci, 'fixture_capture_stage', return_value={'complete': True}), contextlib.redirect_stdout(io.StringIO()):
             return fn(*args)
 
     def stage(self, ev, runner, stage, seen):
@@ -1070,6 +1075,1039 @@ class WorkflowShape(unittest.TestCase):
         self.assertIn('if: ${{ always() && steps.collect-controls.outcome == \'success\' }}', block)
         guard_step = text[text.index('name: Guard P33 aggregate (all)'):text.index('run-stage.sh all')]
         self.assertNotIn('if:', guard_step)  # default success() gating on every earlier step, uploads included
+
+
+
+@contextlib.contextmanager
+def fixture_world():
+    """New public fixture bytes, synthetic tooling bytes; no tool or application execution."""
+    with tempfile.TemporaryDirectory() as tmp:
+        base = Path(tmp) / 'ci'
+        checkout = Path(tmp) / 'checkout'
+        for path in (base, base / 'tmp', base / 'evidence', checkout):
+            path.mkdir(mode=0o700)
+        for name in ci.FIXTURE_OWNER_PATHS:
+            dst = checkout / name
+            dst.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+            dst.write_bytes((ci.ROOT / name).read_bytes())
+            dst.chmod(0o600)
+        (checkout / 'node_modules').mkdir(mode=0o700)
+        (checkout / 'node_modules/public-test-tool.js').write_text('// inert public tooling witness\n')
+        (checkout / 'node_modules/public-test-tool.js').chmod(0o600)
+        binding = ci.fixture_prepare(base, checkout)
+        root = Path(binding['root'])
+        ci.fixture_write(base / 'evidence/fixture105-suite.json', {'schema': 'fixture105-suite/1', 'targets': [], 'pre_target_failures': [], 'tool_observations': [], 'suite_complete': False, 'cases': []})
+        yield base, checkout, root, binding
+
+
+class Fixture105Tooling(unittest.TestCase):
+    def test_new_connected_files_each_required(self):
+        for name in ci.FIXTURE_CONNECTED_COUNTS:
+            errors, facts = [], {}
+            ci.check_all_files(file_lines(), [p for p in TRACKED if p != name], errors, facts)
+            self.assertIn('required connected file absent: ' + name, errors)
+
+    def test_compensating_connected_count_drift_refuses(self):
+        for unit, native in ((57, 34), (59, 32)):
+            counts = dict(PER_FILE)
+            counts.update({'test/unit/connected-fixture105.test.ts': unit, 'test/integration/connected-fixture105.test.ts': native})
+            errors = []
+            ci.check_all_files(file_lines(counts), TRACKED, errors, {})
+            self.assertEqual(sum(counts.values()), 8559)
+            self.assertEqual(sum('connected per-file count drift' in e for e in errors), 2)
+
+    def test_fixture_namespace_does_not_match_supervisor_prefix(self):
+        with fixture_world() as (base, checkout, root, binding):
+            self.assertFalse(root.name.startswith('the-desk-p33-'))
+            self.assertEqual(ci.fixture_validate(base, checkout), (binding, {'absent': True}))
+
+    def test_fixture_preparation_is_exclusive(self):
+        with fixture_world() as (base, checkout, root, binding):
+            with self.assertRaisesRegex(RuntimeError, 'already exists'):
+                ci.fixture_prepare(base, checkout)
+
+    def test_arbitrary_tmpdir_without_runner_binding_refuses(self):
+        with fixture_world() as (base, checkout, root, binding):
+            (base / 'evidence/fixture105-binding.json').unlink()
+            with mock.patch.dict(os.environ, {'TMPDIR': str(base / 'tmp')}):
+                with self.assertRaises(FileNotFoundError):
+                    ci.fixture_validate(base, checkout)
+
+    def test_fixture_missing_required_binding_fails(self):
+        for name in ci.FIXTURE_BINDINGS:
+            with self.subTest(name=name), fixture_world() as (base, checkout, root, binding):
+                (root / 'bindings' / name).unlink()
+                with self.assertRaisesRegex(RuntimeError, 'population'):
+                    ci.fixture_validate(base, checkout)
+
+    def test_fixture_root_and_source_drift_refuse(self):
+        for mode in ('marker', 'source', 'tool'):
+            with self.subTest(mode=mode), fixture_world() as (base, checkout, root, binding):
+                path = root / 'ROOT.json' if mode == 'marker' else checkout / ('docs/connected-fixture105.md' if mode == 'source' else 'node_modules/public-test-tool.js')
+                path.write_bytes(path.read_bytes() + b'\n')
+                with self.assertRaisesRegex(RuntimeError, 'hash|changed'):
+                    ci.fixture_validate(base, checkout)
+
+    def test_fixture_symlink_escape_refuses(self):
+        with fixture_world() as (base, checkout, root, binding):
+            source = root / 'bindings/RELEASE.json'
+            original = source.read_bytes()
+            source.unlink()
+            outside = base / 'outside'
+            outside.write_bytes(original)
+            source.symlink_to(outside)
+            with self.assertRaises(OSError):
+                ci.fixture_validate(base, checkout)
+
+    def test_fixture_ancestor_symlink_refuses(self):
+        with fixture_world() as (base, checkout, root, binding):
+            bindings = root / 'bindings'
+            moved = base / 'moved-bindings'
+            bindings.rename(moved)
+            bindings.symlink_to(moved, target_is_directory=True)
+            with self.assertRaises(OSError):
+                ci.fixture_validate(base, checkout)
+
+    def test_fixture_extra_or_oversize_leaf_refuses(self):
+        with fixture_world() as (base, checkout, root, binding):
+            ci.fixture_write(root / 'bindings/extra.json', {})
+            with self.assertRaisesRegex(RuntimeError, 'population'):
+                ci.fixture_validate(base, checkout)
+            with self.assertRaisesRegex(RuntimeError, 'bound'):
+                ci.fixture_read(root / 'ROOT.json', 1)
+
+    def test_fixture_collection_retains_bindings_and_receipts(self):
+        with fixture_world() as (base, checkout, root, binding):
+            suite = self.journal(root)
+            (base / 'evidence/fixture105-suite.json').write_bytes(ci.fixture_bytes(suite))
+            upload = base / 'upload'
+            upload.mkdir(mode=0o700)
+            keep = ci.Retention(upload)
+            ci.fixture_collect(base, keep, 'full', {})
+            self.assertFalse(any(keep.problems.values()))
+            for name in ci.FIXTURE_BINDINGS:
+                self.assertEqual((upload / 'fixture105/bindings' / name).read_bytes(), (root / 'bindings' / name).read_bytes())
+            self.assertTrue((upload / 'fixture105/suite.json').is_file())
+            self.assertTrue((upload / 'fixture105/receipts' / ('a' * 64) / 'CONSTRUCTION.json').is_file())
+            self.assertTrue((root / 'RETENTION.json').is_file())
+
+    def test_fixture_partial_failure_is_retained_not_passed(self):
+        with fixture_world() as (base, checkout, root, binding):
+            (root / 'bindings/RELEASE.json').unlink()
+            upload = base / 'upload'
+            upload.mkdir(mode=0o700)
+            keep = ci.Retention(upload)
+            ci.fixture_collect(base, keep, 'full', {})
+            self.assertIn('fixture105/bindings/RELEASE.json', keep.problems['missing'])
+            self.assertTrue((upload / 'fixture105/ROOT.json').exists())
+
+    def test_fixture_changed_during_copy_refuses(self):
+        with fixture_world() as (base, checkout, root, binding):
+            upload = base / 'upload'
+            upload.mkdir(mode=0o700)
+            keep = ci.Retention(upload)
+            original = keep.copy
+            def mutate(src, rel, limit, *, required):
+                result = original(src, rel, limit, required=required)
+                if str(rel) == 'fixture105/ROOT.json':
+                    Path(src).write_bytes(Path(src).read_bytes() + b'\n')
+                return result
+            with mock.patch.object(keep, 'copy', mutate):
+                ci.fixture_collect(base, keep, 'full', {})
+            self.assertTrue(keep.problems['errors'])
+
+    def test_fixture_redacted_identity_is_distinct(self):
+        with fixture_world() as (base, checkout, root, binding):
+            upload = base / 'upload'
+            upload.mkdir(mode=0o700)
+            keep = ci.Retention(upload, extra=['fixture105-execution-root/1'])
+            ci.fixture_collect(base, keep, 'full', {})
+            manifest = json.loads((upload / 'fixture105-retention.json').read_text())
+            row = next(p for p in manifest['files'] if p['path'] == 'fixture105/ROOT.json')
+            self.assertTrue(row['redacted'])
+            self.assertNotEqual(row['original'], row['retained'])
+
+    def test_fixture_upload_failure_blocks_success(self):
+        good = {'all_stages_ok': True, 'evidence_status': 'complete'}
+        self.assertTrue(ci.final_verdict({scope: good for scope in ci.SCOPES}, {**OK_OUTCOMES, 'UPLOAD_OUTCOME': 'failure'}))
+
+    def journal(self, root):
+        # Fully disclosed synthetic tooling records, not native execution evidence.
+        release_bytes = (root / 'bindings/RELEASE.json').read_bytes()
+        release = json.loads(release_bytes)
+        subject = ci.fixture_hash(json.dumps(release['subject_binding'], sort_keys=True, separators=(',', ':')).encode())
+        suite = {'schema': 'fixture105-suite/1', 'targets': [], 'pre_target_failures': [], 'tool_observations': [], 'suite_complete': True, 'cases': []}
+        for fixed in ci.FIXTURE_CASE_EXPECTATIONS:
+            case = {**fixed, 'completed': True, 'calls': []}
+            suite['cases'].append(case)
+            for ordinal, expected in enumerate(fixed['expected']):
+                call = {'ordinal': ordinal, 'expected': expected, 'completed': True, 'returned': expected == 'completed', 'target_hash': None, 'pre_target_index': None}
+                case['calls'].append(call)
+                if expected == 'pre_target_failure':
+                    call['pre_target_index'] = len(suite['pre_target_failures'])
+                    suite['pre_target_failures'].append('synthetic_pre_target_refusal')
+                    continue
+                target = 'a' * 64 if not suite['targets'] else format(len(suite['targets']), '064x')
+                call['target_hash'] = target
+                unknown = expected == 'expected_construction_unknown'
+                row = {'target_hash': target, 'construction_state': 'construction_unknown' if unknown else 'construction_recorded', 'later_phase': 'construction' if unknown else 'direction' if expected == 'expected_later_phase_unknown' else 'readback', 'later_outcome': 'completed' if expected == 'completed' else 'refused' if expected == 'expected_refusal' else 'unknown'}
+                suite['targets'].append(row)
+                intent = {'schema': 'fixture105-receipt-intent/1', 'target_hash': target, 'release_sha256': ci.fixture_hash(release_bytes), 'subject_sha256': subject, 'expected_names': ['CONSTRUCTION.json'], 'state': 'intent'}
+                pin = ci.fixture_write(root / 'expectations' / (target + '.intent.json'), intent)
+                if unknown:
+                    continue
+                directory = root / 'receipts' / target
+                directory.mkdir(mode=0o700)
+                receipt = ci.fixture_write(directory / 'CONSTRUCTION.json', {'observed': 'synthetic tooling witness, not a database receipt'})
+                ci.fixture_write(root / 'expectations' / (target + '.terminal.json'), {'schema': 'fixture105-receipt-terminal/1', 'target_hash': target, 'intent_sha256': pin['sha256'], 'state': 'construction_recorded', 'receipts': [{'name': 'CONSTRUCTION.json', **receipt}]})
+        return suite
+
+    def test_completed_target_directory_deleted_refuses(self):
+        for removed in ('directory', 'intent', 'terminal'):
+            with self.subTest(removed=removed), fixture_world() as (base, checkout, root, binding):
+                suite = self.journal(root)
+                ci.fixture_journal(root, suite)
+                target = suite['targets'][0]['target_hash']
+                if removed == 'directory':
+                    (root / 'receipts' / target / 'CONSTRUCTION.json').unlink()
+                    (root / 'receipts' / target).rmdir()
+                else:
+                    (root / 'expectations' / (target + '.' + removed + '.json')).unlink()
+                with self.assertRaises((OSError, RuntimeError)):
+                    ci.fixture_journal(root, suite)
+
+    def test_unknown_construction_has_no_invented_terminal(self):
+        with fixture_world() as (base, checkout, root, binding):
+            suite = self.journal(root)
+            target = next(row for row in suite['targets'] if row['construction_state'] == 'construction_unknown')
+            ci.fixture_journal(root, suite)
+            # All expectation/call correspondence remains valid; only this forbidden
+            # terminal is introduced, so the intended unknown guard is reached.
+            ci.fixture_write(root / 'expectations' / (target['target_hash'] + '.terminal.json'), {})
+            with self.assertRaisesRegex(RuntimeError, 'unknown construction'):
+                ci.fixture_journal(root, suite)
+
+    def test_expected_observed_correspondence_is_separate(self):
+        with fixture_world() as (base, checkout, root, binding):
+            suite = self.journal(root)
+            suite['targets'][0]['later_outcome'] = 'unknown'
+            with self.assertRaisesRegex(RuntimeError, 'outcome correspondence'):
+                ci.fixture_journal(root, suite)
+
+    def test_later_unknown_preserves_construction_terminal(self):
+        with fixture_world() as (base, checkout, root, binding):
+            suite = self.journal(root)
+            target = next(row for row in suite['targets'] if row['construction_state'] == 'construction_recorded' and row['later_outcome'] == 'unknown')
+            ci.fixture_journal(root, suite)
+            (root / 'expectations' / (target['target_hash'] + '.terminal.json')).unlink()
+            with self.assertRaises(OSError):
+                ci.fixture_journal(root, suite)
+
+    def test_root_validation_precedes_cluster_allocation(self):
+        body = (ci.ROOT / 'test/integration/connected-fixture105.test.ts').read_text()
+        root_calls = list(re.finditer(r'executionRoot\s*=\s*validateConnectedFixture105ExecutionRoot\s*\(\s*\)', body))
+        allocations = list(re.finditer(r'cluster\s*=\s*new\s+TrackedFixtureCluster\s*\(bootstrapUrl\)', body))
+        self.assertEqual((len(root_calls), len(allocations)), (1, 1))
+        self.assertLess(root_calls[0].start(), allocations[0].start())
+        host = (ci.ROOT / 'src/runtime/connected-fixture105.ts').read_text()
+        self.assertNotIn('.fixture105-execution', host)
+        intent = re.search(r'journalIntent\(\s*this\.binding\s*,\s*this\.target\s*\)', host)
+        allocation = re.search(r'await\s+this\.initializeSubject\(\)', host)
+        self.assertIsNotNone(intent)
+        self.assertIsNotNone(allocation)
+        self.assertLess(intent.start(), allocation.start())
+
+    def cache(self, root, prefix=''):
+        path = root / 'tool-cache' / prefix / 'vitest' / ci.FIXTURE_CACHE_HASH / 'results.json'
+        path.parent.mkdir(parents=True, mode=0o700, exist_ok=True)
+        ci.fixture_write(path, {'version': '4.1.12', 'results': [[':test/unit/example.test.ts', {'duration': 1, 'failed': False}]]})
+        return path
+
+    def test_exact_cache_capture_and_missing_write_refusal(self):
+        with fixture_world() as (base, checkout, root, binding):
+            with self.assertRaisesRegex(RuntimeError, 'missing expected'):
+                ci.fixture_cache_snapshot(root, {'test/unit/example.test.ts'}, [], True)
+            path = self.cache(root)
+            got = ci.fixture_cache_snapshot(root, {'test/unit/example.test.ts'}, [], True)
+            self.assertEqual(got['vitest/' + ci.FIXTURE_CACHE_HASH + '/results.json']['sha256'], ci.fixture_hash(path.read_bytes()))
+
+    def test_cache_shape_path_count_and_special_refusals(self):
+        with fixture_world() as (base, checkout, root, binding):
+            path = self.cache(root)
+            for content in ({'version': '4.1.12', 'results': [[':foreign', {'duration': 1, 'failed': False}]]}, {'version': '4.1.12', 'results': [[':test/unit/example.test.ts', {'duration': -1, 'failed': False}]]}, {'version': 'x', 'results': [], 'extra': True}):
+                path.write_bytes(ci.fixture_bytes(content))
+                with self.assertRaisesRegex(RuntimeError, 'cache'):
+                    ci.fixture_cache_snapshot(root, {'test/unit/example.test.ts'}, [], True)
+            path.unlink()
+            path.symlink_to(root / 'ROOT.json')
+            with self.assertRaisesRegex(RuntimeError, 'ownership'):
+                ci.fixture_cache_snapshot(root, {'test/unit/example.test.ts'}, [], True)
+            with self.assertRaisesRegex(RuntimeError, 'nonce'):
+                ci.fixture_cache_snapshot(root, set(), ['a' * 48] * 9, True)
+
+    def test_loader_exact_empty_settlement_and_immutable_package_controls(self):
+        with fixture_world() as (base, checkout, root, binding):
+            directory = checkout / 'node_modules/.vite-temp'
+            directory.mkdir(mode=0o700)
+            identity = ci.fixture_temp(checkout, True)
+            self.assertEqual(identity['leaves'], [])
+            leaf = directory / 'vitest.config.ts.timestamp-1-.mjs'
+            ci.fixture_write(leaf, {'inert': True})
+            self.assertEqual(len(ci.fixture_temp(checkout)['leaves']), 1)
+            with self.assertRaisesRegex(RuntimeError, 'unsettled'):
+                ci.fixture_temp(checkout, True)
+            leaf.rename(directory / 'wrong.mjs')
+            with self.assertRaisesRegex(RuntimeError, 'name'):
+                ci.fixture_temp(checkout)
+            (directory / 'wrong.mjs').unlink()
+            (checkout / 'node_modules/.vite').mkdir(mode=0o700)
+            with self.assertRaisesRegex(RuntimeError, 'immutable graph'):
+                ci.fixture_validate(base, checkout)
+
+
+
+    def test_adoption_all_relations_before_allocation(self):
+        for mutation in ('release_id', 'release_bytes', 'release_sha256', 'ledger_bytes', 'ledger_sha256', 'malformed', 'oversize', 'symlink', 'fifo'):
+            with self.subTest(mutation=mutation), fixture_world() as (base, checkout, root, binding):
+                path = root / 'bindings/ADOPTION.json'
+                original = path.read_bytes()
+                path.unlink()
+                if mutation == 'symlink':
+                    path.symlink_to(root / 'ROOT.json')
+                elif mutation == 'fifo':
+                    os.mkfifo(path, 0o600)
+                elif mutation in ('malformed', 'oversize'):
+                    ci.fixture_write_raw(path, b'{' if mutation == 'malformed' else b'x' * 262145)
+                else:
+                    value = json.loads(original)
+                    value[mutation] = 0 if mutation.endswith('bytes') else 'changed'
+                    ci.fixture_write(path, value)
+                with self.assertRaises((OSError, RuntimeError, ValueError)):
+                    ci.fixture_validate(base, checkout)
+                self.assertEqual(list((root / 'expectations').iterdir()), [])
+                self.assertEqual(list((root / 'receipts').iterdir()), [])
+
+    def capture_controls(self, base, checkout, root):
+        records = {}
+        cache = self.cache(root)
+        cache.write_bytes(ci.fixture_bytes({'version': '4.1.12', 'results': [[':test/unit/unit00.test.ts', {'duration': 1, 'failed': False}]]}))
+        with mock.patch.object(ci, 'ROOT', checkout), mock.patch.object(ci, 'tracked_files', return_value=TRACKED):
+            for stage in ci.SCOPES['controls']:
+                before = {'binding': json.loads((base / 'evidence/fixture105-binding.json').read_text())}
+                ci.fixture_write(base / ('evidence/fixture105-before-' + stage + '.json'), before)
+                record = ci.fixture_capture_stage(base, stage, {}, False)
+                self.assertTrue(record['complete'], record)
+                records[stage] = {'ok': True, 'facts': {'fixture105': record}}
+        return records
+
+    def test_real_prepare_capture_collect_final_under_umask022(self):
+        with fixture_world() as (base, checkout, root, binding):
+            previous = os.umask(0o022)
+            try:
+                records = self.capture_controls(base, checkout, root)
+                upload = base / 'upload'
+                upload.mkdir(mode=0o700)
+                keep = ci.Retention(upload)
+                with mock.patch.object(ci, 'ROOT', checkout):
+                    ci.fixture_collect(base, keep, 'controls', records)
+                self.assertFalse(any(keep.problems.values()), keep.problems)
+                for path in (base / 'evidence').glob('fixture105-cache-*/**/results.json'):
+                    self.assertEqual(path.stat().st_mode & 0o777, 0o600)
+                    self.assertEqual(path.read_bytes(), (root / 'tool-cache/vitest' / ci.FIXTURE_CACHE_HASH / 'results.json').read_bytes())
+                # The real final predicate receives actual collector completeness;
+                # other scopes are explicitly synthetic, not an executed application.
+                final = {'all_stages_ok': all(row['ok'] for row in records.values()), 'evidence_status': 'complete' if not any(keep.problems.values()) else 'partial/censored'}
+                self.assertEqual(ci.final_verdict({scope: final for scope in ci.SCOPES}, OK_OUTCOMES), [])
+            finally:
+                os.umask(previous)
+
+    def test_real_synthetic_preparation_to_both_collectors_and_final(self):
+        with fixture_world() as (base, checkout, root, binding):
+            ev = base / 'evidence'
+            runtime = base / 'tmp/the-desk-p33-1000-abc'
+            runtime.mkdir(mode=0o700)
+            for name in ('env.json', 'identity.json', 'db-probe.json', 'snapshot-pre.json', 'bind-pre.json', 'bind-build.json'):
+                write_json(ev / name, {'ok': True})
+            suite = self.journal(root)
+            (ev / 'fixture105-suite.json').write_bytes(ci.fixture_bytes(suite))
+            cache = self.cache(root)
+            cache.write_bytes(ci.fixture_bytes({'version': '4.1.12', 'results': [[':test/unit/unit00.test.ts', {'duration': 1, 'failed': False}]]}))
+            previous = os.umask(0o022)
+            try:
+                with mock.patch.object(ci, 'ROOT', checkout), mock.patch.object(ci, 'tracked_files', return_value=TRACKED), mock.patch.dict(os.environ, {'RUNNER_TEMP': str(base.parent), **OK_OUTCOMES}), contextlib.redirect_stdout(io.StringIO()):
+                    for stage in ci.STAGES:
+                        add_stage(ev, runtime, stage)
+                        verdict_path = ev / ('verdict-' + stage + '.json')
+                        verdict = json.loads(verdict_path.read_bytes())
+                        for case in verdict['facts'].get('cases', []):
+                            if case.get('mode') == 'p33':
+                                nested = self.cache(root, 'p33/' + case['nonce'])
+                                nested.write_bytes(ci.fixture_bytes({'version': '4.1.12', 'results': [[':test/support/p33-parity-child.case.ts', {'duration': 1, 'failed': False}]]}))
+                        ci.fixture_write(ev / ('fixture105-before-' + stage + '.json'), {'binding': binding})
+                        record = ci.fixture_capture_stage(base, stage, verdict['facts'], True)
+                        self.assertTrue(record['complete'], record)
+                        verdict['facts']['fixture105'] = record
+                        write_json(verdict_path, verdict)
+                        if stage == 'focused':
+                            ci.cmd_collect('controls')
+                    ci.cmd_collect('full')
+                    self.assertEqual(ci.cmd_final(), 0)
+                for scope in ci.SCOPES:
+                    final = json.loads((base / ('upload-' + scope) / 'final.json').read_bytes())
+                    self.assertEqual(final['evidence_status'], 'complete', final)
+                    self.assertTrue(final['all_stages_ok'])
+            finally:
+                os.umask(previous)
+
+    def test_success_snapshot_population_and_hash_are_required(self):
+        for mutation in ('directory', 'leaf', 'bytes', 'extra', 'record', 'empty_directory', 'excess_directories'):
+            with self.subTest(mutation=mutation), fixture_world() as (base, checkout, root, binding):
+                records = self.capture_controls(base, checkout, root)
+                stage = ci.SCOPES['controls'][0]
+                directory = base / ('evidence/fixture105-cache-' + stage)
+                leaf = directory / 'vitest' / ci.FIXTURE_CACHE_HASH / 'results.json'
+                if mutation == 'directory':
+                    directory.rename(base / 'retained-snapshot')
+                elif mutation == 'leaf':
+                    leaf.unlink()
+                elif mutation == 'bytes':
+                    leaf.write_bytes(leaf.read_bytes() + b' ')
+                elif mutation == 'extra':
+                    ci.fixture_write(directory / 'extra.json', {})
+                elif mutation == 'empty_directory':
+                    (directory / 'foreign').mkdir(mode=0o700)
+                elif mutation == 'excess_directories':
+                    for index in range(11):
+                        (directory / ('foreign' + str(index))).mkdir(mode=0o700)
+                else:
+                    path = base / ('evidence/fixture105-after-' + stage + '.json')
+                    row = json.loads(path.read_bytes())
+                    row['snapshot'] = {}
+                    path.write_bytes(ci.fixture_bytes(row))
+                upload = base / 'upload'
+                upload.mkdir(mode=0o700)
+                keep = ci.Retention(upload)
+                with mock.patch.object(ci, 'ROOT', checkout):
+                    ci.fixture_collect(base, keep, 'controls', records)
+                self.assertTrue(keep.problems['errors'])
+                final = {'all_stages_ok': True, 'evidence_status': 'partial/censored'}
+                self.assertTrue(ci.final_verdict({scope: final for scope in ci.SCOPES}, OK_OUTCOMES))
+
+    def test_partial_survivor_is_captured_before_rejection_and_salvaged(self):
+        with fixture_world() as (base, checkout, root, binding):
+            path = self.cache(root)
+            path.write_bytes(b'{malformed cache')
+            loader = checkout / 'node_modules/.vite-temp'
+            loader.mkdir(mode=0o700)
+            name = 'vitest.config.ts.timestamp-1-.mjs'
+            ci.fixture_write_raw(loader / name, b'// synthetic survivor\n')
+            ci.fixture_write(base / 'evidence/fixture105-loader-created.json', ci.fixture_temp(checkout))
+            with mock.patch.object(ci, 'ROOT', checkout), mock.patch.object(ci, 'tracked_files', return_value=TRACKED):
+                record = ci.fixture_capture_stage(base, 'focused', {}, True)
+                self.assertFalse(record['complete'])
+                self.assertEqual((base / 'evidence/fixture105-cache-focused/loader' / name).read_bytes(), (loader / name).read_bytes())
+                # all has no post-check at all: failed runtime evidence must survive.
+                (base / 'evidence/all').mkdir(mode=0o700)
+                upload = base / 'upload'
+                upload.mkdir(mode=0o700)
+                keep = ci.Retention(upload)
+                ci.fixture_collect(base, keep, 'full', {})
+            self.assertEqual((upload / 'tooling-fixture105/salvage-full-all/loader' / name).read_bytes(), (loader / name).read_bytes())
+            self.assertEqual((upload / 'tooling-fixture105/salvage-full-all/vitest' / ci.FIXTURE_CACHE_HASH / 'results.json').read_bytes(), path.read_bytes())
+
+    def test_harness_incomplete_or_unaccounted_calls_refuse(self):
+        for mutation in ('case', 'call', 'expectation', 'pretarget', 'extra_target'):
+            with self.subTest(mutation=mutation), fixture_world() as (base, checkout, root, binding):
+                suite = self.journal(root)
+                if mutation == 'case':
+                    suite['cases'][0]['completed'] = False
+                elif mutation == 'call':
+                    suite['cases'][0]['calls'][0]['completed'] = False
+                elif mutation == 'expectation':
+                    suite['cases'][0]['expected'] = ['expected_refusal']
+                elif mutation == 'pretarget':
+                    suite['pre_target_failures'].append('unexpected_open_failure')
+                else:
+                    suite['targets'].append({**suite['targets'][0], 'target_hash': 'f' * 64})
+                with self.assertRaisesRegex(RuntimeError, 'harness|unaccounted'):
+                    ci.fixture_journal(root, suite)
+
+    def test_valid_version_cache_refusals_reach_rows_and_bounds(self):
+        good = [':test/unit/example.test.ts', {'duration': 1, 'failed': False}]
+        for rows in ([good, good], [[':foreign', good[1]]], [[good[0], {'duration': -1, 'failed': False}]], [[good[0], {'duration': 1, 'failed': 'false'}]]):
+            with self.assertRaisesRegex(RuntimeError, 'cache row'):
+                ci.fixture_cache_rows(ci.fixture_bytes({'version': '4.1.12', 'results': rows}), {'test/unit/example.test.ts'})
+        with self.assertRaisesRegex(RuntimeError, 'cache shape'):
+            ci.fixture_cache_rows(ci.fixture_bytes({'version': 'wrong', 'results': []}), set())
+        for mutation in ('mode', 'oversize', 'duplicate_nonce', 'wrong_project', 'multiple_loader'):
+            with self.subTest(mutation=mutation), fixture_world() as (base, checkout, root, binding):
+                path = self.cache(root)
+                if mutation == 'mode':
+                    path.chmod(0o622)
+                elif mutation == 'oversize':
+                    path.write_bytes(b'x' * (ci.SNAPSHOT_LIMIT + 1))
+                elif mutation == 'wrong_project':
+                    path.rename(path.with_name('foreign.json'))
+                elif mutation == 'multiple_loader':
+                    loader = checkout / 'node_modules/.vite-temp'
+                    loader.mkdir(mode=0o700)
+                    for name in ('vitest.config.ts.timestamp-1-a.mjs', 'vitest.config.ts.timestamp-2-b.mjs'):
+                        ci.fixture_write_raw(loader / name, b'// new synthetic tooling only\n')
+                    with self.assertRaisesRegex(RuntimeError, 'unsettled'):
+                        ci.fixture_temp(checkout)
+                    continue
+                with self.assertRaises((OSError, RuntimeError)):
+                    ci.fixture_cache_snapshot(root, {'test/unit/example.test.ts'}, ['a' * 48, 'a' * 48] if mutation == 'duplicate_nonce' else [], True)
+
+
+    def test_failed_controls_then_full_salvage_and_stage_isolation(self):
+        for inject_first_capture_collision in (False, True):
+            with self.subTest(collision=inject_first_capture_collision), fixture_world() as (base, checkout, root, binding):
+                path = self.cache(root)
+                raw = b'{malformed but safely bounded generated cache'
+                path.write_bytes(raw)
+                # All attempts failed before their normal check. No pass is invented.
+                for stage in ci.STAGES:
+                    (base / 'evidence' / stage).mkdir(mode=0o700)
+                if inject_first_capture_collision:
+                    (base / 'evidence/fixture105-cache-salvage-controls-prerequisite').mkdir(mode=0o700)
+                with mock.patch.object(ci, 'ROOT', checkout):
+                    for scope in ('controls', 'full'):
+                        upload = base / ('upload-' + scope)
+                        upload.mkdir(mode=0o700)
+                        keep = ci.Retention(upload)
+                        ci.fixture_collect(base, keep, scope, {})
+                        # A prerequisite collision cannot suppress focused retention;
+                        # the second scope receives a distinct immutable capture.
+                        stages = ('focused',) if scope == 'controls' else ('prerequisite', 'focused', 'all')
+                        for stage in stages:
+                            leaf = upload / ('tooling-fixture105/salvage-' + scope + '-' + stage) / 'vitest' / ci.FIXTURE_CACHE_HASH / 'results.json'
+                            self.assertEqual(leaf.read_bytes(), raw)
+                        final = {'all_stages_ok': False, 'evidence_status': 'partial/censored'}
+                        self.assertTrue(ci.final_verdict({name: final for name in ci.SCOPES}, OK_OUTCOMES))
+                        if inject_first_capture_collision and scope == 'controls':
+                            self.assertTrue(any('prerequisite' in error for error in keep.problems['errors']))
+                control = base / 'evidence/fixture105-cache-salvage-controls-focused/vitest' / ci.FIXTURE_CACHE_HASH / 'results.json'
+                full = base / 'evidence/fixture105-cache-salvage-full-focused/vitest' / ci.FIXTURE_CACHE_HASH / 'results.json'
+                self.assertEqual(control.read_bytes(), full.read_bytes())
+                self.assertNotEqual(control.stat().st_ino, full.stat().st_ino)
+
+    def test_snapshot_empty_allowed_ancestor_and_directory_bound(self):
+        for mutation in ('empty_loader', 'eleven_nonce_directories'):
+            with self.subTest(mutation=mutation), fixture_world() as (base, checkout, root, binding):
+                records = self.capture_controls(base, checkout, root)
+                stage = ci.SCOPES['controls'][0]
+                snapshot = base / ('evidence/fixture105-cache-' + stage)
+                if mutation == 'empty_loader':
+                    (snapshot / 'loader').mkdir(mode=0o700)
+                    with self.assertRaisesRegex(RuntimeError, 'directory population'):
+                        ci.fixture_snapshot_population(snapshot, records[stage]['facts']['fixture105']['snapshot'])
+                    # Even partial/unpinned traversal refuses an otherwise permitted
+                    # directory with no captured leaf rather than silently omitting it.
+                    with self.assertRaisesRegex(RuntimeError, 'empty/missing directory'):
+                        ci.fixture_snapshot_population(snapshot)
+                else:
+                    nested = snapshot / 'p33'
+                    nested.mkdir(mode=0o700)
+                    for index in range(11):
+                        (nested / format(index, '048x')).mkdir(mode=0o700)
+                    with self.assertRaisesRegex(RuntimeError, 'entry bound'):
+                        ci.fixture_snapshot_population(snapshot)
+
+
+class FixtureGraphDiagnostic(unittest.TestCase):
+    def diagnostic(self, expected, actual, kind='source'):
+        return json.loads(ci.fixture_graph_difference(expected, actual, kind))
+
+    def test_equality_and_success_unchanged(self):
+        graph = {'': {'type': 'directory', 'mode': 448}}
+        self.assertEqual(self.diagnostic(graph, graph),
+                         {'kind': 'source', 'changed_path_count': 0, 'differences': []})
+        with fixture_world() as (base, checkout, root, binding):
+            with mock.patch.object(ci, 'fixture_graph', wraps=ci.fixture_graph) as capture:
+                self.assertEqual(ci.fixture_validate(base, checkout), (binding, {'absent': True}))
+            self.assertEqual([call.args for call in capture.call_args_list],
+                             [(checkout, 'source'), (checkout / 'node_modules', 'tools')])
+
+    def test_addition_removal_sorted_and_values_excluded(self):
+        expected = {'z': {'type': 'symlink', 'target': 'PRIVATE_TARGET'}}
+        actual = {'a': {'type': 'file', 'sha256': 'PRIVATE_HASH', 'bytes': 123}}
+        raw = ci.fixture_graph_difference(expected, actual, 'tools')
+        result = json.loads(raw)
+        self.assertEqual(result['kind'], 'tools')
+        self.assertEqual(result['changed_path_count'], 2)
+        self.assertEqual(result['differences'], [
+            {'path': 'a', 'classification': 'added', 'fields': ['bytes', 'sha256', 'type']},
+            {'path': 'z', 'classification': 'removed', 'fields': ['target', 'type']}])
+        for value in ('PRIVATE_TARGET', 'PRIVATE_HASH', '123'):
+            self.assertNotIn(value, raw)
+
+    def test_changed_fields_not_metadata_values(self):
+        before = {'x': {'type': 'file', 'mode': 384, 'bytes': 123, 'sha256': 'OLD_HASH'}}
+        after = {'x': {'type': 'file', 'mode': 384, 'bytes': 456, 'sha256': 'NEW_HASH'}}
+        self.assertEqual(self.diagnostic(before, after)['differences'],
+                         [{'path': 'x', 'classification': 'changed', 'fields': ['bytes', 'sha256']}])
+        before['x']['target'] = None
+        self.assertIn('target', self.diagnostic(before, after)['differences'][0]['fields'])
+
+    def test_mode_only_root_and_empty_directory(self):
+        before = {'': {'type': 'directory', 'mode': 448}, 'empty': {'type': 'directory', 'mode': 448}}
+        after = {'': {'type': 'directory', 'mode': 493}}
+        self.assertEqual(self.diagnostic(before, after)['differences'], [
+            {'path': '.', 'classification': 'changed', 'fields': ['mode']},
+            {'path': 'empty', 'classification': 'removed', 'fields': ['mode', 'type']}])
+
+    def test_output_bounds_full_count_and_determinism(self):
+        actual = {('%03d' % i) + '\u2603' * 250: {'type': 'directory', 'mode': 448} for i in reversed(range(30))}
+        raw = ci.fixture_graph_difference({}, actual, 'tools')
+        result = json.loads(raw)
+        self.assertEqual(result['changed_path_count'], 30)
+        self.assertEqual(len(result['differences']), 10)
+        self.assertEqual([r['path'] for r in result['differences']], [p[:200] for p in sorted(actual)[:10]])
+        self.assertTrue(all(len(r['path']) == 200 for r in result['differences']))
+        self.assertLess(len(raw.encode()), 14000)
+        self.assertEqual(raw, ci.fixture_graph_difference({}, dict(reversed(list(actual.items()))), 'tools'))
+
+    def test_refusal_prefix_graph_kind_and_no_recapture(self):
+        for kind in ('source', 'tools'):
+            with self.subTest(kind=kind), fixture_world() as (base, checkout, root, binding):
+                parent = checkout if kind == 'source' else checkout / 'node_modules'
+                (parent / 'new-empty').mkdir(mode=0o700)
+                with mock.patch.object(ci, 'fixture_graph', wraps=ci.fixture_graph) as capture:
+                    with self.assertRaisesRegex(RuntimeError, '^fixture immutable graph changed ') as raised:
+                        ci.fixture_validate(base, checkout)
+                detail = json.loads(str(raised.exception).removeprefix('fixture immutable graph changed '))
+                self.assertEqual(detail, {'kind': kind, 'changed_path_count': 1, 'differences': [
+                    {'path': 'new-empty', 'classification': 'added', 'fields': ['mode', 'type']}]})
+                self.assertEqual(capture.call_count, 1 if kind == 'source' else 2)
+
+
+
+class Partition155Tests(unittest.TestCase):
+    def setUp(self):
+        self.env = mock.patch.dict(os.environ, {}, clear=True)
+        self.env.start()
+        self.addCleanup(self.env.stop)
+        self.tracked = sorted([p for p in TRACKED if p != 'test/root00.test.ts'] + [ci.WRITER_TEST])
+        self.identity = {'checkout': 'a' * 40, 'head': 'b' * 40, 'tree': 'c' * 40,
+                         'repository': 'mikeddamico/the-desk', 'run_id': '123', 'run_attempt': '1', 'source_sha256': 'd' * 64}
+        rest = ci.partition_files(self.tracked, 'rest')
+        other = [p for p in rest if p not in ci.FIXTURE_CONNECTED_COUNTS]
+        self.counts = {p: 3560 // len(other) + (i < 3560 % len(other)) for i, p in enumerate(other)}
+        self.counts.update(ci.FIXTURE_CONNECTED_COUNTS)
+        self.counts[ci.WRITER_TEST] = 4908
+        self.proofs = {}
+        for label in ('writer', 'rest'):
+            selected = ci.partition_files(self.tracked, label)
+            binding = {'schema': 'ci-partition/1', 'partition': label, 'identity': self.identity,
+                       'selection': selected, 'counts': list(ci.PARTITION_COUNTS[label])}
+            verdict = {'ok': True, 'partition': label, 'stage': 'all', 'facts': {'selected_files': selected,
+                'file_results': {p: [{'tests': self.counts[p], 'failed': 0, 'skipped': 0, 'todo': 0}] for p in selected}}}
+            self.proofs[label] = ci.build_partition_proof(binding, verdict)
+        self.outcomes = {p: 'success' for p in ('writer', 'rest', 'container')}
+
+    def joint(self, proofs=None, identity=None, outcomes=None):
+        return ci.joint_problems(proofs if proofs is not None else self.proofs,
+                                 identity if identity is not None else self.identity,
+                                 self.tracked, outcomes if outcomes is not None else self.outcomes)
+
+    def copy(self, value):
+        return json.loads(json.dumps(value))
+
+    def test_exact_pair_and_disjoint_union(self):
+        self.assertEqual(self.joint(), [])
+        self.assertEqual(set(self.proofs['writer']['files']) & set(self.proofs['rest']['files']), set())
+        self.assertEqual(sum(sum(p['files'].values()) for p in self.proofs.values()), 8559)
+        self.assertEqual(len(ci.partition_files(self.tracked, 'all')), 78)
+
+    def test_missing_unknown_and_legacy_labels(self):
+        self.assertEqual(ci.partition_label(), 'all')
+        with self.assertRaises(RuntimeError): ci.partition_label(required=True)
+        for label in ('', 'all', 'WRITER', 'writer,rest', 'other'):
+            with mock.patch.dict(os.environ, {'DESK_CI_PARTITION': label}):
+                with self.assertRaises(RuntimeError): ci.partition_label(required=True)
+        for label in ('writer', 'rest'):
+            with mock.patch.dict(os.environ, {'DESK_CI_PARTITION': label}):
+                self.assertEqual(ci.partition_label(required=True), label)
+
+    def test_inventory_drift_and_duplicate(self):
+        for tracked in ([p for p in self.tracked if p != ci.HARNESS_TEST], self.tracked + ['test/new.test.ts'],
+                        self.tracked + [ci.WRITER_TEST], [p for p in self.tracked if p != ci.WRITER_TEST]):
+            with self.assertRaises(RuntimeError): ci.partition_files(tracked, 'rest')
+
+    def test_missing_swapped_reused_proofs(self):
+        for proofs in ({}, {'writer': self.proofs['writer']},
+                       {'writer': self.proofs['rest'], 'rest': self.proofs['writer']},
+                       {'writer': self.proofs['writer'], 'rest': self.proofs['writer']}):
+            self.assertTrue(self.joint(proofs=proofs))
+
+    def test_failed_skipped_cancelled_missing_dependencies(self):
+        for label in self.outcomes:
+            for state in ('failure', 'skipped', 'cancelled', None):
+                outcomes = dict(self.outcomes, **{label: state})
+                self.assertTrue(self.joint(outcomes=outcomes))
+        self.assertTrue(self.joint(outcomes={'writer': 'success', 'rest': 'success'}))
+
+    def test_every_identity_field_and_current_context(self):
+        for key in self.identity:
+            bad = self.copy(self.proofs)
+            bad['rest']['identity'][key] = 'changed'
+            self.assertTrue(self.joint(proofs=bad))
+            self.assertTrue(self.joint(identity=dict(self.identity, **{key: 'changed'})))
+
+    def test_schema_assertions_and_unknown_fields(self):
+        for label in self.proofs:
+            for key, value in [('schema', 'legacy-all'), ('partition', 'all'), ('source_verified', False),
+                               ('evidence_complete', 1), ('extra', True), ('identity', {})]:
+                bad = self.copy(self.proofs); bad[label][key] = value
+                self.assertTrue(self.joint(proofs=bad))
+
+    def test_missing_extra_overlapping_and_count_drift(self):
+        for label in self.proofs:
+            path = next(iter(self.proofs[label]['files']))
+            for value in (0, -1, True, '1', self.proofs[label]['files'][path] + 1):
+                bad = self.copy(self.proofs); bad[label]['files'][path] = value
+                self.assertTrue(self.joint(proofs=bad))
+            bad = self.copy(self.proofs); del bad[label]['files'][path]
+            self.assertTrue(self.joint(proofs=bad))
+            bad = self.copy(self.proofs); bad[label]['files']['test/unexpected.test.ts'] = 1
+            self.assertTrue(self.joint(proofs=bad))
+        bad = self.copy(self.proofs); bad['rest']['files'][ci.WRITER_TEST] = 4908
+        self.assertTrue(self.joint(proofs=bad))
+        bad = self.copy(self.proofs); paths = list(ci.FIXTURE_CONNECTED_COUNTS)
+        bad['rest']['files'][paths[0]] -= 1; bad['rest']['files'][paths[1]] += 1
+        self.assertTrue(self.joint(proofs=bad))
+
+    def test_proof_parser_closed_bounded_unique(self):
+        raw = ci.fixture_bytes(self.proofs['writer']).decode().rstrip('\n')
+        self.assertEqual(ci.parse_partition_proof(raw), self.proofs['writer'])
+        for text in (None, '', raw + '\n', raw + '\r', '[' + raw + ']', '{"a":1,"a":2}',
+                     '{"a":NaN}', 'x' * 65537, '{'):
+            with self.assertRaises((RuntimeError, ValueError)): ci.parse_partition_proof(text)
+
+    def test_file_summary_partition_rejections(self):
+        for label in ('writer', 'rest'):
+            selected = ci.partition_files(self.tracked, label)
+            counts = {p: self.counts[p] for p in selected}
+            with mock.patch.dict(os.environ, {'DESK_CI_PARTITION': label}):
+                errors, facts = [], {}
+                ci.check_all_files(file_lines(counts), self.tracked, errors, facts)
+                self.assertEqual(errors, [])
+                for text in (file_lines(counts) + file_lines({selected[0]: counts[selected[0]]}),
+                             file_lines(counts) + ' ✓ test/unexpected.test.ts (1 tests) 1ms\n',
+                             file_lines(counts).replace(' tests)', ' tests | 1 skipped)', 1),
+                             file_lines(counts).replace(' tests)', ' tests | 1 failed)', 1),
+                             file_lines(counts).replace(' tests)', ' tests | 1 todo)', 1),
+                             file_lines(counts).split('\n', 1)[1]):
+                    errors = []; ci.check_all_files(text, self.tracked, errors, {})
+                    self.assertTrue(errors)
+
+    def test_writer_empty_journal(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp); root = base / 'root'; root.mkdir(mode=0o700)
+            (base / 'evidence').mkdir(mode=0o700)
+            for name in ('expectations', 'receipts'): (root / name).mkdir(mode=0o700)
+            ci.fixture_empty_writer(base, root)
+            for path in (root / 'expectations/x', root / 'receipts/x', base / 'evidence/fixture105-suite.json'):
+                path.write_text('{}')
+                with self.assertRaises(RuntimeError): ci.fixture_empty_writer(base, root)
+                path.unlink()
+
+    def test_partition_binding_changes(self):
+        members = {p: [1, 'a' * 64] for p in self.tracked}
+        identity = {'checkout_head': 'a' * 40, 'pr_head_sha': 'b' * 40, 'checkout_tree': 'c' * 40,
+                    'repository': 'mikeddamico/the-desk', 'run_id': '123', 'run_attempt': '1', 'errors': []}
+        binding = ci.partition_binding('writer', identity, members)
+        env = {'DESK_CI_PARTITION': 'writer', 'GITHUB_SHA': 'a' * 40, 'GITHUB_RUN_ID': '123',
+               'GITHUB_RUN_ATTEMPT': '1', 'GITHUB_REPOSITORY': 'mikeddamico/the-desk'}
+        with tempfile.TemporaryDirectory() as tmp, mock.patch.dict(os.environ, env), \
+             mock.patch.object(ci, 'ci_dir', return_value=Path(tmp)), \
+             mock.patch.object(ci, 'load_pre', return_value={'members': members}):
+            ev = Path(tmp) / 'evidence'; ev.mkdir()
+            write_json(ev / 'identity.json', identity); write_json(ev / 'partition.json', binding)
+            self.assertEqual(ci.check_partition_binding(), binding)
+            for key in ('GITHUB_SHA', 'GITHUB_RUN_ID', 'GITHUB_RUN_ATTEMPT', 'GITHUB_REPOSITORY', 'DESK_CI_PARTITION'):
+                with mock.patch.dict(os.environ, {key: 'changed'}):
+                    with self.assertRaises(RuntimeError): ci.check_partition_binding()
+            changed = self.copy(binding); changed['selection'] = []
+            write_json(ev / 'partition.json', changed)
+            with self.assertRaises(RuntimeError): ci.check_partition_binding()
+
+    def test_native_p33_modes_and_guard_failures(self):
+        for label in ('writer', 'rest'):
+            with tempfile.TemporaryDirectory() as tmp, mock.patch.dict(os.environ, {'DESK_CI_PARTITION': label}):
+                stage, runtime = Path(tmp) / 'stage', Path(tmp) / 'runtime'
+                attempt = make_stage(stage, runtime, 'attempt-test', 'all', [])
+                selected = ci.partition_files(self.tracked, label)
+                files, tests, _ = ci.PARTITION_COUNTS[label]
+                write(stage / 'stdout', file_lines({p: self.counts[p] for p in selected}) +
+                      ' Test Files  %d passed (%d)\n      Tests  %d passed (%d)\n' % (files, files, tests, tests))
+                if label == 'writer':
+                    import shutil
+                    shutil.rmtree(attempt / NONCES['all'][0])
+                self.assertEqual(ci.evaluate_stage('all', stage, runtime, self.tracked)[0], [])
+                write(stage / 'exit', '124\n')
+                self.assertTrue(ci.evaluate_stage('all', stage, runtime, self.tracked)[0])
+                write(stage / 'exit', '0\n')
+                edit_json(attempt / 'guard-result.json', lambda r: r.update(noChildren=False))
+                self.assertTrue(ci.evaluate_stage('all', stage, runtime, self.tracked)[0])
+                edit_json(attempt / 'guard-result.json', lambda r: r.update(noChildren=True))
+                if label == 'writer': (attempt / ('d' * 48)).mkdir()
+                else:
+                    import shutil
+                    shutil.rmtree(attempt / NONCES['all'][0])
+                self.assertTrue(ci.evaluate_stage('all', stage, runtime, self.tracked)[0])
+
+    def test_failed_gate_never_emits_proof(self):
+        for outcome in ci.FINAL_OUTCOMES:
+            outcomes = {name: 'success' for name in ci.FINAL_OUTCOMES}; outcomes[outcome] = 'failure'
+            finals = {scope: {'all_stages_ok': True, 'evidence_status': 'complete'} for scope in ci.SCOPES}
+            self.assertTrue(ci.final_verdict(finals, outcomes))
+
+    @contextlib.contextmanager
+    def final_world(self, label):
+        members = {p: [1, 'a' * 64] for p in self.tracked}
+        identity = {'checkout_head': 'a' * 40, 'pr_head_sha': 'b' * 40, 'checkout_tree': 'c' * 40,
+                    'repository': 'mikeddamico/the-desk', 'run_id': '123', 'run_attempt': '1', 'errors': []}
+        binding = ci.partition_binding(label, identity, members)
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp); ev = base / 'evidence'; ev.mkdir()
+            output = base / 'github-output'
+            env = {'DESK_CI_PARTITION': label, 'GITHUB_SHA': 'a' * 40, 'GITHUB_RUN_ID': '123',
+                   'GITHUB_RUN_ATTEMPT': '1', 'GITHUB_REPOSITORY': 'mikeddamico/the-desk',
+                   'GITHUB_OUTPUT': str(output), **OK_OUTCOMES}
+            write_json(ev / 'identity.json', identity); write_json(ev / 'snapshot-pre.json', {'members': members})
+            write_json(ev / 'bind-pre.json', {'ok': True}); write_json(ev / 'partition.json', binding)
+            security = base / 'security-report'; security.mkdir(mode=0o700)
+            security_bytes = ci.fixture_bytes({'version': '2.1.0', 'runs': [{'tool': {'driver': {'name': 'gitleaks'}}, 'results': []}]})
+            (security / 'results.sarif').write_bytes(security_bytes)
+            ci.fixture_write(security / 'manifest.json', {'schema': 'ci-security-report/1', 'binding': binding,
+                'outcome': 'success', 'findings': 0, 'bytes': len(security_bytes), 'sha256': ci.fixture_hash(security_bytes)})
+            selected = binding['selection']
+            write_json(ev / 'verdict-all.json', {'ok': True, 'stage': 'all', 'partition': label, 'facts': {
+                'selected_files': selected, 'file_results': {p: [{'tests': self.counts[p], 'failed': 0, 'skipped': 0, 'todo': 0}] for p in selected}}})
+            for scope in ci.SCOPES:
+                (base / ('upload-' + scope)).mkdir(mode=0o700)
+                write_json(base / ('upload-' + scope) / 'final.json', {'scope': scope, 'all_stages_ok': True,
+                    'evidence_status': 'complete', 'partition': label, 'commit': 'a' * 40, 'run_id': '123', 'run_attempt': '1'})
+            with mock.patch.dict(os.environ, env), mock.patch.object(ci, 'ci_dir', return_value=base), \
+                 mock.patch.object(ci, 'proof_identity_now', return_value=(identity, members)), \
+                 contextlib.redirect_stdout(io.StringIO()):
+                yield base, output, identity, members
+
+    def test_final_emits_only_successful_canonical_proof(self):
+        for label in ('writer', 'rest'):
+            with self.final_world(label) as (base, output, identity, members):
+                self.assertEqual(ci.cmd_final(), 0)
+                raw = output.read_text()
+                self.assertEqual(raw.count('\n'), 1)
+                self.assertTrue(raw.startswith('proof='))
+                proof = ci.parse_partition_proof(raw[6:-1])
+                self.assertEqual(proof['partition'], label)
+                self.assertEqual(proof['identity'], ci.partition_identity(identity, members))
+                self.assertEqual(proof['files'], {p: self.counts[p] for p in ci.partition_files(self.tracked, label)})
+
+    def test_final_failures_emit_no_output(self):
+        for label in ('writer', 'rest'):
+            for outcome in ci.FINAL_OUTCOMES:
+                with self.final_world(label) as (base, output, identity, members), mock.patch.dict(os.environ, {outcome: 'failure'}):
+                    self.assertEqual(ci.cmd_final(), 1); self.assertFalse(output.exists())
+            for key, value in [('partition', 'all'), ('commit', 'e' * 40), ('run_id', '124'), ('run_attempt', '2'), ('evidence_status', 'partial/censored')]:
+                with self.final_world(label) as (base, output, identity, members):
+                    edit_json(base / 'upload-full/final.json', lambda r: r.update({key: value}))
+                    self.assertEqual(ci.cmd_final(), 1); self.assertFalse(output.exists())
+            with self.final_world(label) as (base, output, identity, members):
+                changed = dict(members); changed[next(iter(changed))] = [2, 'f' * 64]
+                with mock.patch.object(ci, 'proof_identity_now', return_value=(identity, changed)):
+                    self.assertEqual(ci.cmd_final(), 1); self.assertFalse(output.exists())
+
+    def test_joint_command_boundary(self):
+        members = {p: [1, 'a' * 64] for p in self.tracked}
+        identity = {'checkout_head': 'a' * 40, 'pr_head_sha': 'b' * 40, 'checkout_tree': 'c' * 40,
+                    'repository': 'mikeddamico/the-desk', 'run_id': '123', 'run_attempt': '1'}
+        proofs = self.copy(self.proofs)
+        for proof in proofs.values(): proof['identity'] = ci.partition_identity(identity, members)
+        env = {label.upper() + '_PROOF': ci.fixture_bytes(proof).decode().rstrip('\n') for label, proof in proofs.items()}
+        env.update({label.upper() + '_OUTCOME': value for label, value in self.outcomes.items()})
+        with mock.patch.dict(os.environ, env), mock.patch.object(ci, 'proof_identity_now', return_value=(identity, members)), contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(ci.cmd_joint(), 0)
+            for key, value in [('WRITER_PROOF', ''), ('REST_PROOF', '{}'), ('REST_OUTCOME', 'cancelled')]:
+                with mock.patch.dict(os.environ, {key: value}): self.assertEqual(ci.cmd_joint(), 1)
+            with mock.patch.object(ci, 'proof_identity_now', return_value=(dict(identity, checkout_head='e' * 40), members)):
+                self.assertEqual(ci.cmd_joint(), 1)
+
+    def test_parser_identity_schema_and_bounds(self):
+        original = self.proofs['writer']
+        changes = [('checkout', True), ('tree', 'g' * 40), ('head', ''), ('source_sha256', 'e' * 63),
+                   ('repository', 'a' * 101 + '/b'), ('run_id', '0'), ('run_attempt', '١'), ('extra', 'x')]
+        for key, value in changes:
+            proof = self.copy(original); proof['identity'][key] = value
+            with self.assertRaises(RuntimeError): ci.parse_partition_proof(ci.fixture_bytes(proof).decode().rstrip('\n'))
+        for counts in ({'test/' + 'a' * 513 + '.test.ts': 4908}, {'test/../x.test.ts': 4908},
+                       {'test/x%d.test.ts' % n: 1 for n in range(79)}):
+            proof = self.copy(original); proof['files'] = counts
+            with self.assertRaises(RuntimeError): ci.parse_partition_proof(ci.fixture_bytes(proof).decode().rstrip('\n'))
+        with self.assertRaises(RuntimeError): ci.parse_partition_proof(json.dumps(original))
+
+    def test_predecessor_and_controls_partition_binding(self):
+        with tempfile.TemporaryDirectory() as tmp, mock.patch.dict(os.environ, {'DESK_CI_PARTITION': 'writer',
+                'GITHUB_SHA': 'a' * 40, 'GITHUB_RUN_ID': '123', 'GITHUB_RUN_ATTEMPT': '1'}):
+            path = Path(tmp) / 'verdict.json'
+            write_json(path, {'stage': 'focused', 'partition': 'writer', 'ok': True})
+            self.assertTrue(ci.stage_verdict_ok(path, 'focused'))
+            for key, value in [('partition', 'rest'), ('partition', 'all'), ('stage', 'all')]:
+                write_json(path, {'stage': 'focused', 'partition': 'writer', 'ok': True, key: value})
+                self.assertFalse(ci.stage_verdict_ok(path, 'focused'))
+            final = {'scope': 'controls', 'all_stages_ok': True, 'evidence_status': 'complete',
+                     'collection_problems': {'missing': [], 'censored': [], 'errors': []},
+                     'verdicts': {'prerequisite': True, 'focused': True}, 'not_attempted': [],
+                     'partition': 'writer', 'commit': 'a' * 40, 'run_id': '123', 'run_attempt': '1'}
+            write_json(Path(tmp) / 'final.json', final)
+            self.assertEqual(ci.controls_problems(tmp), [])
+            for key, value in [('partition', 'rest'), ('commit', 'e' * 40), ('run_id', '124'), ('run_attempt', '2')]:
+                write_json(Path(tmp) / 'final.json', dict(final, **{key: value}))
+                self.assertTrue(ci.controls_problems(tmp))
+
+    def test_fixture_capture_and_collect_partition_paths(self):
+        for label in ('writer', 'rest'):
+            with fixture_world() as (base, checkout, root, binding), mock.patch.dict(os.environ, {'DESK_CI_PARTITION': label}), \
+                 mock.patch.object(ci, 'ROOT', checkout), mock.patch.object(ci, 'tracked_files', return_value=self.tracked):
+                journal = base / 'evidence/fixture105-suite.json'
+                journal.unlink()
+                ci.fixture_write(base / 'evidence/fixture105-before-all.json', {'binding': binding})
+                record = ci.fixture_capture_stage(base, 'all', {}, False)
+                self.assertEqual(record['complete'], label == 'writer', record)
+                if label == 'writer': self.assertEqual(record['connected_population'], 'empty')
+                upload = base / 'upload'; upload.mkdir(mode=0o700)
+                keep = ci.Retention(upload)
+                successful = {'all': {'facts': {'fixture105': record}}} if label == 'writer' else {}
+                ci.fixture_collect(base, keep, 'full', successful)
+                if label == 'writer':
+                    self.assertFalse(any(keep.problems.values()), keep.problems)
+                    self.assertFalse((upload / 'fixture105/suite.json').exists())
+                else:
+                    self.assertIn('fixture105/suite.json', keep.problems['missing'])
+        for mutation in ('journal', 'expectations', 'receipts'):
+            with fixture_world() as (base, checkout, root, binding), mock.patch.dict(os.environ, {'DESK_CI_PARTITION': 'writer'}), \
+                 mock.patch.object(ci, 'ROOT', checkout), mock.patch.object(ci, 'tracked_files', return_value=self.tracked):
+                if mutation != 'journal':
+                    (base / 'evidence/fixture105-suite.json').unlink()
+                    ci.fixture_write(root / mutation / ('a' * 64 + '.intent.json' if mutation == 'expectations' else 'x'), {})
+                record = ci.fixture_capture_stage(base, 'all', {}, False)
+                self.assertFalse(record['complete'])
+        with fixture_world() as (base, checkout, root, binding), mock.patch.dict(os.environ, {'DESK_CI_PARTITION': 'rest'}), \
+             mock.patch.object(ci, 'ROOT', checkout), mock.patch.object(ci, 'tracked_files', return_value=self.tracked):
+            record = ci.fixture_capture_stage(base, 'all', {}, False)
+            self.assertFalse(record['complete'])  # Existing intentionally incomplete 33-case journal.
+
+
+    def test_workflow_closed_jobs_and_credentials(self):
+        workflow = (ci.ROOT / '.github/workflows/ci.yml').read_text()
+        self.assertEqual(workflow.count('  verify-writer:\n'), 1)
+        self.assertEqual(workflow.count('  verify-rest:\n'), 1)
+        self.assertIn('needs: [verify-writer, verify-rest, container]', workflow)
+        for label in ('writer', 'rest'):
+            self.assertIn('DESK_CI_PARTITION: ' + label, workflow)
+            self.assertIn('needs.verify-' + label + '.outputs.proof', workflow)
+        self.assertNotIn('matrix:', workflow)
+        wrapper = (ci.ROOT / 'tools/ci-validation/run-stage.sh').read_text()
+        self.assertIn('all) CEILING=7200', wrapper)
+        self.assertIn('if [ "$PROFILE" = rest ]; then DB_FEED=$TEST_DATABASE_URL; else DB_FEED=""; fi', wrapper)
+        self.assertIn('/bin/bash -c "$CHILD" _ "$PROFILE" "$CEILING"', wrapper)
+        self.assertEqual(workflow.count('id: gitleaks'), 2)
+        self.assertEqual(workflow.count('id: audit'), 2)
+
+
+class P33NativeLoaderTests(unittest.TestCase):
+    """The fixed child uses pinned Node native stripping, not a preload loader."""
+
+    def test_p33_child_uses_native_stripping_without_loader(self):
+        guard = (ci.ROOT / 'test/support/p33-parity-supervisor.py').read_text()
+        start = guard.index("    command = ([args.node,")
+        end = guard.index("    selector = selectors.DefaultSelector()", start)
+        self.assertEqual(guard[start:end],
+                         "    command = ([args.node, str(ROOT/'test/support/p33-parity-runner.ts'), '--p33-child']\n"
+                         "               if args.mode == 'p33' else [sys.executable, str(SELF), 'control', args.mode])\n")
+
+
+class SecurityReport156Tests(unittest.TestCase):
+    @contextlib.contextmanager
+    def world(self, results=None):
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp) / 'ci'; root = Path(tmp) / 'checkout'
+            base.mkdir(mode=0o700); root.mkdir(mode=0o700)
+            (root / 'owned.ts').write_text('// source\n')
+            pre = ci.take_snapshot(['owned.ts'], root=root, allow_dist=False)
+            binding = {'partition': 'writer', 'identity': {'commit': 'a' * 40}}
+            data = ci.fixture_bytes({'version': '2.1.0', 'runs': [{'tool': {'driver': {'name': 'gitleaks'}}, 'results': results or []}]})
+            (root / 'results.sarif').write_bytes(data)
+            yield base, root, binding, pre, data
+
+    def test_report_moves_without_source_exemption(self):
+        with self.world() as (base, root, binding, pre, data):
+            self.assertEqual(ci.take_snapshot(['owned.ts'], root=root, allow_dist=False)['extra'], ['results.sarif'])
+            record = ci.retain_security_report(base, root, binding, pre, 'success')
+            self.assertEqual(record['sha256'], ci.fixture_hash(data))
+            self.assertFalse((root / 'results.sarif').exists())
+            self.assertEqual((base / 'security-report/results.sarif').read_bytes(), data)
+            self.assertEqual(ci.snapshot_errors(ci.take_snapshot(['owned.ts'], root=root, allow_dist=False), pre=pre), [])
+            ci.verify_security_report(base, binding)
+            (root / 'unexpected.txt').write_text('x')
+            self.assertTrue(ci.snapshot_errors(ci.take_snapshot(['owned.ts'], root=root, allow_dist=False), pre=pre))
+
+    def test_missing_tracked_linked_and_malformed_report_refuse(self):
+        for mutation in ('missing', 'tracked', 'symlink', 'hardlink', 'malformed', 'oversize', 'unknown-outcome'):
+            with self.subTest(mutation=mutation), self.world() as (base, root, binding, pre, data):
+                path = root / 'results.sarif'; outcome = 'success'
+                if mutation == 'missing': path.unlink()
+                elif mutation == 'tracked': pre['members']['results.sarif'] = [len(data), ci.fixture_hash(data)]
+                elif mutation == 'symlink':
+                    path.unlink(); path.symlink_to(root / 'owned.ts')
+                elif mutation == 'hardlink': os.link(path, root / 'extra-link')
+                elif mutation == 'malformed': path.write_text('{}')
+                elif mutation == 'oversize': path.write_bytes(b'x' * (ci.COPY_LIMIT + 1))
+                else: outcome = 'skipped'
+                with self.assertRaises((RuntimeError, OSError, ValueError)):
+                    ci.retain_security_report(base, root, binding, pre, outcome)
+                self.assertFalse((base / 'security-report').exists())
+
+    def test_previous_capture_not_overwritten(self):
+        with self.world() as (base, root, binding, pre, data):
+            destination = base / 'security-report'; destination.mkdir(mode=0o700)
+            sentinel = destination / 'results.sarif'; sentinel.write_text('preserve')
+            with self.assertRaises(FileExistsError): ci.retain_security_report(base, root, binding, pre, 'success')
+            self.assertEqual(sentinel.read_text(), 'preserve')
+            self.assertEqual((root / 'results.sarif').read_bytes(), data)
+
+    def test_failed_scan_evidence_is_retained_but_never_accepted(self):
+        with self.world([{'ruleId': 'synthetic-not-a-secret'}]) as (base, root, binding, pre, data):
+            ci.retain_security_report(base, root, binding, pre, 'failure')
+            self.assertEqual((base / 'security-report/results.sarif').read_bytes(), data)
+            with self.assertRaises(RuntimeError): ci.verify_security_report(base, binding)
+        with self.world([{'ruleId': 'synthetic-not-a-secret'}]) as (base, root, binding, pre, data):
+            ci.retain_security_report(base, root, binding, pre, 'success')
+            with self.assertRaises(RuntimeError): ci.verify_security_report(base, binding)
+
+    def test_changed_report_binding_manifest_population_refuse(self):
+        for mutation in ('bytes', 'binding', 'manifest', 'extra'):
+            with self.world() as (base, root, binding, pre, data):
+                ci.retain_security_report(base, root, binding, pre, 'success')
+                if mutation == 'bytes': (base / 'security-report/results.sarif').write_bytes(data + b' ')
+                elif mutation == 'binding': binding = {'partition': 'rest'}
+                elif mutation == 'manifest': edit_json(base / 'security-report/manifest.json', lambda r: r.update(outcome='failure'))
+                else: (base / 'security-report/extra').write_text('x')
+                with self.assertRaises(RuntimeError): ci.verify_security_report(base, binding)
+
+    def test_report_upload_required_and_unique(self):
+        workflow = (ci.ROOT / '.github/workflows/ci.yml').read_text()
+        self.assertEqual(workflow.count('GITLEAKS_ENABLE_UPLOAD_ARTIFACT: "false"'), 2)
+        self.assertEqual(workflow.count('tools/ci-validation/ci.py retain-security'), 2)
+        self.assertEqual(workflow.count('SECURITY_UPLOAD_OUTCOME: ${{ steps.upload-security.outcome }}'), 2)
+        for label in ('writer', 'rest'):
+            self.assertIn('name: ci-security-' + label + '-${{ github.run_id }}-${{ github.run_attempt }}', workflow)
+        finals = {scope: {'all_stages_ok': True, 'evidence_status': 'complete'} for scope in ci.SCOPES}
+        for outcome in ('failure', 'skipped', 'cancelled', None):
+            self.assertTrue(ci.final_verdict(finals, {**OK_OUTCOMES, 'SECURITY_UPLOAD_OUTCOME': outcome}))
 
 
 if __name__ == '__main__':

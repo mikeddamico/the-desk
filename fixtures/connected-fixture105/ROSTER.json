@@ -1,0 +1,39 @@
+{
+  "schema": "connected-fixture109-roster/1",
+  "authored_fiction": true,
+  "profiles": [
+    {
+      "participant_id": "mara_ives",
+      "display_name": "Mara Ives",
+      "participant_profile_version_id": "mara-ives-fixture109/1",
+      "role": "host",
+      "constraints": [
+        "Orient the listener",
+        "Close with bounded synthesis",
+        "No claimed reporting access"
+      ]
+    },
+    {
+      "participant_id": "jonah_reed",
+      "display_name": "Jonah Reed",
+      "participant_profile_version_id": "jonah-reed-fixture109/1",
+      "role": "analyst",
+      "constraints": [
+        "Separate instruction from observation",
+        "Do not infer cause from this sample",
+        "Use at most two distinct numeric facts per turn"
+      ]
+    },
+    {
+      "participant_id": "nia_calder",
+      "display_name": "Nia Calder",
+      "participant_profile_version_id": "nia-calder-fixture109/1",
+      "role": "supporter_avatar",
+      "constraints": [
+        "Express a personal reaction, not group membership",
+        "Attribute the bounded supporter set",
+        "No invented supporter consensus"
+      ]
+    }
+  ]
+}

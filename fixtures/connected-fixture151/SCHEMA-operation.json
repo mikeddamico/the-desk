@@ -1,0 +1,139 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "record_kind",
+    "subject",
+    "release_sha256",
+    "construction_observation_sha256",
+    "actual_claims_writing_result_sha256",
+    "actual_performance_result_sha256",
+    "performance_direction_hash",
+    "genuine_semantic_admission",
+    "required_semantic_status",
+    "owned_rows",
+    "operation_id"
+  ],
+  "properties": {
+    "schema": { "const": "fixture105-operation/1" },
+    "record_kind": { "const": "actual_owned_operation" },
+    "subject": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "profile",
+        "purpose",
+        "environment",
+        "program_run_id",
+        "attempt_id",
+        "show_config_hash",
+        "package_hash",
+        "brief_hash",
+        "substantive_script_hash",
+        "final_script_hash",
+        "gate_set_version",
+        "program_run_authored_at",
+        "show_id",
+        "show_version",
+        "show_config_version_id",
+        "package_id",
+        "brief_version_id",
+        "substantive_script_version_id",
+        "final_script_version_id",
+        "claims_policy_version",
+        "writing_policy_version",
+        "performance_policy_version"
+      ],
+      "properties": {
+        "profile": { "const": "connected-evaluation-fixture105/1" },
+        "purpose": { "const": "evaluation" },
+        "environment": { "const": "test" },
+        "program_run_id": { "const": "a8c6f0e2-4eef-589f-95d2-ed6ae393dcda" },
+        "attempt_id": { "const": "bd1de358-0db4-5229-9c1d-4fc8d6b967a1" },
+        "show_config_hash": {
+          "const": "18eec4ddf5be87cbfd6317bc067f152ec400394eda18454d9bbd9bd22a76ff2d"
+        },
+        "package_hash": {
+          "const": "288664c91f63508197091e4d2522a62962e6c8eb8484e7f4359dc1d2be01b8ae"
+        },
+        "brief_hash": {
+          "const": "8067cb4e58d9a6a82b7dcf6c581ad01f6f346eba3f6e36e3802d6dca0e3b5c9f"
+        },
+        "substantive_script_hash": {
+          "const": "8d4f3db317b14ed71ee4aae9a032bd390167a933a20aba9ba94fb5238c740647"
+        },
+        "final_script_hash": {
+          "const": "877c409ae0c3262432fa12ebd39eeca32a8dd7909f5bc4e8ecc7bf9d5af20a75"
+        },
+        "gate_set_version": { "const": "build2-connected-fixture105-gates/1" },
+        "program_run_authored_at": { "const": "2024-06-26T18:00:00Z" },
+        "show_id": { "const": "7ef80c54-5645-5925-a5f1-d8b5b7ad2a30" },
+        "show_version": { "const": "estuary-fixture109/1" },
+        "show_config_version_id": {
+          "const": "9e1252b5-f582-5aab-ad2a-e067fa571b04"
+        },
+        "package_id": { "const": "fabfeb44-c361-5e82-9b8f-3a960d211cfa" },
+        "brief_version_id": { "const": "0e196925-50d3-5ff7-9baf-501a9a748adc" },
+        "substantive_script_version_id": {
+          "const": "48b7a57a-4569-522d-9834-7531711b0ebe"
+        },
+        "final_script_version_id": {
+          "const": "55706b84-d31e-5d32-9a21-8824c988914b"
+        },
+        "claims_policy_version": { "const": "claims-0.1.2" },
+        "writing_policy_version": { "const": "writing-0.2.3" },
+        "performance_policy_version": { "const": "performance-render-0.1.4" }
+      }
+    },
+    "release_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "construction_observation_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "actual_claims_writing_result_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "actual_performance_result_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "performance_direction_hash": {
+      "const": "127e47140121f28b25c826ae816312d045f60939b488de0f1eae0a166d87e1fc"
+    },
+    "genuine_semantic_admission": { "const": false },
+    "required_semantic_status": {
+      "const": {
+        "H04": "not_established_required",
+        "H13": "not_established_required"
+      }
+    },
+    "owned_rows": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 32,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["table", "primary_key", "canonical_row", "row_sha256"],
+        "properties": {
+          "table": {
+            "enum": [
+              "artifacts",
+              "performance_direction_versions",
+              "performance_intents",
+              "gate_results"
+            ]
+          },
+          "primary_key": { "type": "string", "format": "uuid" },
+          "canonical_row": { "type": "string", "minLength": 1 },
+          "row_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+        }
+      }
+    },
+    "operation_id": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+  },
+  "$comment": "Mandatory semantic validation: INNER-DIGEST-RULES.md, SQL-COLUMN-MAP.json and RESULT-DIGEST-MAP.json. JSON Schema validation alone cannot admit an artifact or prove linked digests."
+}
