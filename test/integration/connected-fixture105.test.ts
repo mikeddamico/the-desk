@@ -1848,6 +1848,45 @@ suite("connected fixture105 native ownership", () => {
     caseBody(
       "holds unknown construction commit without inventing its missing settlement receipt",
       async () => {
+        let diagnosticRows = 0;
+        const observeTarget = (
+          text: string,
+          result: pg.QueryResult,
+          database: string,
+        ): void => {
+          if (
+            process.env.DESK_P33_PROFILE !== "native157" ||
+            !text.startsWith("SELECT current_database() AS database,") ||
+            diagnosticRows >= 64
+          )
+            return;
+          diagnosticRows += 1;
+          const row = result.rows[0] as Obj | undefined;
+          // Fixed predicate facts only: no database names, logins, URLs or SQL text.
+          process.stderr.write(
+            `NATIVE157_TARGET ${JSON.stringify({
+              ordinal: diagnosticRows,
+              oneRow: result.rows.length === 1,
+              databaseMatches: row?.database === database,
+              runtimeRole: row?.runtime_role === true,
+              notElevated: row?.elevated === false,
+              noOtherSessions: row?.other_sessions === 0,
+              otherSessions:
+                typeof row?.other_sessions === "number"
+                  ? row.other_sessions
+                  : null,
+              oidString: typeof row?.database_oid === "string",
+              loginString: typeof row?.login === "string",
+              databaseString: typeof row?.database === "string",
+              addressValid:
+                row?.server_address === null ||
+                typeof row?.server_address === "string",
+              portValid:
+                row?.server_port === null ||
+                typeof row?.server_port === "number",
+            })}\n`,
+          );
+        };
         const env = await fresh();
         let armed = false;
         let intercepted = 0;
@@ -1866,6 +1905,7 @@ suite("connected fixture105 native ownership", () => {
             values?: unknown[],
           ): Promise<pg.QueryResult> {
             const result = await original.call(this, text, values);
+            observeTarget(text, result, env.name);
             if (armed && text === "COMMIT") {
               armed = false;
               intercepted += 1;
@@ -1947,6 +1987,7 @@ suite("connected fixture105 native ownership", () => {
               values?: unknown[],
             ): Promise<pg.QueryResult> {
               const result = await query.call(this, text, values);
+              observeTarget(text, result, separate.name);
               if (statement.test(text)) {
                 reached++;
                 expect(reached).toBe(1);

@@ -2012,11 +2012,44 @@ class Partition155Tests(unittest.TestCase):
         self.assertNotIn('matrix:', workflow)
         wrapper = (ci.ROOT / 'tools/ci-validation/run-stage.sh').read_text()
         self.assertIn('all) CEILING=7200', wrapper)
-        self.assertIn('if [ "$PROFILE" = rest ]; then DB_FEED=$TEST_DATABASE_URL; else DB_FEED=""; fi', wrapper)
+        self.assertIn('if [ "$PROFILE" = rest ] || [ "$PROFILE" = native157 ]; then DB_FEED=$TEST_DATABASE_URL; else DB_FEED=""; fi', wrapper)
         self.assertIn('/bin/bash -c "$CHILD" _ "$PROFILE" "$CEILING"', wrapper)
         self.assertEqual(workflow.count('id: gitleaks'), 2)
         self.assertEqual(workflow.count('id: audit'), 2)
 
+
+class Diagnostic157ShapeTests(unittest.TestCase):
+    """Temporary diagnostic route: static proofs only, never aggregate acceptance."""
+
+    def test_both_jobs_hold_before_unchanged_aggregate(self):
+        workflow = (ci.ROOT / '.github/workflows/ci.yml').read_text()
+        self.assertEqual(workflow.count('run-stage.sh diagnostic157'), 2)
+        for job in workflow.split('  verify-')[1:3]:
+            self.assertLess(job.index('run-stage.sh diagnostic157'), job.index('run-stage.sh all'))
+            step = job[job.index('name: Temporary CI157'):job.index('name: Guard P33 aggregate')]
+            self.assertNotIn('if:', step)
+            self.assertNotIn('continue-on-error', step)
+        wrapper = (HERE / 'run-stage.sh').read_text()
+        self.assertIn('all) CEILING=7200 ;;', wrapper)
+        self.assertIn('diagnostic157) STAGE=all; CEILING=180; DIAGNOSTIC_ONLY=1 ;;', wrapper)
+        self.assertIn('PROFILE=p33; CEILING=60; else PROFILE=native157', wrapper)
+        self.assertIn('*) echo "unknown stage" >&2; exit 64', wrapper)
+        self.assertLess(wrapper.index('> "$STAGE_DIR/exit"'), wrapper.index('HOLD: diagnostic157 only'))
+        self.assertIn('exit 78\nfi\nexit "$RC"', wrapper)
+
+    def test_native_selector_and_observation_are_closed(self):
+        guard = (ci.ROOT / 'test/support/p33-parity-supervisor.py').read_text()
+        self.assertIn("'native157': ['test/integration/connected-fixture105.test.ts', '--testNamePattern',", guard)
+        self.assertIn("'^connected fixture105 native ownership holds unknown construction commit without inventing its missing settlement receipt$'", guard)
+        self.assertIn('if len(output) + len(diagnostic) <= OUTPUT_LIMIT:', guard)
+        native = (ci.ROOT / 'test/integration/connected-fixture105.test.ts').read_text()
+        self.assertIn('process.env.DESK_P33_PROFILE !== "native157"', native)
+        self.assertIn('diagnosticRows >= 64', native)
+        self.assertIn('const LIMIT = 120000;', native)
+        runner = (ci.ROOT / 'test/support/p33-parity-runner.ts').read_text()
+        self.assertLess(runner.index('await ctx.close();'), runner.index('phase("completion_written")'))
+        self.assertIn('.getActiveResourcesInfo()', runner)
+        self.assertIn('.slice(0, 32)', runner)
 
 
 class SecurityReport156Tests(unittest.TestCase):
