@@ -2037,6 +2037,14 @@ class Diagnostic157ShapeTests(unittest.TestCase):
         self.assertLess(wrapper.index('> "$STAGE_DIR/exit"'), wrapper.index('HOLD: diagnostic157 only'))
         self.assertIn('exit 78\nfi\nexit "$RC"', wrapper)
 
+    def test_p33_child_uses_native_stripping_without_loader(self):
+        guard = (ci.ROOT / 'test/support/p33-parity-supervisor.py').read_text()
+        start = guard.index("    command = ([args.node,")
+        end = guard.index("    selector = selectors.DefaultSelector()", start)
+        self.assertEqual(guard[start:end],
+                         "    command = ([args.node, str(ROOT/'test/support/p33-parity-runner.ts'), '--p33-child']\n"
+                         "               if args.mode == 'p33' else [sys.executable, str(SELF), 'control', args.mode])\n")
+
     def test_native_selector_and_observation_are_closed(self):
         guard = (ci.ROOT / 'test/support/p33-parity-supervisor.py').read_text()
         self.assertIn("'native157': ['test/integration/connected-fixture105.test.ts', '--testNamePattern',", guard)

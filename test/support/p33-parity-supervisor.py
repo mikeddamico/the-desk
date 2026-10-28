@@ -519,7 +519,7 @@ def case_owner(args):
     # The ordinary test's guard handshake must not enable child recursion.
     env.pop('DESK_P33_SOCKET', None)
     env.pop('DESK_P33_TOKEN', None)
-    command = ([args.node, '--import', 'tsx', str(ROOT/'test/support/p33-parity-runner.ts'), '--p33-child']
+    command = ([args.node, str(ROOT/'test/support/p33-parity-runner.ts'), '--p33-child']
                if args.mode == 'p33' else [sys.executable, str(SELF), 'control', args.mode])
     selector = selectors.DefaultSelector()
     selector.register(link, selectors.EVENT_READ, 'parent')
