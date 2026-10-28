@@ -155,3 +155,28 @@ binding, and uploads it under a partition-specific name. The action's duplicate
 built-in upload is replaced, not its scan or failure status. Final acceptance
 requires the unchanged successful report, its successful upload and the original
 strict source snapshot with no report exemption or untracked-file whitelist.
+
+### CI108–CI110 diagnostic disclosure
+
+CI108's native unknown-construction case stopped before target admission with
+`fixture_target_isolation`; the rejected predicate was not captured. The same
+selected case passed in CI109 and CI110 (76.698s and 99.653s), with all ten target
+observations reporting valid predicates and zero other sessions. Neither result
+establishes the intermittent cause or proves it fixed. A capped, failure-only
+predicate observation remains in that test; it performs no additional query,
+wait, retry, session termination or admission change.
+
+The P33 standalone child now uses pinned Node24 native TypeScript stripping,
+rather than preloading `tsx`; the original independent validation, Vitest case,
+hooks, completion checks, two-second deadline and descendant settlement remain.
+Observed child exit improved from 1566.2ms (CI109) to 1290.6ms (CI110), and the
+Vitest import interval from 622.9ms to 175.5ms despite a slower validation interval.
+These are separate hosted observations, not a controlled benchmark or a guarantee
+against future deadline failures. Bounded lifecycle/resource-type and deadline
+exit/EOF observations are diagnostic only, never acceptance evidence on their own.
+
+Both selected CI110 runs have settled, reaped, no-children guard evidence without
+cleanup errors. Diagnostic selection did not establish full-suite acceptance.
+Temporary diagnostic selections and holds have been removed; the original full
+writer/rest partitions, count gates, security/artifact requirements and final
+joint proof remain required on the final independently reviewed commit.

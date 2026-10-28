@@ -1855,35 +1855,37 @@ suite("connected fixture105 native ownership", () => {
           database: string,
         ): void => {
           if (
-            process.env.DESK_P33_PROFILE !== "native157" ||
             !text.startsWith("SELECT current_database() AS database,") ||
             diagnosticRows >= 64
           )
             return;
           diagnosticRows += 1;
           const row = result.rows[0] as Obj | undefined;
-          // Fixed predicate facts only: no database names, logins, URLs or SQL text.
+          const checks = {
+            oneRow: result.rows.length === 1,
+            databaseMatches: row?.database === database,
+            runtimeRole: row?.runtime_role === true,
+            notElevated: row?.elevated === false,
+            noOtherSessions: row?.other_sessions === 0,
+            oidString: typeof row?.database_oid === "string",
+            loginString: typeof row?.login === "string",
+            databaseString: typeof row?.database === "string",
+            addressValid:
+              row?.server_address === null ||
+              typeof row?.server_address === "string",
+            portValid:
+              row?.server_port === null || typeof row?.server_port === "number",
+          };
+          if (Object.values(checks).every((passed) => passed)) return;
+          // Failure facts only: no queries, waits, retries, names, URLs or SQL text.
           process.stderr.write(
-            `NATIVE157_TARGET ${JSON.stringify({
+            `FIXTURE_TARGET ${JSON.stringify({
               ordinal: diagnosticRows,
-              oneRow: result.rows.length === 1,
-              databaseMatches: row?.database === database,
-              runtimeRole: row?.runtime_role === true,
-              notElevated: row?.elevated === false,
-              noOtherSessions: row?.other_sessions === 0,
+              ...checks,
               otherSessions:
                 typeof row?.other_sessions === "number"
                   ? row.other_sessions
                   : null,
-              oidString: typeof row?.database_oid === "string",
-              loginString: typeof row?.login === "string",
-              databaseString: typeof row?.database === "string",
-              addressValid:
-                row?.server_address === null ||
-                typeof row?.server_address === "string",
-              portValid:
-                row?.server_port === null ||
-                typeof row?.server_port === "number",
             })}\n`,
           );
         };
