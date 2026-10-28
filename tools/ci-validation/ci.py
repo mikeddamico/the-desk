@@ -1,9 +1,10 @@
 #!/usr/bin/python3
-"""Fixed capture/validation tool for the amended foundation-ci workflow (stages: prerequisite, focused, all).
+"""Fixed capture/validation tool for the foundation-ci workflow (stages: prerequisite, focused, all).
 
-PROPOSED, NOT YET REVIEWED OR RUN. Standard library only. It never starts the P33 guard, Vitest, a database
-client other than the fixed read-only probe below, or any native extraction. No arbitrary command, path, profile or
-stage input is accepted. Subcommands: init, bind-build, dbprobe, precheck, check, collect, final.
+Standard library only. It never starts the P33 guard, Vitest, a database client other than the fixed read-only probe
+below, or any native extraction. No arbitrary command, path, profile or stage input is accepted. Fixed subcommands handle
+workspace initialization, build/fixture/partition binding, database probing, stage prechecks and verdict checks,
+scoped evidence collection, security retention, and per-partition/joint final verdicts (see main()).
 precheck for stage `all` additionally requires a complete controls-scope collection record (controls_problems), so a
 failed controls retention stops the run before the aggregate is created; partial artifacts are still collected and uploaded.
 

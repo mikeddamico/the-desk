@@ -1,6 +1,6 @@
 #!/bin/bash
 # Fixed-stage envelope around the UNCHANGED P33 guard (test/support/p33-parity-supervisor.py).
-# PROPOSED, NOT YET REVIEWED OR RUN. Hosted ubuntu-24.04 VM only; never run it elsewhere.
+# Hosted ubuntu-24.04 VM only; never run it elsewhere.
 # One argument: prerequisite | focused | all. No other input selects a command or profile.
 # The disposable VM is the outer containment boundary; this wrapper adds only: a wall ceiling,
 # core 0, a 64 MiB per-file ceiling, a sanitized environment, exclusive capture files, and the
