@@ -1,0 +1,166 @@
+{
+  "schema": "frozen-fixture046-render-input-support/1",
+  "source": {
+    "member": "foundation_rows_398.json",
+    "bytes": 471514,
+    "sha256": "a27f4381bd6449bfb656c6431b56115a932e05c82791696fc293c701c0a58a7e"
+  },
+  "records": {
+    "voice_profiles": [
+      {
+        "participant_identity": "tully",
+        "voice_profile_id": "d125001b-0000-4000-8000-000000000001"
+      },
+      {
+        "participant_identity": "gaz",
+        "voice_profile_id": "d125001b-0000-4000-8000-000000000002"
+      },
+      {
+        "participant_identity": "simon",
+        "voice_profile_id": "d125001b-0000-4000-8000-000000000003"
+      }
+    ],
+    "voice_profile_versions": [
+      {
+        "render_fields": {
+          "provider": "fixture_tts",
+          "provider_model_compatibility": [
+            "fixture-model-1.0"
+          ],
+          "provider_voice_id": "fixture_voice_tully",
+          "render_facing_design": "warm dry British broadcaster",
+          "request_side_voice_controls": {
+            "stability": "standard"
+          }
+        },
+        "version": 1,
+        "voice_profile_id": "d125001b-0000-4000-8000-000000000001",
+        "voice_profile_version_id": "d125001c-0000-4000-8000-000000000001"
+      },
+      {
+        "render_fields": {
+          "provider": "fixture_tts",
+          "provider_model_compatibility": [
+            "fixture-model-1.0"
+          ],
+          "provider_voice_id": "fixture_voice_gaz",
+          "render_facing_design": "dry intellectual British analyst; restrained, precise, unperformed humor",
+          "request_side_voice_controls": {
+            "stability": "standard"
+          }
+        },
+        "version": 1,
+        "voice_profile_id": "d125001b-0000-4000-8000-000000000002",
+        "voice_profile_version_id": "d125001c-0000-4000-8000-000000000002"
+      },
+      {
+        "render_fields": {
+          "provider": "fixture_tts",
+          "provider_model_compatibility": [
+            "fixture-model-1.0"
+          ],
+          "provider_voice_id": "fixture_voice_simon",
+          "render_facing_design": "expressive supporter avatar; warm, witty, emotionally present",
+          "request_side_voice_controls": {
+            "stability": "standard"
+          }
+        },
+        "version": 1,
+        "voice_profile_id": "d125001b-0000-4000-8000-000000000003",
+        "voice_profile_version_id": "d125001c-0000-4000-8000-000000000003"
+      }
+    ],
+    "pronunciations": [
+      {
+        "canonical_text": "Northbridge",
+        "canonical_version": 1,
+        "entity_identity": "entity_northbridge_fc",
+        "ipa": "/ˈnɔːθbrɪdʒ/",
+        "language": "en-GB",
+        "pronunciation_id": "d125001d-0000-4000-8000-000000000001",
+        "supersedes_pronunciation_id": null
+      },
+      {
+        "canonical_text": "Northbridge",
+        "canonical_version": 2,
+        "entity_identity": "entity_northbridge_fc",
+        "ipa": "/ˈnɔːθbrɪdʒ/",
+        "language": "en-GB",
+        "pronunciation_id": "d125001d-0000-4000-8000-000000000002",
+        "supersedes_pronunciation_id": "d125001d-0000-4000-8000-000000000001"
+      }
+    ],
+    "pronunciation_renderings": [
+      {
+        "pronunciation_id": "d125001d-0000-4000-8000-000000000001",
+        "pronunciation_rendering_id": "d125001e-0000-4000-8000-000000000001",
+        "provider": "fixture_tts",
+        "rendering": "Northbridge",
+        "version": 1,
+        "voice_profile_version_id": "d125001c-0000-4000-8000-000000000001"
+      },
+      {
+        "pronunciation_id": "d125001d-0000-4000-8000-000000000002",
+        "pronunciation_rendering_id": "d125001e-0000-4000-8000-000000000002",
+        "provider": "fixture_tts",
+        "rendering": "North-bridge",
+        "version": 2,
+        "voice_profile_version_id": "d125001c-0000-4000-8000-000000000001"
+      },
+      {
+        "pronunciation_id": "d125001d-0000-4000-8000-000000000002",
+        "pronunciation_rendering_id": "d125001e-0000-4000-8000-000000000003",
+        "provider": "fixture_tts",
+        "rendering": "North-bridge",
+        "version": 2,
+        "voice_profile_version_id": "d125001c-0000-4000-8000-000000000002"
+      }
+    ]
+  },
+  "record_pointer_ledger": [
+    {
+      "source_pointer": "/tables/voice_profiles/0",
+      "target_pointer": "/records/voice_profiles/0"
+    },
+    {
+      "source_pointer": "/tables/voice_profiles/1",
+      "target_pointer": "/records/voice_profiles/1"
+    },
+    {
+      "source_pointer": "/tables/voice_profiles/2",
+      "target_pointer": "/records/voice_profiles/2"
+    },
+    {
+      "source_pointer": "/tables/voice_profile_versions/0",
+      "target_pointer": "/records/voice_profile_versions/0"
+    },
+    {
+      "source_pointer": "/tables/voice_profile_versions/1",
+      "target_pointer": "/records/voice_profile_versions/1"
+    },
+    {
+      "source_pointer": "/tables/voice_profile_versions/2",
+      "target_pointer": "/records/voice_profile_versions/2"
+    },
+    {
+      "source_pointer": "/tables/pronunciations/0",
+      "target_pointer": "/records/pronunciations/0"
+    },
+    {
+      "source_pointer": "/tables/pronunciations/1",
+      "target_pointer": "/records/pronunciations/1"
+    },
+    {
+      "source_pointer": "/tables/pronunciation_renderings/0",
+      "target_pointer": "/records/pronunciation_renderings/0"
+    },
+    {
+      "source_pointer": "/tables/pronunciation_renderings/1",
+      "target_pointer": "/records/pronunciation_renderings/1"
+    },
+    {
+      "source_pointer": "/tables/pronunciation_renderings/2",
+      "target_pointer": "/records/pronunciation_renderings/2"
+    }
+  ]
+}

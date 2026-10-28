@@ -43,12 +43,12 @@ ROOT = HERE.parents[1]
 WORKFLOW_REL = '.github/workflows/ci.yml'
 HARNESS_TEST = 'test/unit/p33-parity-harness.test.ts'
 INTEGRATION_PREFIX = 'test/integration/'
-EXPECTED_TEST_FILES = 79          # tracked *.test.ts files under test/
-EXPECTED_ALL_FILES = 78           # 79 minus the focused harness the `all` profile excludes
-EXPECTED_ALL_TESTS = 8559
+EXPECTED_TEST_FILES = 80          # tracked *.test.ts files under test/
+EXPECTED_ALL_FILES = 79           # 80 minus the focused harness the `all` profile excludes
+EXPECTED_ALL_TESTS = 8599
 EXPECTED_INTEGRATION_FILES = 29
 WRITER_TEST = 'test/unit/writer-fixture-input.test.ts'
-PARTITION_COUNTS = {'writer': (1, 4908, 0), 'rest': (77, 3651, 29)}
+PARTITION_COUNTS = {'writer': (1, 4908, 0), 'rest': (78, 3691, 29)}
 DB_NAME = 'the_desk_test'
 DB_URL = re.compile(r'postgresql://([^:@/\s]+):([^@/\s]+)@(localhost|127\.0\.0\.1):5432/' + DB_NAME)
 HEX40 = re.compile(r'[0-9a-f]{40}')
@@ -726,11 +726,16 @@ def check_all_files(stdout, tracked, errors, facts):
             total += row['tests']
             if name in FIXTURE_CONNECTED_COUNTS and row['tests'] != FIXTURE_CONNECTED_COUNTS[name]:
                 errors.append('connected per-file count drift: ' + name)
+            if name in FROZEN_RENDER046_COUNTS and row['tests'] != FROZEN_RENDER046_COUNTS[name]:
+                errors.append('frozen-render046 per-file count drift: ' + name)
             if row['failed'] or row['skipped'] or row['todo'] or row['tests'] < 1:
                 errors.append('%s reported failed/skipped/todo or no tests: %r' % (name, row))
     for name in FIXTURE_CONNECTED_COUNTS if partition != 'writer' else []:
         if name not in selected:
             errors.append('required connected file absent: ' + name)
+    for name in FROZEN_RENDER046_COUNTS if partition != 'writer' else []:
+        if name not in selected:
+            errors.append('required frozen-render046 file absent: ' + name)
     unexpected = sorted(set(seen) - set(selected))
     if unexpected:
         errors.append('result lines for files outside the selection: %s' % unexpected[:5])
@@ -860,6 +865,7 @@ FIXTURE_NAME = 'desk-connected-fixture105'
 FIXTURE_BINDINGS = ('ADOPTION.json', 'RELEASE.json', 'SOURCE-INVENTORY.json', 'SOURCE-LEDGER.json', 'TOOLS-INVENTORY.json')
 FIXTURE_EFFECTS = ['construct_fixture_subject', 'evaluate_record_claims_writing', 'evaluate_record_performance', 'record_fixture_audit', 'readback_converge']
 FIXTURE_CONNECTED_COUNTS = {'test/unit/connected-fixture105.test.ts': 58, 'test/integration/connected-fixture105.test.ts': 33}
+FROZEN_RENDER046_COUNTS = {'test/unit/frozen-render046.test.ts': 40}
 FIXTURE_TEMP_NAME = re.compile(r'vitest\.config\.ts\.timestamp-[0-9]{1,16}-[0-9a-f]{0,32}\.mjs')
 FIXTURE_CACHE_HASH = 'da39a3ee5e6b4b0d3255bfef95601890afd80709'
 
@@ -2127,6 +2133,8 @@ def joint_problems(proofs, expected_identity, tracked, outcomes):
             continue
         if label == 'rest' and any(counts.get(path) != n for path, n in FIXTURE_CONNECTED_COUNTS.items()):
             errors.append('rest connected coverage mismatch')
+        if label == 'rest' and any(counts.get(path) != n for path, n in FROZEN_RENDER046_COUNTS.items()):
+            errors.append('rest frozen-render046 coverage mismatch')
         if set(union) & set(counts):
             errors.append('partition overlap')
         union.update(counts)

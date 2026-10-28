@@ -1,0 +1,100 @@
+{
+  "actor": "offline_manual_correction",
+  "artifact_id": "feb55d72-6b70-4857-9b4b-d99f4e0dfc91",
+  "correction_operation": {
+    "adjudicated_by": "supervising_assistant_technical_adjudication_v0.4",
+    "executed_by": "claude_code_claude-sonnet-5-5_offline_manual_correction",
+    "inherited_producer_labels": {
+      "actor": "fixture_builder",
+      "producer_run_id": "fixture_direction_manual_v3"
+    },
+    "kind": "offline_manual_pace_correction",
+    "model_run_executed": false,
+    "provider_call_executed": false,
+    "source_direction_artifact_id": "d1250005-0000-4000-8000-000000000012",
+    "source_direction_version_id": "d1250016-0000-4000-8000-000000000001",
+    "source_performance_intent_id": "d1250017-0000-4000-8000-000000000006"
+  },
+  "created_at": "2026-09-27T13:07:15Z",
+  "direction_hash": "177b9d58cc787b21440170b945aedbe27856c8498097315b0078fed0e4e4ba08",
+  "direction_spec_version": "performance-render-0.1.4",
+  "input_fingerprint": "f2fdd19480a00686f0efed0f201918d628a59876cc65f572203adaae6b344d65",
+  "performance_direction_version_id": "815f80aa-d9ca-4ddd-9e65-41b46bf5e138",
+  "performance_intents": [
+    {
+      "intent_type": "energy_intensity",
+      "performance_intent_id": "153c0fc0-98dd-4819-b7dc-87c7c9fb3942",
+      "scope_ref": "4effbf95-e328-468a-b2d4-3981cc6b7020",
+      "scope_type": "turn",
+      "strength": "light",
+      "timing_anchor": null,
+      "value": "heightened"
+    },
+    {
+      "intent_type": "delivery_affect",
+      "performance_intent_id": "76616ac1-67d8-4e62-a76f-4a6033f3624d",
+      "scope_ref": "fa1950ac-07d3-4c37-bc68-f667ed9e27c8",
+      "scope_type": "turn",
+      "strength": "standard",
+      "timing_anchor": null,
+      "value": "dry"
+    },
+    {
+      "intent_type": "delivery_affect",
+      "performance_intent_id": "fad195af-23a1-42d3-91da-6d8bf413a571",
+      "scope_ref": "67bb27be-e82e-4290-8e77-656d2a55cfd3",
+      "scope_type": "turn",
+      "strength": "light",
+      "timing_anchor": null,
+      "value": "gently_amused"
+    },
+    {
+      "intent_type": "energy_intensity",
+      "performance_intent_id": "8e6f737f-8b72-4f59-aa83-cfcdd7402dbf",
+      "scope_ref": "990f64bf-72a1-47c7-ac21-17562bed3c92",
+      "scope_type": "turn",
+      "strength": "standard",
+      "timing_anchor": null,
+      "value": "heightened"
+    },
+    {
+      "intent_type": "delivery_affect",
+      "performance_intent_id": "c65669f3-3bf0-42c5-a548-188cc31a04bc",
+      "scope_ref": "55eca47e-786b-4b81-97c1-8273ce470823",
+      "scope_type": "turn",
+      "strength": "standard",
+      "timing_anchor": null,
+      "value": "dry"
+    },
+    {
+      "intent_type": "pace",
+      "performance_intent_id": "0eabc30c-9a85-4e7a-86b0-036bba4bd1b2",
+      "scope_ref": "bdd0b7a2-b590-4731-9df9-7ac6a6442bb4",
+      "scope_type": "turn",
+      "strength": "standard",
+      "timing_anchor": null,
+      "value": "slower"
+    },
+    {
+      "intent_type": "delivery_affect",
+      "performance_intent_id": "d2f6744d-91cd-418b-86f9-6886cb278e35",
+      "scope_ref": "69abf0c0-b566-4422-a6f8-6b7ff497d429",
+      "scope_type": "turn",
+      "strength": "standard",
+      "timing_anchor": null,
+      "value": "rueful"
+    },
+    {
+      "intent_type": "delivery_affect",
+      "performance_intent_id": "bc79a909-44ec-4353-9a82-c87bfbc4e396",
+      "scope_ref": "d45d42b2-0a89-4beb-a3f4-5ac62f63d19c",
+      "scope_type": "turn",
+      "strength": "standard",
+      "timing_anchor": null,
+      "value": "warm"
+    }
+  ],
+  "producer_run_id": "offline_correction_of:fixture_direction_manual_v3",
+  "script_hash": "883cbe121635364f72072b29264f00af9b79eb32fd7ebd3d7e8462f829f50677",
+  "script_version_id": "b9a7be59-70b8-45ae-bb38-190c3b8ab94c"
+}
