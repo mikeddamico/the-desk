@@ -131,6 +131,177 @@ function driverQuery(
   ) => Promise<pg.QueryResult<Obj>>;
 }
 
+// Temporary CI117 single-case diagnostic. Active only under the closed native117 profile; every other run keeps the
+// case exactly as written. It records which of the ten target-isolation facts failed on which target query without
+// changing any query outcome. Output is primitive facts only: no names, URLs, SQL text or error objects.
+const TARGET_PREFIX = "SELECT current_database() AS database,";
+const TARGET_OBSERVER_CAP = 64;
+type TargetVector =
+  | { ordinal: number; outcome: "rejected" }
+  | {
+      ordinal: number;
+      outcome: "rows";
+      oneRow: boolean;
+      databaseMatches: boolean;
+      runtimeRole: boolean;
+      notElevated: boolean;
+      noOtherSessions: boolean;
+      oidString: boolean;
+      loginString: boolean;
+      databaseString: boolean;
+      addressValid: boolean;
+      portValid: boolean;
+      otherSessions: number | null;
+    };
+class TargetObserver {
+  // Saturating count of target queries, passing ones included; capReached means a query beyond the cap was seen.
+  private count = 0;
+  private capReached = false;
+  private observationFailed = false;
+  private readonly vectors: TargetVector[] = [];
+  constructor(private readonly database: string) {}
+
+  private enter(text: unknown): number {
+    try {
+      if (typeof text !== "string" || !text.startsWith(TARGET_PREFIX)) return 0;
+      if (this.count >= TARGET_OBSERVER_CAP) {
+        this.capReached = true;
+        return 0;
+      }
+      this.count += 1;
+      return this.count;
+    } catch {
+      this.observationFailed = true;
+      return 0;
+    }
+  }
+  private rejected(ordinal: number): void {
+    try {
+      if (ordinal !== 0 && this.vectors.length < TARGET_OBSERVER_CAP)
+        this.vectors.push({ ordinal, outcome: "rejected" });
+    } catch {
+      this.observationFailed = true;
+    }
+  }
+  private observe(ordinal: number, result: pg.QueryResult<Obj>): void {
+    if (ordinal === 0) return;
+    try {
+      const row = result.rows[0];
+      // The ten conjuncts of the runtime target check, in the same form as its refusal condition.
+      const checks = {
+        oneRow: result.rows.length === 1,
+        databaseMatches: row?.database === this.database,
+        runtimeRole: row?.runtime_role === true,
+        notElevated: row?.elevated === false,
+        noOtherSessions: row?.other_sessions === 0,
+        oidString: typeof row?.database_oid === "string",
+        loginString: typeof row?.login === "string",
+        databaseString: typeof row?.database === "string",
+        addressValid:
+          row?.server_address === null ||
+          typeof row?.server_address === "string",
+        portValid:
+          row?.server_port === null || typeof row?.server_port === "number",
+      };
+      if (Object.values(checks).every((passed) => passed)) return;
+      if (this.vectors.length < TARGET_OBSERVER_CAP)
+        this.vectors.push({
+          ordinal,
+          outcome: "rows",
+          ...checks,
+          otherSessions:
+            typeof row?.other_sessions === "number" ? row.other_sessions : null,
+        });
+    } catch {
+      this.observationFailed = true;
+    }
+  }
+  /**
+   * Wraps the driver query. The original is awaited exactly once with the original receiver and arguments; its
+   * fulfilled result is returned as the same object and its rejection is rethrown as the same value. Bookkeeping
+   * failures only set a flag and can never replace or alter the query outcome.
+   */
+  wrap(
+    original: ReturnType<typeof driverQuery>,
+  ): (this: pg.Client, ...args: unknown[]) => Promise<pg.QueryResult<Obj>> {
+    const enter = (text: unknown): number => this.enter(text);
+    const rejected = (ordinal: number): void => {
+      this.rejected(ordinal);
+    };
+    const observe = (ordinal: number, result: pg.QueryResult<Obj>): void => {
+      this.observe(ordinal, result);
+    };
+    return async function (
+      this: pg.Client,
+      ...args: unknown[]
+    ): Promise<pg.QueryResult<Obj>> {
+      const ordinal = enter(args[0]);
+      let result: pg.QueryResult<Obj>;
+      try {
+        result = (await Reflect.apply(
+          original,
+          this,
+          args,
+        )) as pg.QueryResult<Obj>;
+      } catch (error) {
+        rejected(ordinal);
+        throw error;
+      }
+      observe(ordinal, result);
+      return result;
+    };
+  }
+  /**
+   * Runs `work` with the wrapper installed. The exact original descriptor is restored first through the
+   * cleanup-preserving pattern; only then is the bounded summary emitted. A primary failure of `work` is preserved.
+   */
+  async around(work: () => Promise<void>): Promise<void> {
+    const descriptor = Object.getOwnPropertyDescriptor(
+      pg.Client.prototype,
+      "query",
+    );
+    if (descriptor === undefined) throw new Error("driver method unavailable");
+    const original = driverQuery(descriptor);
+    await withTestCleanup(
+      async () => {
+        Object.defineProperty(pg.Client.prototype, "query", {
+          ...descriptor,
+          value: this.wrap(original),
+        });
+        await work();
+      },
+      () => {
+        Object.defineProperty(pg.Client.prototype, "query", descriptor);
+        this.emit();
+        return Promise.resolve();
+      },
+    );
+  }
+  /** Failure vectors then one summary. An output failure is raised as a cleanup failure, never as a diagnosis. */
+  private emit(): void {
+    try {
+      for (const vector of this.vectors)
+        process.stderr.write(`FIXTURE_TARGET117 ${JSON.stringify(vector)}\n`);
+      process.stderr.write(
+        `FIXTURE_TARGET117_SUMMARY ${JSON.stringify({
+          observed: this.count,
+          cap: TARGET_OBSERVER_CAP,
+          capReached: this.capReached,
+          failureVectors: this.vectors.length,
+          observationFailed: this.observationFailed,
+          inconclusive:
+            this.count === 0 ||
+            this.observationFailed ||
+            this.vectors.some((vector) => vector.outcome === "rejected") ||
+            (this.capReached && this.vectors.length === 0),
+        })}\n`,
+      );
+    } catch {
+      throw new Error("fixture target diagnostic output failed");
+    }
+  }
+}
+
 // pg-pool attaches release when a Client is checked out; prototype hooks also see plain Clients.
 function isCheckedOutClient(
   client: pg.Client,
@@ -2291,15 +2462,21 @@ suite("connected fixture105 native ownership", () => {
       async () => {
         const env = await fresh();
         const primary = new Error("controlled acquisition cut");
-        await fault(
-          "fixture105_after_acquisition",
-          () => {
-            throw primary;
-          },
-          async () => {
-            await expect(runConnectedFixture105()).rejects.toBe(primary);
-          },
-        );
+        const firstInvocation = async (): Promise<void> => {
+          await fault(
+            "fixture105_after_acquisition",
+            () => {
+              throw primary;
+            },
+            async () => {
+              await expect(runConnectedFixture105()).rejects.toBe(primary);
+            },
+          );
+        };
+        // CI117: observe only the first host invocation, and only under the closed native117 profile.
+        if (process.env.DESK_P33_PROFILE === "native117")
+          await new TargetObserver(env.name).around(firstInvocation);
+        else await firstInvocation();
         expect(await counts(env)).toEqual({
           packages: 1,
           directions: 0,

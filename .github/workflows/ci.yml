@@ -89,6 +89,9 @@ jobs:
           path: ${{ runner.temp }}/ci/upload-controls
           if-no-files-found: error
           retention-days: 30
+      - name: Temporary CI117 diagnostic (always holds aggregate)
+        run: /bin/bash tools/ci-validation/run-stage.sh diagnostic117
+        timeout-minutes: 4
       - name: Guard P33 aggregate (all)
         run: /bin/bash tools/ci-validation/run-stage.sh all
         timeout-minutes: 122
@@ -228,6 +231,9 @@ jobs:
           path: ${{ runner.temp }}/ci/upload-controls
           if-no-files-found: error
           retention-days: 30
+      - name: Temporary CI117 diagnostic (always holds aggregate)
+        run: /bin/bash tools/ci-validation/run-stage.sh diagnostic117
+        timeout-minutes: 4
       - name: Guard P33 aggregate (all)
         run: /bin/bash tools/ci-validation/run-stage.sh all
         timeout-minutes: 122
