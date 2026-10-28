@@ -180,3 +180,71 @@ cleanup errors. Diagnostic selection did not establish full-suite acceptance.
 Temporary diagnostic selections and holds have been removed; the original full
 writer/rest partitions, count gates, security/artifact requirements and final
 joint proof remain required on the final independently reviewed commit.
+
+### CI120 bounded diagnostic candidate (temporary, HOLD only)
+
+CI120 retained one extra backend at unknown-construction target observation 2,
+with all other predicates true. Its backend identity is unknown; the preseed
+missing-config failure's rejected predicate was not observed. Unbound server
+log autovacuum messages establish no cause. Neither CI119 nor nonrecurrence
+proves a fix.
+
+TARGET_SQL now proposes one materialized population with the unchanged
+current-database/other-PID predicate, full integer count and a PID-ordered sample
+limited to 8 before JSONB aggregation. Categories are client, autovacuum,
+other_backend (13 fixed PG17 types), or unknown. The default pg JSONB parser
+returns parsed data. The original isolation predicates, target identity and
+refusal behavior are unchanged. Count and sample share captured rows; this is
+not a globally instantaneous or freshly reset transaction statistics guarantee.
+PG17 may hide backend_type for other users/background sessions. Hidden and
+unrecognized types remain unknown; no monitoring grant is added.
+
+The native TargetObserver validates closed own-data row/sample shapes, positive
+ordered unique int32 PIDs, full count/sample/truncation consistency, then buffers
+owned primitive failure vectors. Nine fixed first-invocation scopes cover four
+preseed variants, unknown construction and its three direct-owner variants, and
+the original acquisition-cut invocation. Each observer caps observations at 64
+(passing observations included). An original captured failure vector survives
+malformed, hidden, truncated or overlength supplemental detail. Each line is
+bounded to 1024 bytes, with at most 576 vectors and 9 summaries across native
+scopes. Markers FIXTURE_TARGET_DIAGNOSTIC and
+FIXTURE_TARGET_DIAGNOSTIC_SUMMARY carry version 2 schemas. No SQL, names, URLs,
+credentials, raw types or error objects are emitted. Unknown/capped/incomplete
+records are inconclusive, never admission authority.
+
+The observer captures D and installs O(D), then each COMMIT witness installs
+W(O). W's intentional acknowledgement-loss rejection remains intact. The inner
+cleanup restores O; the outer cleanup restores D before emitting. Cleanup/output
+failure preserves the primary work error. Added async/observation overhead can
+perturb timing. The original 120000ms case limits/assertions remain unchanged.
+
+Only guard profile target-diagnostic runs 12 test-local selftest groups before
+native allocation. Fake-driver output is intercepted; only one separately
+counted FIXTURE_TARGET_DIAGNOSTIC_SELFTEST completion record reaches evidence.
+These JS controls operate on already-mapped categories, not executed SQL CASE
+or real autovacuum evidence. Existing 58 unit and 33 native cases remain unchanged
+in count, and no case selector is accepted from callers.
+
+Temporary workflow steps invoke run-stage.sh diagnostic120 in both jobs. Writer
+returns HOLD 78 without launching tests. Rest aliases STAGE=all but selects only
+the two connected files through target-diagnostic. Existing all precheck, fresh
+bindings, controls, DB pipe, 7200s ceiling, 20s TERM/KILL grace and capture limits
+remain. The actual guard exit is retained at all/exit, while the diagnostic
+wrapper returns 78. Default success gating skips the original aggregate step;
+one always-gated rest check all captures post-source/native state, followed by
+existing full collection/upload and final HOLD. ci.py is unchanged: its 3780/full
+file/one-P33 requirements intentionally reject 91 tests and zero P33 cases.
+Those expected coverage errors must not be "fixed" by weakening validators.
+
+Independent retained-evidence inspection must account for exact 58+33 file/test
+populations, zero skips/todos/unhandled errors, 12/12 selftests once, one guard
+attempt/zero P33 case directories, settled/reaped/no-children cleanup, the full
+33-case invocation journal, source/cache preservation and bounded diagnostic
+records. Preserve reproduced assertion failures and censoring as findings; do
+not rerun until green. A passing 91-case nonrecurrence proves no cause or fix.
+Normal full CI requires separate review restoring this temporary route.
+
+This candidate is source preparation only. No execution, installation, provider,
+privilege/logging change, assembly, READY or publication authority follows. The
+seven changed source owners and exact invocation need review before execution;
+source/release/root bindings must be generated freshly from that candidate.

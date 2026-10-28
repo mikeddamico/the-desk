@@ -131,11 +131,8 @@ function driverQuery(
   ) => Promise<pg.QueryResult<Obj>>;
 }
 
-// Bounded test instrumentation retained from the CI117 isolation investigation. It wraps only the first
-// acquisition-cut invocation, buffering target predicate failures until the original query descriptor is restored.
-// It adds async overhead and can fail during post-restoration output; it is not behavior-neutral. The 117 output
-// markers identify provenance, not an active test profile. Output is primitive facts only: no names, URLs, SQL text
-// or error objects.
+// Bounded same-query diagnostic facts only. Observer work can perturb timing.
+// No names, SQL, raw backend types or errors are emitted; hidden types stay unknown.
 const TARGET_PREFIX = "SELECT current_database() AS database,";
 const TARGET_OBSERVER_CAP = 64;
 type TargetVector =
@@ -155,13 +152,172 @@ type TargetVector =
       portValid: boolean;
       otherSessions: number | null;
     };
+const TARGET_SCOPES = [
+  "preseed_foreign_claim",
+  "preseed_missing_config",
+  "preseed_changed_show",
+  "preseed_extra_show",
+  "unknown_construction",
+  "unknown_program_run",
+  "unknown_program_attempt",
+  "unknown_package_binding",
+  "acquisition_cut",
+] as const;
+type TargetScope = (typeof TARGET_SCOPES)[number];
+type TargetCategory = "client" | "autovacuum" | "other_backend" | "unknown";
+type TargetSample = { pid: number; category: TargetCategory }[];
+type TargetReason =
+  | "none"
+  | "query_rejected"
+  | "invalid_metadata"
+  | "unknown_type"
+  | "sample_truncated"
+  | "record_limit"
+  | "observation_fault";
+interface TargetSupplement {
+  status: "complete" | "inconclusive";
+  reason: TargetReason;
+  sample: TargetSample | null;
+  truncated: boolean | null;
+}
+interface TargetEnvelope {
+  schema: "fixture-target-diagnostic/2";
+  scope: TargetScope;
+  vector: TargetVector;
+  supplement: TargetSupplement;
+}
+function targetUnknown(
+  reason: Exclude<TargetReason, "none">,
+): TargetSupplement {
+  return { status: "inconclusive", reason, sample: null, truncated: null };
+}
+function targetData(value: unknown, keys: readonly string[]): Obj | undefined {
+  if (typeof value !== "object" || value === null || Array.isArray(value))
+    return;
+  const prototype = Reflect.getPrototypeOf(value);
+  if (prototype !== Object.prototype && prototype !== null) return;
+  if (Reflect.ownKeys(value).length !== keys.length) return;
+  const data: Obj = {};
+  for (const key of keys) {
+    const descriptor = Object.getOwnPropertyDescriptor(value, key);
+    if (!descriptor || !("value" in descriptor) || !descriptor.enumerable)
+      return;
+    data[key] = descriptor.value;
+  }
+  return data;
+}
+function targetInt(value: unknown, minimum = 0): value is number {
+  return (
+    typeof value === "number" &&
+    Number.isInteger(value) &&
+    value >= minimum &&
+    value <= 2147483647
+  );
+}
+function targetSupplement(value: unknown): TargetSupplement {
+  const row = targetData(value, [
+    "database",
+    "database_oid",
+    "login",
+    "server_address",
+    "server_port",
+    "runtime_role",
+    "elevated",
+    "other_sessions",
+    "other_backend_sample",
+    "other_backend_sample_truncated",
+  ]);
+  if (!row || !targetInt(row.other_sessions))
+    return targetUnknown("invalid_metadata");
+  const sample: unknown = row.other_backend_sample;
+  const truncated = row.other_backend_sample_truncated;
+  if (
+    !Array.isArray(sample) ||
+    Object.getPrototypeOf(sample) !== Array.prototype
+  )
+    return targetUnknown("invalid_metadata");
+  const length = Object.getOwnPropertyDescriptor(sample, "length")
+    ?.value as unknown;
+  if (
+    length !== Math.min(row.other_sessions, 8) ||
+    Reflect.ownKeys(sample).length !== length + 1 ||
+    typeof truncated !== "boolean" ||
+    truncated !== row.other_sessions > 8
+  )
+    return targetUnknown("invalid_metadata");
+  const owned: TargetSample = [];
+  let previous = 0;
+  for (let index = 0; index < length; index++) {
+    const descriptor = Object.getOwnPropertyDescriptor(sample, String(index));
+    if (!descriptor || !("value" in descriptor) || !descriptor.enumerable)
+      return targetUnknown("invalid_metadata");
+    const entry = targetData(descriptor.value, ["pid", "category"]);
+    if (
+      !entry ||
+      !targetInt(entry.pid, 1) ||
+      entry.pid <= previous ||
+      (entry.category !== "client" &&
+        entry.category !== "autovacuum" &&
+        entry.category !== "other_backend" &&
+        entry.category !== "unknown")
+    )
+      return targetUnknown("invalid_metadata");
+    previous = entry.pid;
+    owned.push({ pid: entry.pid, category: entry.category });
+  }
+  const reason = truncated
+    ? "sample_truncated"
+    : owned.some((entry) => entry.category === "unknown")
+      ? "unknown_type"
+      : "none";
+  return {
+    status: reason === "none" ? "complete" : "inconclusive",
+    reason,
+    sample: owned,
+    truncated,
+  };
+}
+
 class TargetObserver {
   // Saturating count of target queries, passing ones included; capReached means a query beyond the cap was seen.
   private count = 0;
   private capReached = false;
   private observationFailed = false;
-  private readonly vectors: TargetVector[] = [];
-  constructor(private readonly database: string) {}
+  private readonly vectors: TargetEnvelope[] = [];
+  private restorationFailed = false;
+  constructor(
+    private readonly database: string,
+    private readonly scope: TargetScope = "acquisition_cut",
+  ) {
+    if (!TARGET_SCOPES.includes(scope))
+      throw new Error("fixture target scope invalid");
+  }
+  restoreWitness(descriptor: PropertyDescriptor): void {
+    try {
+      Object.defineProperty(pg.Client.prototype, "query", descriptor);
+    } catch (error) {
+      this.restorationFailed = true;
+      throw error;
+    }
+  }
+  private retain(vector: TargetVector, row?: unknown): void {
+    let supplement: TargetSupplement;
+    try {
+      supplement =
+        vector.outcome === "rejected"
+          ? targetUnknown("query_rejected")
+          : targetSupplement(row);
+    } catch {
+      this.observationFailed = true;
+      supplement = targetUnknown("observation_fault");
+    }
+    this.vectors.push({
+      schema: "fixture-target-diagnostic/2",
+      scope: this.scope,
+      vector,
+      supplement,
+    });
+  }
 
   private enter(text: unknown): number {
     try {
@@ -180,7 +336,7 @@ class TargetObserver {
   private rejected(ordinal: number): void {
     try {
       if (ordinal !== 0 && this.vectors.length < TARGET_OBSERVER_CAP)
-        this.vectors.push({ ordinal, outcome: "rejected" });
+        this.retain({ ordinal, outcome: "rejected" });
     } catch {
       this.observationFailed = true;
     }
@@ -205,15 +361,29 @@ class TargetObserver {
         portValid:
           row?.server_port === null || typeof row?.server_port === "number",
       };
-      if (Object.values(checks).every((passed) => passed)) return;
+      if (Object.values(checks).every((passed) => passed)) {
+        try {
+          if (targetSupplement(row).status === "inconclusive")
+            this.observationFailed = true;
+        } catch {
+          this.observationFailed = true;
+        }
+        return;
+      }
       if (this.vectors.length < TARGET_OBSERVER_CAP)
-        this.vectors.push({
-          ordinal,
-          outcome: "rows",
-          ...checks,
-          otherSessions:
-            typeof row?.other_sessions === "number" ? row.other_sessions : null,
-        });
+        this.retain(
+          {
+            ordinal,
+            outcome: "rows",
+            ...checks,
+            otherSessions:
+              typeof row?.other_sessions === "number" &&
+              Number.isFinite(row.other_sessions)
+                ? row.other_sessions
+                : null,
+          },
+          row,
+        );
     } catch {
       this.observationFailed = true;
     }
@@ -274,7 +444,7 @@ class TargetObserver {
       },
       () => {
         Object.defineProperty(pg.Client.prototype, "query", descriptor);
-        this.emit();
+        if (!this.restorationFailed) this.emit();
         return Promise.resolve();
       },
     );
@@ -282,25 +452,333 @@ class TargetObserver {
   /** Failure vectors then one summary. An output failure is raised as a cleanup failure, never as a diagnosis. */
   private emit(): void {
     try {
-      for (const vector of this.vectors)
-        process.stderr.write(`FIXTURE_TARGET117 ${JSON.stringify(vector)}\n`);
-      process.stderr.write(
-        `FIXTURE_TARGET117_SUMMARY ${JSON.stringify({
-          observed: this.count,
-          cap: TARGET_OBSERVER_CAP,
-          capReached: this.capReached,
-          failureVectors: this.vectors.length,
-          observationFailed: this.observationFailed,
-          inconclusive:
-            this.count === 0 ||
-            this.observationFailed ||
-            this.vectors.some((vector) => vector.outcome === "rejected") ||
-            (this.capReached && this.vectors.length === 0),
-        })}\n`,
-      );
+      for (const envelope of this.vectors) {
+        let line = `FIXTURE_TARGET_DIAGNOSTIC ${JSON.stringify(envelope)}\n`;
+        if (Buffer.byteLength(line) > 1024) {
+          envelope.supplement = targetUnknown("record_limit");
+          line = `FIXTURE_TARGET_DIAGNOSTIC ${JSON.stringify(envelope)}\n`;
+        }
+        if (Buffer.byteLength(line) > 1024)
+          throw new Error("fixture target base vector bound");
+        process.stderr.write(line);
+      }
+      const line = `FIXTURE_TARGET_DIAGNOSTIC_SUMMARY ${JSON.stringify({
+        schema: "fixture-target-diagnostic-summary/2",
+        scope: this.scope,
+        observed: this.count,
+        cap: TARGET_OBSERVER_CAP,
+        capReached: this.capReached,
+        failureVectors: this.vectors.length,
+        observationFailed: this.observationFailed,
+        inconclusive:
+          this.count === 0 ||
+          this.observationFailed ||
+          this.vectors.some(
+            (entry) =>
+              entry.vector.outcome === "rejected" ||
+              entry.supplement.status === "inconclusive",
+          ) ||
+          this.capReached,
+      })}\n`;
+      if (Buffer.byteLength(line) > 1024)
+        throw new Error("fixture target summary bound");
+      process.stderr.write(line);
     } catch {
       throw new Error("fixture target diagnostic output failed");
     }
+  }
+
+  /** Test-local controls; fake-driver output never reaches retained native evidence. */
+  static async selftest(): Promise<void> {
+    let groups = 0;
+    const done = (group: number): void => {
+      expect(group).toBe(groups + 1);
+      groups = group;
+    };
+    const row = (categories: TargetCategory[] = []): Obj => ({
+      database: "fixed",
+      database_oid: "1",
+      login: "fixed",
+      server_address: null,
+      server_port: null,
+      runtime_role: true,
+      elevated: false,
+      other_sessions: categories.length,
+      other_backend_sample: categories
+        .slice(0, 8)
+        .map((category, index) => ({ pid: index + 1, category })),
+      other_backend_sample_truncated: categories.length > 8,
+    });
+    const result = (data: Obj): pg.QueryResult<Obj> => ({
+      command: "SELECT",
+      rowCount: 1,
+      oid: 0,
+      fields: [],
+      rows: [data],
+    });
+    const receiver = Object.create(pg.Client.prototype) as pg.Client;
+    const lines: string[] = [];
+    let capturedBytes = 0;
+    let expectedOutputDriver: PropertyDescriptor | undefined;
+    const capture = vi
+      .spyOn(process.stderr, "write")
+      .mockImplementation((chunk) => {
+        if (expectedOutputDriver)
+          expect(
+            Object.getOwnPropertyDescriptor(pg.Client.prototype, "query"),
+          ).toEqual(expectedOutputDriver);
+        if (typeof chunk !== "string")
+          throw new Error("selftest nontext output");
+        capturedBytes += Buffer.byteLength(chunk);
+        if (capturedBytes > 600064) throw new Error("selftest output bound");
+        lines.push(chunk);
+        return true;
+      });
+    const descriptor = Object.getOwnPropertyDescriptor(
+      pg.Client.prototype,
+      "query",
+    );
+    if (!descriptor) {
+      capture.mockRestore();
+      throw new Error("selftest driver descriptor");
+    }
+    try {
+      expect(targetSupplement(row())).toEqual({
+        status: "complete",
+        reason: "none",
+        sample: [],
+        truncated: false,
+      });
+      done(1);
+      expect(targetSupplement(row(["client"])).sample).toEqual([
+        { pid: 1, category: "client" },
+      ]);
+      done(2);
+      expect(targetSupplement(row(["autovacuum"])).sample).toEqual([
+        { pid: 1, category: "autovacuum" },
+      ]);
+      done(3);
+      // Already-mapped categories only: these controls do not execute the SQL CASE.
+      for (let index = 0; index < 13; index++) {
+        expect(
+          targetSupplement({
+            ...row(["other_backend"]),
+            other_backend_sample: [
+              { pid: index + 1, category: "other_backend" },
+            ],
+          }).reason,
+        ).toBe("none");
+      }
+      done(4);
+      for (let index = 0; index < 2; index++)
+        expect(targetSupplement(row(["unknown"])).reason).toBe("unknown_type");
+      done(5);
+      expect(
+        targetSupplement(row(new Array<TargetCategory>(9).fill("client"))),
+      ).toMatchObject({
+        reason: "sample_truncated",
+        truncated: true,
+        sample: Array.from({ length: 8 }, (_, index) => ({
+          pid: index + 1,
+          category: "client",
+        })),
+      });
+      done(6);
+      const malformed: Obj[] = [];
+      const absent = row();
+      delete absent.other_backend_sample;
+      malformed.push(absent);
+      malformed.push({ ...row(), other_backend_sample: "[]" });
+      malformed.push({
+        ...row(new Array<TargetCategory>(9).fill("client")),
+        other_backend_sample: Array.from({ length: 9 }, (_, index) => ({
+          pid: index + 1,
+          category: "client",
+        })),
+      });
+      malformed.push(
+        { ...row(), other_sessions: 1 },
+        { ...row(), other_sessions: -1 },
+        { ...row(), other_sessions: 0.5 },
+        { ...row(), other_backend_sample_truncated: true },
+      );
+      malformed.push({
+        ...row(["client"]),
+        other_backend_sample: [{ pid: 1, category: "client", extra: true }],
+      });
+      const getter = row();
+      Object.defineProperty(getter, "other_backend_sample", {
+        enumerable: true,
+        get() {
+          throw new Error("getter invoked");
+        },
+      });
+      malformed.push(getter);
+      malformed.push({
+        ...row(["client"]),
+        other_backend_sample: new Array<unknown>(1),
+      });
+      expect(malformed.length).toBe(10);
+      for (const value of malformed)
+        expect(targetSupplement(value).reason).toBe("invalid_metadata");
+      done(7);
+      for (const pid of [0, -1, 0.5, 2147483648])
+        expect(
+          targetSupplement({
+            ...row(["client"]),
+            other_backend_sample: [{ pid, category: "client" }],
+          }).reason,
+        ).toBe("invalid_metadata");
+      for (const second of [2, 1])
+        expect(
+          targetSupplement({
+            ...row(["client", "client"]),
+            other_backend_sample: [
+              { pid: 2, category: "client" },
+              { pid: second, category: "client" },
+            ],
+          }).reason,
+        ).toBe("invalid_metadata");
+      expect(
+        targetSupplement({
+          ...row(["client"]),
+          other_backend_sample: [{ pid: 1, category: "arbitrary" }],
+        }).reason,
+      ).toBe("invalid_metadata");
+      done(8);
+      const actual = result(row(["client"]));
+      const values: unknown[] = [];
+      const fake = driverQuery({
+        value: function (
+          this: pg.Client,
+          text: string,
+          parameters?: unknown[],
+        ): Promise<pg.QueryResult<Obj>> {
+          expect(this).toBe(receiver);
+          expect(text).toBe(TARGET_PREFIX);
+          expect(parameters).toBe(values);
+          return Promise.resolve(actual);
+        },
+      });
+      const forward = new TargetObserver("fixed");
+      expect(
+        await forward.wrap(fake).call(receiver, TARGET_PREFIX, values),
+      ).toBe(actual);
+      const rejection = new Error("fixed driver rejection");
+      await expect(
+        forward
+          .wrap(driverQuery({ value: () => Promise.reject(rejection) }))
+          .call(receiver, TARGET_PREFIX),
+      ).rejects.toBe(rejection);
+      done(9);
+      const base = { ...descriptor, value: () => Promise.resolve(actual) };
+      Object.defineProperty(pg.Client.prototype, "query", base);
+      expectedOutputDriver = base;
+      const nested = new TargetObserver("fixed");
+      const loss = new Error("fixed commit loss");
+      const outputStart = lines.length;
+      await expect(
+        nested.around(async () => {
+          const outer = Object.getOwnPropertyDescriptor(
+            pg.Client.prototype,
+            "query",
+          );
+          if (!outer) throw new Error("selftest outer descriptor");
+          const original = driverQuery(outer);
+          await withTestCleanup(
+            async () => {
+              Object.defineProperty(pg.Client.prototype, "query", {
+                ...outer,
+                value: async function (this: pg.Client, text: string) {
+                  const resolved = await original.call(this, text);
+                  if (text === "COMMIT") throw loss;
+                  return resolved;
+                },
+              });
+              const installed = Object.getOwnPropertyDescriptor(
+                pg.Client.prototype,
+                "query",
+              );
+              if (!installed) throw new Error("selftest witness descriptor");
+              const wrapped = driverQuery(installed);
+              expect(await wrapped.call(receiver, TARGET_PREFIX)).toBe(actual);
+              await wrapped.call(receiver, "COMMIT");
+            },
+            () => {
+              nested.restoreWitness(outer);
+              return Promise.resolve();
+            },
+          );
+        }),
+      ).rejects.toBe(loss);
+      expect(
+        Object.getOwnPropertyDescriptor(pg.Client.prototype, "query"),
+      ).toEqual(base);
+      expect(lines.length - outputStart).toBe(2);
+      done(10);
+      const capped = new TargetObserver("fixed");
+      const cappedQuery = capped.wrap(
+        driverQuery({ value: () => Promise.resolve(actual) }),
+      );
+      for (let index = 0; index < 65; index++)
+        await cappedQuery.call(receiver, TARGET_PREFIX);
+      expect(capped.count).toBe(64);
+      expect(capped.capReached).toBe(true);
+      expect(capped.vectors.length).toBe(64);
+      capped.emit();
+      expect(lines.every((line) => Buffer.byteLength(line) <= 1024)).toBe(true);
+      done(11);
+      const bounded = new TargetObserver("fixed");
+      bounded.observe(bounded.enter(TARGET_PREFIX), actual);
+      const envelope = bounded.vectors[0];
+      if (!envelope) throw new Error("selftest vector missing");
+      envelope.supplement.sample = [
+        { pid: 1, category: "x".repeat(2048) as TargetCategory },
+      ];
+      bounded.emit();
+      expect(envelope.supplement.reason).toBe("record_limit");
+      expect(envelope.vector).toMatchObject({
+        ordinal: 1,
+        noOtherSessions: false,
+      });
+      const faulted = new TargetObserver("fixed");
+      faulted.observe(
+        faulted.enter(TARGET_PREFIX),
+        result(
+          new Proxy(row(["client"]), {
+            getPrototypeOf() {
+              throw new Error("fixed reflection fault");
+            },
+          }),
+        ),
+      );
+      expect(faulted.vectors[0]?.supplement.reason).toBe("observation_fault");
+      expect(faulted.observationFailed).toBe(true);
+      // Replace only the test-local captured sink; always reinstate it before leaving this group.
+      capture.mockImplementationOnce(() => {
+        throw new Error("fixed output fault");
+      });
+      const primary = new Error("fixed primary work failure");
+      await expect(
+        new TargetObserver("fixed").around(() => Promise.reject(primary)),
+      ).rejects.toBe(primary);
+      expect(cleanupFailures.get(primary)?.length).toBe(1);
+      done(12);
+    } catch {
+      throw new Error(
+        `fixture target diagnostic selftest group ${String(groups + 1)}`,
+      );
+    } finally {
+      try {
+        Object.defineProperty(pg.Client.prototype, "query", descriptor);
+      } finally {
+        capture.mockRestore();
+      }
+    }
+    expect(groups).toBe(12);
+    process.stderr.write(
+      'FIXTURE_TARGET_DIAGNOSTIC_SELFTEST {"schema":"fixture-target-selftest/1","groups":12,"passed":12}\n',
+    );
   }
 }
 
@@ -833,6 +1311,8 @@ suite("connected fixture105 native ownership", () => {
   const isolatedClusters: TrackedFixtureCluster[] = [];
 
   beforeAll(async () => {
+    if (process.env.DESK_P33_PROFILE === "target-diagnostic")
+      await TargetObserver.selftest();
     if (bootstrapUrl === undefined)
       throw new Error("TEST_DATABASE_URL required");
     const savedBinding = process.env.DESK_FIXTURE105_BINDING;
@@ -1386,8 +1866,18 @@ suite("connected fixture105 native ownership", () => {
                   ],
                 );
               });
-            await expect(runConnectedFixture105()).rejects.toThrow(
-              "fixture_initial_population",
+            const scopes = {
+              "foreign-claim": "preseed_foreign_claim",
+              "missing-config": "preseed_missing_config",
+              "changed-show": "preseed_changed_show",
+              "extra-show": "preseed_extra_show",
+            } as const;
+            await new TargetObserver(env.name, scopes[variant]).around(
+              async () => {
+                await expect(runConnectedFixture105()).rejects.toThrow(
+                  "fixture_initial_population",
+                );
+              },
             );
             expect(await counts(env)).toEqual({
               packages: 0,
@@ -2021,96 +2511,61 @@ suite("connected fixture105 native ownership", () => {
     caseBody(
       "holds unknown construction commit without inventing its missing settlement receipt",
       async () => {
-        let diagnosticRows = 0;
-        const observeTarget = (
-          text: string,
-          result: pg.QueryResult,
-          database: string,
-        ): void => {
-          if (
-            !text.startsWith("SELECT current_database() AS database,") ||
-            diagnosticRows >= 64
-          )
-            return;
-          diagnosticRows += 1;
-          const row = result.rows[0] as Obj | undefined;
-          const checks = {
-            oneRow: result.rows.length === 1,
-            databaseMatches: row?.database === database,
-            runtimeRole: row?.runtime_role === true,
-            notElevated: row?.elevated === false,
-            noOtherSessions: row?.other_sessions === 0,
-            oidString: typeof row?.database_oid === "string",
-            loginString: typeof row?.login === "string",
-            databaseString: typeof row?.database === "string",
-            addressValid:
-              row?.server_address === null ||
-              typeof row?.server_address === "string",
-            portValid:
-              row?.server_port === null || typeof row?.server_port === "number",
-          };
-          if (Object.values(checks).every((passed) => passed)) return;
-          // Failure facts only: no queries, waits, retries, names, URLs or SQL text.
-          process.stderr.write(
-            `FIXTURE_TARGET ${JSON.stringify({
-              ordinal: diagnosticRows,
-              ...checks,
-              otherSessions:
-                typeof row?.other_sessions === "number"
-                  ? row.other_sessions
-                  : null,
-            })}\n`,
-          );
-        };
         const env = await fresh();
         let armed = false;
         let intercepted = 0;
-        const descriptor = Object.getOwnPropertyDescriptor(
-          pg.Client.prototype,
-          "query",
-        );
-        if (descriptor === undefined)
-          throw new Error("driver method unavailable");
-        const original = driverQuery(descriptor);
-        Object.defineProperty(pg.Client.prototype, "query", {
-          ...descriptor,
-          value: async function (
-            this: pg.Client,
-            text: string,
-            values?: unknown[],
-          ): Promise<pg.QueryResult> {
-            const result = await original.call(this, text, values);
-            observeTarget(text, result, env.name);
-            if (armed && text === "COMMIT") {
-              armed = false;
-              intercepted += 1;
-              const loss = new Error("construction acknowledgement withheld");
-              this.emit("error", loss);
-              throw loss;
-            }
-            return result;
-          },
-        });
-        try {
-          await fault(
-            "fixture105_after_package_before_observation",
-            () => {
-              armed = true;
-            },
-            async () => {
-              try {
-                await runConnectedFixture105();
-                throw new Error("expected unknown construction commit");
-              } catch (error) {
-                expect(error).toBeInstanceOf(CommandConnectionError);
-                if (!(error instanceof CommandConnectionError)) throw error;
-                expect(error.commitOutcome).toBe("unknown");
+        const observer = new TargetObserver(env.name, "unknown_construction");
+        await observer.around(async () => {
+          const descriptor = Object.getOwnPropertyDescriptor(
+            pg.Client.prototype,
+            "query",
+          );
+          if (descriptor === undefined)
+            throw new Error("driver method unavailable");
+          const original = driverQuery(descriptor);
+          Object.defineProperty(pg.Client.prototype, "query", {
+            ...descriptor,
+            value: async function (
+              this: pg.Client,
+              text: string,
+              values?: unknown[],
+            ): Promise<pg.QueryResult> {
+              const result = await original.call(this, text, values);
+              if (armed && text === "COMMIT") {
+                armed = false;
+                intercepted += 1;
+                const loss = new Error("construction acknowledgement withheld");
+                this.emit("error", loss);
+                throw loss;
               }
+              return result;
+            },
+          });
+          await withTestCleanup(
+            async () => {
+              await fault(
+                "fixture105_after_package_before_observation",
+                () => {
+                  armed = true;
+                },
+                async () => {
+                  try {
+                    await runConnectedFixture105();
+                    throw new Error("expected unknown construction commit");
+                  } catch (error) {
+                    expect(error).toBeInstanceOf(CommandConnectionError);
+                    if (!(error instanceof CommandConnectionError)) throw error;
+                    expect(error.commitOutcome).toBe("unknown");
+                  }
+                },
+              );
+            },
+            () => {
+              observer.restoreWitness(descriptor);
+              return Promise.resolve();
             },
           );
-        } finally {
-          Object.defineProperty(pg.Client.prototype, "query", descriptor);
-        }
+        });
         expect(intercepted).toBe(1);
         const before = await counts(env);
         expect(before).toEqual({
@@ -2141,87 +2596,94 @@ suite("connected fixture105 native ownership", () => {
           let receiptBefore: Buffer | undefined;
           let terminalBefore: Buffer | undefined;
           let targetKey: string | undefined;
-          const queryDescriptor = Object.getOwnPropertyDescriptor(
-            pg.Client.prototype,
-            "query",
-          );
-          if (queryDescriptor === undefined)
-            throw new Error("driver method unavailable");
-          const query = driverQuery(queryDescriptor);
-          const statement =
-            owner === "program_run"
-              ? /^\s*INSERT INTO program_runs\s*\(/u
-              : owner === "program_attempt"
-                ? /^\s*INSERT INTO program_run_attempts\s*\(/u
-                : /^SELECT bind_evidence_package\(/u;
-          Object.defineProperty(pg.Client.prototype, "query", {
-            ...queryDescriptor,
-            value: async function (
-              this: pg.Client,
-              text: string,
-              values?: unknown[],
-            ): Promise<pg.QueryResult> {
-              const result = await query.call(this, text, values);
-              observeTarget(text, result, separate.name);
-              if (statement.test(text)) {
-                reached++;
-                expect(reached).toBe(1);
-                selected.client = this;
-                if (owner === "package_binding") {
-                  const target = observedLists().targets.at(-1);
-                  if (
-                    target === undefined ||
-                    typeof target.target_hash !== "string" ||
-                    executionRoot === undefined
-                  )
-                    throw new Error("binding witness target missing");
-                  targetKey = target.target_hash;
-                  receiptBefore = readFileSync(
-                    join(
-                      executionRoot,
-                      "receipts",
-                      targetKey,
-                      "CONSTRUCTION.json",
-                    ),
-                  );
-                  terminalBefore = readFileSync(
-                    join(
-                      executionRoot,
-                      "expectations",
-                      targetKey + ".terminal.json",
-                    ),
-                  );
-                }
-              }
-              if (this === selected.client && text === "COMMIT") {
-                delete selected.client;
-                lost++;
-                const loss = new Error(
-                  "fixed direct-owner acknowledgement withheld",
-                );
-                this.emit("error", loss);
-                throw loss;
-              }
-              return result;
-            },
-          });
-          try {
-            try {
-              await runConnectedFixture105();
-              throw new Error("expected direct owner unknown COMMIT");
-            } catch (error) {
-              expect(error).toBeInstanceOf(CommandConnectionError);
-              if (!(error instanceof CommandConnectionError)) throw error;
-              expect(error.commitOutcome).toBe("unknown");
-              expect(error.phase).toBe("commit");
-            }
-          } finally {
-            Object.defineProperty(
+          const scopes = {
+            program_run: "unknown_program_run",
+            program_attempt: "unknown_program_attempt",
+            package_binding: "unknown_package_binding",
+          } as const;
+          const observer = new TargetObserver(separate.name, scopes[owner]);
+          await observer.around(async () => {
+            const queryDescriptor = Object.getOwnPropertyDescriptor(
               pg.Client.prototype,
               "query",
-              queryDescriptor,
             );
-          }
+            if (queryDescriptor === undefined)
+              throw new Error("driver method unavailable");
+            const query = driverQuery(queryDescriptor);
+            const statement =
+              owner === "program_run"
+                ? /^\s*INSERT INTO program_runs\s*\(/u
+                : owner === "program_attempt"
+                  ? /^\s*INSERT INTO program_run_attempts\s*\(/u
+                  : /^SELECT bind_evidence_package\(/u;
+            Object.defineProperty(pg.Client.prototype, "query", {
+              ...queryDescriptor,
+              value: async function (
+                this: pg.Client,
+                text: string,
+                values?: unknown[],
+              ): Promise<pg.QueryResult> {
+                const result = await query.call(this, text, values);
+                if (statement.test(text)) {
+                  reached++;
+                  expect(reached).toBe(1);
+                  selected.client = this;
+                  if (owner === "package_binding") {
+                    const target = observedLists().targets.at(-1);
+                    if (
+                      target === undefined ||
+                      typeof target.target_hash !== "string" ||
+                      executionRoot === undefined
+                    )
+                      throw new Error("binding witness target missing");
+                    targetKey = target.target_hash;
+                    receiptBefore = readFileSync(
+                      join(
+                        executionRoot,
+                        "receipts",
+                        targetKey,
+                        "CONSTRUCTION.json",
+                      ),
+                    );
+                    terminalBefore = readFileSync(
+                      join(
+                        executionRoot,
+                        "expectations",
+                        targetKey + ".terminal.json",
+                      ),
+                    );
+                  }
+                }
+                if (this === selected.client && text === "COMMIT") {
+                  delete selected.client;
+                  lost++;
+                  const loss = new Error(
+                    "fixed direct-owner acknowledgement withheld",
+                  );
+                  this.emit("error", loss);
+                  throw loss;
+                }
+                return result;
+              },
+            });
+            await withTestCleanup(
+              async () => {
+                try {
+                  await runConnectedFixture105();
+                  throw new Error("expected direct owner unknown COMMIT");
+                } catch (error) {
+                  expect(error).toBeInstanceOf(CommandConnectionError);
+                  if (!(error instanceof CommandConnectionError)) throw error;
+                  expect(error.commitOutcome).toBe("unknown");
+                  expect(error.phase).toBe("commit");
+                }
+              },
+              () => {
+                observer.restoreWitness(queryDescriptor);
+                return Promise.resolve();
+              },
+            );
+          });
           try {
             expect(reached).toBe(1);
             expect(lost).toBe(1);

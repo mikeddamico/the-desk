@@ -1070,6 +1070,32 @@ class WorkflowShape(unittest.TestCase):
         self.assertNotIn('db:reset', text)
         self.assertNotIn('db:load-fixture', text)
         self.assertNotIn('workflow_dispatch', text)
+        self.assertEqual(text.count('id: diagnostic120'), 2)
+        self.assertEqual(text.count('run-stage.sh diagnostic120'), 2)
+        condition = "if: ${{ always() && steps.diagnostic120.outcome != 'skipped' && steps.init.outcome == 'success' && env.DESK_CI_PARTITION == 'rest' }}"
+        self.assertEqual(text.count(condition), 2)
+        for job in (text.split('  verify-writer:', 1)[1].split('  verify-rest:', 1)[0],
+                    text.split('  verify-rest:', 1)[1].split('  container:', 1)[0]):
+            with self.subTest(job=job.splitlines()[0]):
+                self.assertLess(job.index('id: upload-controls'), job.index('id: diagnostic120'))
+                self.assertLess(job.index('id: diagnostic120'), job.index('name: Guard P33 aggregate (all)'))
+                self.assertLess(job.index('run-stage.sh all'), job.index(condition))
+                diagnostic = job[job.index('id: diagnostic120'):job.index('name: Guard P33 aggregate (all)')]
+                self.assertIn('timeout-minutes: 122', diagnostic)
+                self.assertNotIn('if:', diagnostic)
+        wrapper = (HERE / 'run-stage.sh').read_text()
+        guard = (ci.ROOT / 'test/support/p33-parity-supervisor.py').read_text()
+        self.assertIn("'target-diagnostic': ['test/unit/connected-fixture105.test.ts', 'test/integration/connected-fixture105.test.ts']", guard)
+        self.assertIn('if [ "$STAGE" = diagnostic120 ]; then STAGE=all; DIAGNOSTIC120=true; fi', wrapper)
+        self.assertIn('if [ "$DIAGNOSTIC120" = true ]; then PROFILE=target-diagnostic; fi', wrapper)
+        self.assertLess(wrapper.index('diagnostic120 writer path launches no tests'), wrapper.index('ci.py" precheck'))
+        self.assertIn('all) CEILING=7200', wrapper)
+        self.assertIn('--signal=TERM --kill-after=20', wrapper)
+        self.assertIn('CAP_BYTES=67108864', wrapper)
+        self.assertIn('core %s', wrapper)
+        self.assertLess(wrapper.index('"$RC" > "$STAGE_DIR/exit"'), wrapper.index('diagnostic120 only; actual guard exit $RC'))
+        self.assertIn('exit 78', wrapper[wrapper.index('diagnostic120 only; actual guard exit $RC'):])
+
 
     def test_partial_artifacts_are_still_uploaded_and_upload_failure_gates_the_aggregate(self):
         text = self.text()
@@ -2045,7 +2071,7 @@ class Partition155Tests(unittest.TestCase):
         self.assertNotIn('matrix:', workflow)
         wrapper = (ci.ROOT / 'tools/ci-validation/run-stage.sh').read_text()
         self.assertIn('all) CEILING=7200', wrapper)
-        self.assertIn('if [ "$PROFILE" = rest ]; then DB_FEED=$TEST_DATABASE_URL; else DB_FEED=""; fi', wrapper)
+        self.assertIn('if [ "$PROFILE" = rest ] || [ "$PROFILE" = target-diagnostic ]; then DB_FEED=$TEST_DATABASE_URL; else DB_FEED=""; fi', wrapper)
         self.assertIn('/bin/bash -c "$CHILD" _ "$PROFILE" "$CEILING"', wrapper)
         self.assertEqual(workflow.count('id: gitleaks'), 2)
         self.assertEqual(workflow.count('id: audit'), 2)
@@ -2060,13 +2086,20 @@ class FixtureTargetObserverShapeTests(unittest.TestCase):
         self.assertNotIn('native117', native)
         self.assertEqual(native.count('await new TargetObserver(env.name).around(firstInvocation);'), 1)
         self.assertIn('const TARGET_OBSERVER_CAP = 64;', native)
-        observer = native[native.index('class TargetObserver'):native.index('// pg-pool attaches release')]
-        self.assertIn('Object.defineProperty(pg.Client.prototype, "query", descriptor);\n        this.emit();\n        return Promise.resolve();', observer)
+        observer = native[native.index('class TargetObserver'):native.index('  /** Test-local controls;')]
+        selftest = native[native.index('  static async selftest()'):native.index('// pg-pool attaches release')]
+        self.assertIn('if (process.env.DESK_P33_PROFILE === "target-diagnostic")\n      await TargetObserver.selftest();', native)
+        self.assertIn('capture.mockRestore();', selftest)
+        self.assertIn('expect(groups).toBe(12);', selftest)
+        self.assertLess(selftest.rindex('capture.mockRestore();'), selftest.index("process.stderr.write(\n      'FIXTURE_TARGET_DIAGNOSTIC_SELFTEST"))
+        self.assertNotIn('runConnectedFixture105(', selftest)
+        self.assertNotIn('.query(', selftest)
+        self.assertIn('Object.defineProperty(pg.Client.prototype, "query", descriptor);\n        if (!this.restorationFailed) this.emit();\n        return Promise.resolve();', observer)
         self.assertEqual(observer.count('await Reflect.apply('), 1)
         self.assertIn('rejected(ordinal);\n        throw error;', observer)
         self.assertIn('observe(ordinal, result);\n      return result;', observer)
         self.assertIn('this.count === 0 ||', observer)
-        self.assertIn('this.vectors.some((vector) => vector.outcome === "rejected") ||', observer)
+        self.assertIn('this.vectors.some(\n            (entry) =>\n              entry.vector.outcome === "rejected" ||\n              entry.supplement.status === "inconclusive",\n          ) ||', observer)
         self.assertEqual(observer.count('process.stderr.write'), 2)
         self.assertNotIn('console.', observer)
         self.assertNotIn('.query(', observer)
@@ -2076,6 +2109,31 @@ class FixtureTargetObserverShapeTests(unittest.TestCase):
         self.assertIn('await expect(runConnectedFixture105()).rejects.toBe(primary);', case)
         self.assertIn('expect(seen).toBe(1); // A witness that never reaches its intended cut fails.', native)
         self.assertEqual(native.count('"closes continuation when the acquisition-cut await throws before consumption",'), 3)
+        for scope in ('preseed_foreign_claim', 'preseed_missing_config', 'preseed_changed_show', 'preseed_extra_show',
+                      'unknown_construction', 'unknown_program_run', 'unknown_program_attempt', 'unknown_package_binding'):
+            with self.subTest(scope=scope):
+                self.assertGreaterEqual(native.count('"' + scope + '"'), 2)
+        self.assertEqual(native.count('observer.restoreWitness('), 2)
+        self.assertNotIn('const observeTarget =', native)
+        self.assertIn('await withTestCleanup(\n            async () => {', native)
+        self.assertIn('if (!this.restorationFailed) this.emit();', observer)
+        self.assertIn('Buffer.byteLength(line) > 1024', observer)
+        self.assertIn('targetUnknown("record_limit")', observer)
+        sql = (ci.ROOT / 'src/runtime/connected-fixture105.ts').read_text()
+        sql = sql[sql.index('const TARGET_SQL ='):sql.index('function queryProjection')]
+        self.assertEqual(sql.count('FROM pg_stat_activity'), 1)
+        self.assertIn('WITH others AS MATERIALIZED', sql)
+        self.assertIn('count(*)::integer AS other_sessions', sql)
+        self.assertIn('FROM (SELECT pid, category FROM others ORDER BY pid LIMIT 8) AS sample', sql)
+        self.assertIn('WHERE datname = current_database() AND pid <> pg_backend_pid()', sql)
+        self.assertIn("ELSE 'unknown'", sql)
+        # Independent CASE allowlist literals; mapping is source review, not executed SQL.
+        other_types = ('autovacuum launcher', 'logical replication launcher', 'logical replication worker',
+                       'parallel worker', 'background writer', 'checkpointer', 'archiver', 'standalone backend',
+                       'startup', 'walreceiver', 'walsender', 'walwriter', 'walsummarizer')
+        allowlist = sql[sql.index('WHEN backend_type IN ('):sql.index(") THEN 'other_backend'")]
+        self.assertEqual(tuple(re.findall(r"'([^']+)'", allowlist)), other_types)
+
         self.assertIn('harnessCases.length === CASE_EXPECTATIONS.length', native)
 
 
