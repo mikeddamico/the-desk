@@ -2,7 +2,7 @@
 
 Foundation implementation: Node.js 24/strict TypeScript, explicit validated configuration, structured redacted logging, PostgreSQL forward migrations and least-privilege roles, immutable editorial lineage, canonical identity primitives, and fixture conformance.
 
-Current implementation authority is FINAL LOCK v1.2.7 (`Lock/00_INDEX/ACTIVE_SPECS_LOCKED_v1.2.7.md`), whose executable contract is Frozen Walking-Skeleton Fixture v0.4.6. The Foundation code in this repository was authored against FINAL LOCK v1.2.3 and Fixture v0.4.3; its fixture loader and conformance tests have not yet been updated to Fixture v0.4.6. That loader update, runtime hashing expansion, the claim reducer and workflow runner are later Completion A work and are not part of the Lock activation.
+Current implementation authority is FINAL LOCK v1.2.7 (`Lock/00_INDEX/ACTIVE_SPECS_LOCKED_v1.2.7.md`), whose executable contract is Frozen Walking-Skeleton Fixture v0.4.6. While the initial Foundation tranche was authored against FINAL LOCK v1.2.3 and Fixture v0.4.3, subsequent bounded tranches have updated the fixture loader and conformance suite to Fixture v0.4.6 (`src/fixture/`) and added canonical identity/projection helpers (`src/identity/`) and bounded runtime modules (`src/runtime/`). These bounded implementations do not constitute full Build 1 completion.
 
 Migration 002 (`migrations/002_persistence_profile.sql`) is implemented as the bounded, empty-database-only persistence migration for the approved eight-table profile: it locks the twelve protected tables in a fixed order and fails with full rollback if any holds history. It adds the claim-event append-order guard, which requires `READ COMMITTED` for claim-event appends (other isolation levels are rejected with SQLSTATE `0A000`; see [foundation operations](docs/operations.md)). This is the migration only: the unfinished runtime and Completion A work above is not implied by it.
 
@@ -35,6 +35,18 @@ Copy `.env.example` to an ignored `.env` only for local shell tooling; the appli
 
 TypeScript, ESLint, Prettier, Vitest, and `tsx` are development-only compiler/quality/test/CLI tooling. No queue, cache, workflow vendor, ORM, web framework, or additional datastore is introduced.
 
-## Scope
+## Scope and repository layout
 
-This tranche deliberately does not implement workflow execution, leases, retries/scheduling, READY wait/resume execution, repairs, live providers, audio assembly, publication, ingest, commissioning, retrieval, or a web UI. It supplies constrained database lifecycle transitions and stores the locked identities and lineage needed by Builds 1–2 without making mutable projections provenance targets. See [foundation operations](docs/operations.md) for deployment, privileges, migration, backup, and restore procedures.
+In addition to the initial Foundation database lifecycle and migration layer, the repository includes bounded implementations for:
+
+- `src/identity/`: canonical JSON/timestamp primitives, identity selection, and pure projections ([authority limits](docs/identity-projection-authority.md)).
+- `src/fixture/`: pinned Fixture v0.4.6 pack verification, row parsing, and persistence.
+- `src/runtime/`: bounded durable and provider command operations ([A5.1](docs/a5-1-durable-commands.md), [A5.2](docs/a5-2-provider-commands.md)), writer fixture input projection ([G1](docs/g1-writer-fixture-input.md)), development/test `READY` review wait/resume (`src/runtime/review-wait.ts`), and synthetic Frozen Fixture v0.4.6 render planning ([render planning](docs/frozen-render046-planning.md)).
+- `test/`: unit, conformance, and database integration suites.
+- `tools/ci-validation/`: hosted CI stage wrapper and evidence collection/validation tooling.
+
+These modules remain strictly bounded: synthetic render planning never invokes TTS or grants clearance, provider execution is scoped to explicit development/test non-network controls, and review wait/resume is restricted to development/test environments. The repository also includes fixture assembly verification, PCM measurement, and a container/runtime entrypoint. These bounded components do not establish end-to-end live media production, full Build completion, publication readiness, production clearance, or completed staging/deployment proof. See [foundation operations](docs/operations.md) for database privileges, migration, backup, and restore procedures.
+
+## Contributing
+
+Contributors and coding agents must follow [CONTRIBUTING.md](CONTRIBUTING.md) and the [code style and review requirement](docs/code-style.md).
