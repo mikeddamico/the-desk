@@ -1,0 +1,21 @@
+{
+  "artifact_id": "484a47f5-3e57-4c9b-917e-d5babcdc57c2",
+  "audit_run_id": "20d87118-3576-4b14-8169-61a166bf8ff8",
+  "auditor_kind": "fixture_stub_semantic_auditor",
+  "auditor_version": "semantic-auditor-v1",
+  "created_at": "2026-09-27T13:08:00Z",
+  "findings": [],
+  "fixture_stub": true,
+  "input_fingerprint": "fef4b240055df690424b35577788004039a2d6f9926789545c9f66857e8eeb1a",
+  "input_projection": {
+    "auditor_contract_version": "semantic-auditor-v1",
+    "brief_hash": "36fb22d03300206d3181959a100f2911c2b27d9ff72379f21831d32a4bd5c475",
+    "claims_policy_version": "claims-0.1.2",
+    "package_hash": "a8655c0e8bd72094a823b367a0c21cd665d3d99c271341286a92dbdc2ea304ab",
+    "performance_direction_hash": "177b9d58cc787b21440170b945aedbe27856c8498097315b0078fed0e4e4ba08",
+    "performance_policy_version": "performance-render-0.1.4",
+    "script_hash": "883cbe121635364f72072b29264f00af9b79eb32fd7ebd3d7e8462f829f50677",
+    "writing_policy_version": "writing-0.2.3"
+  },
+  "result": "pass"
+}

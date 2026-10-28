@@ -11,7 +11,7 @@ reach the probe replaces subprocess.run (and shutil.which) with a mock, so Node 
 the repository tree. Tests that need a checkout build a
 synthetic one under a temporary directory and patch ci.ROOT / ci.tracked_files only inside mock contexts.
 
-Pinned fail-closed rules: aggregate 78 files / 8,559 tests and all 29 integration files, each selected file exactly once
+Pinned fail-closed rules: aggregate 79 files / 8,599 tests and all 29 integration files, each selected file exactly once
 with no failed/skipped/todo test, a changed tracked-test inventory, a missing or foreign TEST_DATABASE_URL, a database
 that is not PostgreSQL 17 / the_desk_test / superuser, skipped integration files, root dist output accepted only when it
 is the unchanged build output (added, modified, empty, absent, symlinked or pre-existing dist and any tracked drift,
@@ -42,7 +42,7 @@ TRACKED = sorted(
     + ['test/unit/unit%02d.test.ts' % i for i in range(13)] + [ci.HARNESS_TEST]
     + ['test/integration/int%02d.test.ts' % i for i in range(28)])
 OLD_TESTS, OLD_SELECTED = ci.expected_all_files(TRACKED)
-TRACKED = sorted(TRACKED + list(ci.FIXTURE_CONNECTED_COUNTS))
+TRACKED = sorted(TRACKED + list(ci.FIXTURE_CONNECTED_COUNTS) + list(ci.FROZEN_RENDER046_COUNTS))
 TESTS, SELECTED = ci.expected_all_files(TRACKED)
 INTEGRATION = [n for n in SELECTED if n.startswith('test/integration/')]
 URL = 'postgresql://postgres:postgres@localhost:5432/the_desk_test'
@@ -50,6 +50,7 @@ NONCES = {'focused': ('a' * 48, 'b' * 48), 'all': ('c' * 48,)}
 ATTEMPTS = {'prerequisite': 'attempt-p', 'focused': 'attempt-f', 'all': 'attempt-3'}
 PER_FILE = {n: 8468 // 76 + (1 if i < 8468 % 76 else 0) for i, n in enumerate(OLD_SELECTED)}
 PER_FILE.update(ci.FIXTURE_CONNECTED_COUNTS)
+PER_FILE.update(ci.FROZEN_RENDER046_COUNTS)
 
 
 def file_lines(counts=None, extra=''):
@@ -59,7 +60,7 @@ def file_lines(counts=None, extra=''):
 
 SUMMARY = {
     'focused': ' Test Files  1 passed (1)\n      Tests  2 passed (2)\n',
-    'all': ' Test Files  78 passed (78)\n      Tests  8559 passed (8559)\n',
+    'all': ' Test Files  79 passed (79)\n      Tests  8599 passed (8599)\n',
 }
 
 
@@ -218,7 +219,7 @@ class SummaryAndFileLines(unittest.TestCase):
 
 class AggregateSelection(unittest.TestCase):
     def test_synthetic_inventory_matches_the_fixed_expectations(self):
-        self.assertEqual((len(TESTS), len(SELECTED), len(INTEGRATION)), (79, 78, 29))
+        self.assertEqual((len(TESTS), len(SELECTED), len(INTEGRATION)), (80, 79, 29))
         self.assertEqual(sum(PER_FILE.values()), ci.EXPECTED_ALL_TESTS)
         self.assertNotIn(ci.HARNESS_TEST, SELECTED)
 
@@ -262,7 +263,7 @@ class AggregateSelection(unittest.TestCase):
     def test_count_drift_and_duplicates(self):
         counts = dict(PER_FILE)
         counts[SELECTED[0]] -= 1
-        self.assertTrue(any('sum to 8558' in e for e in self.check(file_lines(counts))[0]))
+        self.assertTrue(any('sum to 8598' in e for e in self.check(file_lines(counts))[0]))
         dup = file_lines() + ' ✓ %s (1 tests) 1ms\n' % SELECTED[0]
         self.assertTrue(any('2 result lines' in e for e in self.check(dup)[0]))
 
@@ -274,7 +275,7 @@ class AggregateSelection(unittest.TestCase):
 
     def test_changed_tracked_inventory_is_hold_not_a_relaxed_count(self):
         grown = sorted(TRACKED + ['test/unit/extra.test.ts'])
-        self.assertTrue(any('inventory is 80' in e for e in self.check(file_lines(), grown)[0]))
+        self.assertTrue(any('inventory is 81' in e for e in self.check(file_lines(), grown)[0]))
         moved = [n for n in TRACKED if n != INTEGRATION[0]] + ['test/unit/moved.test.ts']
         self.assertTrue(any('integration file count 28' in e for e in self.check(file_lines(), sorted(moved))[0]))
         shrunk = [n for n in TRACKED if n != ci.HARNESS_TEST]
@@ -282,12 +283,12 @@ class AggregateSelection(unittest.TestCase):
 
     def test_summary_count_mismatch_with_correct_files(self):
         def change(stage_dir, attempt):
-            write(stage_dir / 'stdout', file_lines() + ' Test Files  78 passed (78)\n      Tests  8558 passed (8558)\n')
+            write(stage_dir / 'stdout', file_lines() + ' Test Files  79 passed (79)\n      Tests  8598 passed (8598)\n')
         self.assertTrue(any('Tests counts' in e for e in evaluate('all', change)))
 
     def test_skipped_summary_with_exit_zero_is_not_accepted(self):
         def change(stage_dir, attempt):
-            write(stage_dir / 'stdout', file_lines() + ' Test Files  78 passed (78)\n      Tests  8473 passed | 86 skipped (8559)\n')
+            write(stage_dir / 'stdout', file_lines() + ' Test Files  79 passed (79)\n      Tests  8513 passed | 86 skipped (8599)\n')
         self.assertTrue(any('Tests counts' in e for e in evaluate('all', change)))
 
 
@@ -1113,8 +1114,22 @@ class Fixture105Tooling(unittest.TestCase):
             counts.update({'test/unit/connected-fixture105.test.ts': unit, 'test/integration/connected-fixture105.test.ts': native})
             errors = []
             ci.check_all_files(file_lines(counts), TRACKED, errors, {})
-            self.assertEqual(sum(counts.values()), 8559)
+            self.assertEqual(sum(counts.values()), 8599)
             self.assertEqual(sum('connected per-file count drift' in e for e in errors), 2)
+
+    def test_frozen_render046_file_and_exact_count_are_required(self):
+        name = 'test/unit/frozen-render046.test.ts'
+        errors = []
+        ci.check_all_files(file_lines(), [p for p in TRACKED if p != name], errors, {})
+        self.assertIn('required frozen-render046 file absent: ' + name, errors)
+        for count in (39, 41):
+            counts = dict(PER_FILE)
+            counts[name] = count
+            counts[OLD_SELECTED[0]] += 40 - count
+            errors = []
+            ci.check_all_files(file_lines(counts), TRACKED, errors, {})
+            self.assertEqual(sum(counts.values()), 8599)
+            self.assertIn('frozen-render046 per-file count drift: ' + name, errors)
 
     def test_fixture_namespace_does_not_match_supervisor_prefix(self):
         with fixture_world() as (base, checkout, root, binding):
@@ -1692,9 +1707,10 @@ class Partition155Tests(unittest.TestCase):
         self.identity = {'checkout': 'a' * 40, 'head': 'b' * 40, 'tree': 'c' * 40,
                          'repository': 'mikeddamico/the-desk', 'run_id': '123', 'run_attempt': '1', 'source_sha256': 'd' * 64}
         rest = ci.partition_files(self.tracked, 'rest')
-        other = [p for p in rest if p not in ci.FIXTURE_CONNECTED_COUNTS]
+        other = [p for p in rest if p not in ci.FIXTURE_CONNECTED_COUNTS and p not in ci.FROZEN_RENDER046_COUNTS]
         self.counts = {p: 3560 // len(other) + (i < 3560 % len(other)) for i, p in enumerate(other)}
         self.counts.update(ci.FIXTURE_CONNECTED_COUNTS)
+        self.counts.update(ci.FROZEN_RENDER046_COUNTS)
         self.counts[ci.WRITER_TEST] = 4908
         self.proofs = {}
         for label in ('writer', 'rest'):
@@ -1717,8 +1733,8 @@ class Partition155Tests(unittest.TestCase):
     def test_exact_pair_and_disjoint_union(self):
         self.assertEqual(self.joint(), [])
         self.assertEqual(set(self.proofs['writer']['files']) & set(self.proofs['rest']['files']), set())
-        self.assertEqual(sum(sum(p['files'].values()) for p in self.proofs.values()), 8559)
-        self.assertEqual(len(ci.partition_files(self.tracked, 'all')), 78)
+        self.assertEqual(sum(sum(p['files'].values()) for p in self.proofs.values()), 8599)
+        self.assertEqual(len(ci.partition_files(self.tracked, 'all')), 79)
 
     def test_missing_unknown_and_legacy_labels(self):
         self.assertEqual(ci.partition_label(), 'all')
@@ -1777,6 +1793,11 @@ class Partition155Tests(unittest.TestCase):
         bad = self.copy(self.proofs); paths = list(ci.FIXTURE_CONNECTED_COUNTS)
         bad['rest']['files'][paths[0]] -= 1; bad['rest']['files'][paths[1]] += 1
         self.assertTrue(self.joint(proofs=bad))
+        bad = self.copy(self.proofs)
+        frozen = 'test/unit/frozen-render046.test.ts'
+        other = next(p for p in bad['rest']['files'] if p not in ci.FIXTURE_CONNECTED_COUNTS and p != frozen)
+        bad['rest']['files'][frozen] -= 1; bad['rest']['files'][other] += 1
+        self.assertIn('rest frozen-render046 coverage mismatch', self.joint(proofs=bad))
 
     def test_proof_parser_closed_bounded_unique(self):
         raw = ci.fixture_bytes(self.proofs['writer']).decode().rstrip('\n')
@@ -1944,7 +1965,7 @@ class Partition155Tests(unittest.TestCase):
             proof = self.copy(original); proof['identity'][key] = value
             with self.assertRaises(RuntimeError): ci.parse_partition_proof(ci.fixture_bytes(proof).decode().rstrip('\n'))
         for counts in ({'test/' + 'a' * 513 + '.test.ts': 4908}, {'test/../x.test.ts': 4908},
-                       {'test/x%d.test.ts' % n: 1 for n in range(79)}):
+                       {'test/x%d.test.ts' % n: 1 for n in range(80)}):
             proof = self.copy(original); proof['files'] = counts
             with self.assertRaises(RuntimeError): ci.parse_partition_proof(ci.fixture_bytes(proof).decode().rstrip('\n'))
         with self.assertRaises(RuntimeError): ci.parse_partition_proof(json.dumps(original))

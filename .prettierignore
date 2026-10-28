@@ -3,3 +3,6 @@ AGENTS.md
 package-lock.json
 dist/
 coverage/
+fixtures/frozen-render046-input/evidence_package.json
+fixtures/frozen-render046-input/INPUT-SUPPORT.json
+fixtures/frozen-render046-input/showrunner_brief.json

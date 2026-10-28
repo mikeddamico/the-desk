@@ -1,0 +1,1306 @@
+{
+  "artifact_id": "d1250005-0000-4000-8000-000000000011",
+  "created_at": "2026-09-27T13:00:00Z",
+  "frozen_at": "2026-09-27T13:00:05Z",
+  "id": "d1250004-0000-4000-8000-000000000001",
+  "manifest": {
+    "availability": {
+      "continuity": {
+        "state": "available"
+      },
+      "historical_context": {
+        "state": "available"
+      },
+      "independent_analysis": {
+        "state": "available"
+      },
+      "licensed_tracking_data": {
+        "reason": "provider_not_configured",
+        "state": "not_applicable"
+      },
+      "serious_incident": {
+        "reason": "no_confirmed_in_scope_incident",
+        "state": "absent"
+      },
+      "structured_stats": {
+        "state": "available"
+      },
+      "supporter_evidence": {
+        "observation_count": 4,
+        "state": "available"
+      },
+      "verified_result": {
+        "state": "available"
+      }
+    },
+    "beats": [
+      {
+        "beat_id": "beat_control",
+        "candidate_selection_score": "0.92",
+        "label": "late-game control",
+        "member_claim_refs": [
+          "d1250008-0000-4000-8000-000000000001",
+          "d1250008-0000-4000-8000-000000000002",
+          "d1250008-0000-4000-8000-000000000003",
+          "d1250008-0000-4000-8000-000000000004",
+          "d1250008-0000-4000-8000-000000000007"
+        ]
+      },
+      {
+        "beat_id": "beat_supporter",
+        "candidate_selection_score": "0.83",
+        "label": "supporter consequence",
+        "member_claim_refs": [
+          "d1250008-0000-4000-8000-000000000005",
+          "d1250008-0000-4000-8000-000000000006",
+          "d1250008-0000-4000-8000-000000000009"
+        ]
+      },
+      {
+        "beat_id": "beat_market",
+        "candidate_selection_score": "0.20",
+        "label": "market calibration",
+        "member_claim_refs": [
+          "d1250008-0000-4000-8000-000000000008"
+        ]
+      }
+    ],
+    "claims": [
+      {
+        "approved_representation": "Northbridge FC beat Southbank Athletic 2-1.",
+        "attribution_requirement": {
+          "required": false
+        },
+        "claim_content_hash": "fbb285c68fd26f5bb5cd26b6f0179d9aa0062e30e84e47e98c8c8d14292c2aa1",
+        "claim_id": "d1250008-0000-4000-8000-000000000001",
+        "effective_usage_class": "assertable",
+        "frozen_state": "confirmed",
+        "frozen_state_hash": "2239630f0ed9835266704ae1432d3b269dccfdd2d43b946a2b969aae310e9e94",
+        "initial_status": "confirmed",
+        "initial_usage_class": "assertable",
+        "kind": "event_fact",
+        "origin": "official_source",
+        "predicate": "match_result",
+        "reduced_usage_class": "assertable",
+        "state_event_cursor": null,
+        "subject_domain": "statistical",
+        "subject_ref": "entity_northbridge_fc",
+        "support_refs": [
+          {
+            "claim_support_id": "d125000a-0000-4000-8000-000000000001",
+            "derivation_run_id": null,
+            "evidence_unit_id": "d1250007-0000-4000-8000-000000000001",
+            "external_support_identity": null,
+            "support_hash": "5dfd65df76fdcd9b3fa8b2ab730cb38712f3941875ad2ae1319d788d256bd1a3",
+            "support_kind": "evidence",
+            "support_role": "supports_value"
+          }
+        ],
+        "value": {
+          "northbridge_goals": 2,
+          "southbank_goals": 1
+        },
+        "value_type": "scoreline"
+      },
+      {
+        "approved_representation": "Northbridge had 43 percent possession.",
+        "attribution_requirement": {
+          "required": false
+        },
+        "claim_content_hash": "55e10cb05eef3ff50b04d02b9c328bd502e7f3af840ecd774ffe7f9743408376",
+        "claim_id": "d1250008-0000-4000-8000-000000000002",
+        "effective_usage_class": "assertable",
+        "frozen_state": "confirmed",
+        "frozen_state_hash": "db0710627bea350c1ca0d9c3344c951c9bb57d7740dd8c23bbc91a7060fd732f",
+        "initial_status": "confirmed",
+        "initial_usage_class": "assertable",
+        "kind": "event_fact",
+        "origin": "data_provider",
+        "predicate": "possession_percent",
+        "reduced_usage_class": "assertable",
+        "state_event_cursor": null,
+        "subject_domain": "statistical",
+        "subject_ref": "entity_northbridge_fc",
+        "support_refs": [
+          {
+            "claim_support_id": "d125000a-0000-4000-8000-000000000002",
+            "derivation_run_id": null,
+            "evidence_unit_id": "d1250007-0000-4000-8000-000000000002",
+            "external_support_identity": null,
+            "support_hash": "a5565030c5163db39ffd10a1cd80a07cb30559d898737d23d87fc4f029fefdb0",
+            "support_kind": "evidence",
+            "support_role": "supports_value"
+          }
+        ],
+        "value": {
+          "scalar": "43",
+          "unit": "percent"
+        },
+        "value_type": "exact_decimal"
+      },
+      {
+        "approved_representation": "The North Coast Gazette reports Northbridge had rehearsed a 5-4-1 closing shape in training.",
+        "attribution_requirement": {
+          "approved_prefix": "The North Coast Gazette reports",
+          "required": true,
+          "source_id": "src_north_coast_gazette"
+        },
+        "claim_content_hash": "a6b3d89db355e2854bf35519496959e3b343639ff074be88202d9c10a4f74d38",
+        "claim_id": "d1250008-0000-4000-8000-000000000003",
+        "effective_usage_class": "assertable",
+        "frozen_state": "confirmed",
+        "frozen_state_hash": "3de1334c7a8e5c58ba2cbdd531d6541bec7e1a7f5fc7447714b41b584af2bae4",
+        "initial_status": "confirmed",
+        "initial_usage_class": "assertable",
+        "kind": "reported_fact",
+        "origin": "external_publisher",
+        "predicate": "closing_shape_rehearsed",
+        "reduced_usage_class": "assertable",
+        "state_event_cursor": null,
+        "subject_domain": "tactical",
+        "subject_ref": "entity_northbridge_fc",
+        "support_refs": [
+          {
+            "claim_support_id": "d125000a-0000-4000-8000-000000000003",
+            "derivation_run_id": null,
+            "evidence_unit_id": "d1250007-0000-4000-8000-000000000003",
+            "external_support_identity": null,
+            "support_hash": "a71d542b57e7edcfe91186a9a934b0301845599b4a40f7fecb8d6e633b4b8578",
+            "support_kind": "evidence",
+            "support_role": "supports_value"
+          }
+        ],
+        "value": {
+          "context": "closing shape rehearsed in training",
+          "formation": "5-4-1"
+        },
+        "value_type": "structured_text"
+      },
+      {
+        "approved_representation": "One specialist analysis in the package suggests Southbank's wider second-half attacks may have been a deliberate response to Northbridge narrowing the midfield.",
+        "attribution_requirement": {
+          "approved_prefix": "One specialist analysis in the package suggests",
+          "required": true,
+          "source_id": "src_matchboard_analysis"
+        },
+        "claim_content_hash": "f8bdddac5d0d10856a94121cd1dd178fd650477cbd82e338afa52cde5b228672",
+        "claim_id": "d1250008-0000-4000-8000-000000000004",
+        "effective_usage_class": "hedged_only",
+        "frozen_state": "confirmed",
+        "frozen_state_hash": "59580d5287ca5d6d8c428d73936fc442c21454be258e5b0c6d4b5209b2fca4cd",
+        "initial_status": "confirmed",
+        "initial_usage_class": "hedged_only",
+        "kind": "analysis",
+        "origin": "external_publisher",
+        "predicate": "southbank_wide_response",
+        "reduced_usage_class": "hedged_only",
+        "state_event_cursor": null,
+        "subject_domain": "tactical",
+        "subject_ref": "entity_northbridge_fc",
+        "support_refs": [
+          {
+            "claim_support_id": "d125000a-0000-4000-8000-000000000004",
+            "derivation_run_id": null,
+            "evidence_unit_id": "d1250007-0000-4000-8000-000000000004",
+            "external_support_identity": null,
+            "support_hash": "98cc45be73f4be9296b343ad543d249a63fc20f6c31daf0a86b6c90eb1b8e4df",
+            "support_kind": "evidence",
+            "support_role": "supports_value"
+          }
+        ],
+        "value": {
+          "interpretation": "Southbank's second-half wing focus may have been a deliberate response to Northbridge narrowing the midfield."
+        },
+        "value_type": "analysis_text"
+      },
+      {
+        "approved_representation": "Across four supporter sources in the package, the dominant note was relief more than celebration.",
+        "attribution_requirement": {
+          "approved_prefix": "Across four supporter sources in the package",
+          "required": true,
+          "source_id": "supporter_sample"
+        },
+        "claim_content_hash": "077522e8f69193fa36fa038ab8378b3780c49456f67ea9eb730c928da00733c5",
+        "claim_id": "d1250008-0000-4000-8000-000000000005",
+        "effective_usage_class": "assertable",
+        "frozen_state": "confirmed",
+        "frozen_state_hash": "4a32d360454d615f54c7b467e95338c8cde8c9388c67919aa9bc4bcf8fa41a8e",
+        "initial_status": "confirmed",
+        "initial_usage_class": "assertable",
+        "kind": "mood",
+        "origin": "supporter_source",
+        "predicate": "supporter_postmatch_tenor",
+        "reduced_usage_class": "assertable",
+        "state_event_cursor": null,
+        "subject_domain": "cultural",
+        "subject_ref": "entity_northbridge_fc",
+        "support_refs": [
+          {
+            "claim_support_id": "d125000a-0000-4000-8000-000000000005",
+            "derivation_run_id": null,
+            "evidence_unit_id": null,
+            "external_support_identity": "artifact:d1250005-0000-4000-8000-000000000017",
+            "support_hash": "46e6a24048f151f62f9e03a66bb57ca4aae78c0281630850bc74bf9205cd4c28",
+            "support_kind": "signal",
+            "support_role": "supports_value"
+          }
+        ],
+        "value": {
+          "direction": "relief_over_celebration",
+          "observation_count": 4
+        },
+        "value_type": "tenor"
+      },
+      {
+        "approved_representation": "An approved lore source traces the phrase 'the long ten' to at least 2019.",
+        "attribution_requirement": {
+          "required": false
+        },
+        "claim_content_hash": "9be7ef594118c81d980d25a343ade42b6dfc2932c9a3a31eb69170584aee117d",
+        "claim_id": "d1250008-0000-4000-8000-000000000006",
+        "effective_usage_class": "assertable",
+        "frozen_state": "confirmed",
+        "frozen_state_hash": "2999b750b23ef1a6c98b3b6ab029a0cf734ea6d2ca9a823f5420dce700bcfc5f",
+        "initial_status": "confirmed",
+        "initial_usage_class": "assertable",
+        "kind": "lore",
+        "origin": "external_publisher",
+        "predicate": "supporter_phrase_long_ten",
+        "reduced_usage_class": "assertable",
+        "state_event_cursor": null,
+        "subject_domain": "cultural",
+        "subject_ref": "entity_northbridge_fc",
+        "support_refs": [
+          {
+            "claim_support_id": "d125000a-0000-4000-8000-000000000006",
+            "derivation_run_id": null,
+            "evidence_unit_id": "d1250007-0000-4000-8000-000000000009",
+            "external_support_identity": null,
+            "support_hash": "413c4fc6bbce8ab3ec6704e07bfc85f7e6800b92ae8f51de1c430b65a74c6ee3",
+            "support_kind": "evidence",
+            "support_role": "supports_value"
+          }
+        ],
+        "value": {
+          "attested_since_year": 2019,
+          "phrase": "the long ten"
+        },
+        "value_type": "lore_phrase"
+      },
+      {
+        "approved_representation": "Northbridge conceded after the 80th minute in 3 of their last 5 league matches.",
+        "attribution_requirement": {
+          "required": false
+        },
+        "claim_content_hash": "cabbed4a2abed81a76fa2a0d4ce7ca2232545224ffbd37ac5a01e1b56fb2063f",
+        "claim_id": "d1250008-0000-4000-8000-000000000007",
+        "effective_usage_class": "assertable",
+        "frozen_state": "confirmed",
+        "frozen_state_hash": "98fa9d6b3406e2b5734cc8fcc12cdd9038e9976838d95f1d4b7f8321ecfb833e",
+        "initial_status": "confirmed",
+        "initial_usage_class": "assertable",
+        "kind": "desk_derived",
+        "origin": "desk_derived",
+        "predicate": "late_concessions_recent",
+        "reduced_usage_class": "assertable",
+        "state_event_cursor": null,
+        "subject_domain": "statistical",
+        "subject_ref": "entity_northbridge_fc",
+        "support_refs": [
+          {
+            "claim_support_id": "d125000a-0000-4000-8000-000000000007",
+            "derivation_run_id": "d1250009-0000-4000-8000-000000000001",
+            "evidence_unit_id": null,
+            "external_support_identity": null,
+            "support_hash": "eb65fd3581e65333e7dcc68a0150e17dc8e728c8e348510b7c3ca12f2d748a88",
+            "support_kind": "derivation",
+            "support_role": "supports_value"
+          }
+        ],
+        "value": {
+          "after_minute": 80,
+          "count": 3,
+          "sample_size": 5
+        },
+        "value_type": "count_window"
+      },
+      {
+        "approved_representation": "Market-implied Northbridge win probability: 0.58.",
+        "attribution_requirement": {
+          "required": false
+        },
+        "claim_content_hash": "d635b3253e5d2aba9cea12a2ac3495606ebac7d3d365b6b9623d613fa92e7a53",
+        "claim_id": "d1250008-0000-4000-8000-000000000008",
+        "effective_usage_class": "silent",
+        "frozen_state": "confirmed",
+        "frozen_state_hash": "4006b76c4b9ad0bd1a841ddaa5930d877c110fb821f522c45f71ae2c8ae1ffa3",
+        "initial_status": "confirmed",
+        "initial_usage_class": "silent",
+        "kind": "analysis",
+        "origin": "data_provider",
+        "predicate": "next_match_market_probability",
+        "reduced_usage_class": "silent",
+        "state_event_cursor": null,
+        "subject_domain": "statistical",
+        "subject_ref": "entity_northbridge_fc",
+        "support_refs": [
+          {
+            "claim_support_id": "d125000a-0000-4000-8000-000000000008",
+            "derivation_run_id": null,
+            "evidence_unit_id": "d1250007-0000-4000-8000-000000000010",
+            "external_support_identity": null,
+            "support_hash": "348f6a219bc56f3d69f86267c1669d9c672f30db7712dc88cd6a8f4ff6e1f8f4",
+            "support_kind": "evidence",
+            "support_role": "supports_value"
+          }
+        ],
+        "value": {
+          "scalar": "0.58",
+          "unit": "probability"
+        },
+        "value_type": "exact_decimal"
+      },
+      {
+        "approved_representation": "The previous published episode left late-game control unresolved.",
+        "attribution_requirement": {
+          "required": false
+        },
+        "claim_content_hash": "92d17eee43920805daf81919b546e7be44a50915d579e4da84ff5782e828d54f",
+        "claim_id": "d1250008-0000-4000-8000-000000000009",
+        "effective_usage_class": "assertable",
+        "frozen_state": "confirmed",
+        "frozen_state_hash": "dfa61e2a799d3966fe4eccb6998b9d4925e074a04ad07724d95957d4052d8231",
+        "initial_status": "confirmed",
+        "initial_usage_class": "assertable",
+        "kind": "program_history",
+        "origin": "desk_derived",
+        "predicate": "prior_published_position",
+        "reduced_usage_class": "assertable",
+        "state_event_cursor": null,
+        "subject_domain": "historical",
+        "subject_ref": "entity_northbridge_fc",
+        "support_refs": [
+          {
+            "claim_support_id": "d125000a-0000-4000-8000-000000000009",
+            "derivation_run_id": null,
+            "evidence_unit_id": null,
+            "external_support_identity": "artifact:d1250005-0000-4000-8000-000000000018",
+            "support_hash": "2192b1ec1e126a0d7f705e69338cc5e2b457c6cd8f13136bc07f72cccdf46dd1",
+            "support_kind": "continuity",
+            "support_role": "supports_value"
+          }
+        ],
+        "value": {
+          "position": "late-game control remained unresolved",
+          "topic_thread_id": "thr_late_game_control"
+        },
+        "value_type": "program_history"
+      }
+    ],
+    "context_candidates": [
+      {
+        "claim_id": "d1250008-0000-4000-8000-000000000007",
+        "context_id": "ctx_latepattern",
+        "functions": [
+          "supports",
+          "continuity"
+        ],
+        "reason": "Recent late-concession pattern sharpens the control question."
+      },
+      {
+        "claim_id": "d1250008-0000-4000-8000-000000000006",
+        "context_id": "ctx_lore",
+        "functions": [
+          "meaning"
+        ],
+        "reason": "Approved supporter language explains why the final minutes feel culturally familiar."
+      },
+      {
+        "claim_id": "d1250008-0000-4000-8000-000000000009",
+        "context_id": "ctx_continuity",
+        "functions": [
+          "continuity"
+        ],
+        "reason": "Prior published position makes the unresolved thread explicit."
+      }
+    ],
+    "continuity": [
+      {
+        "continuity_id": "artifact:d1250005-0000-4000-8000-000000000018",
+        "published_only": true,
+        "topic_thread_id": "thr_late_game_control",
+        "withdrawn": false
+      }
+    ],
+    "coverage_conditions": [
+      {
+        "condition": "normal_match_analysis",
+        "state": "satisfied"
+      },
+      {
+        "condition": "supporter_texture",
+        "state": "satisfied"
+      },
+      {
+        "condition": "independent_analysis",
+        "state": "satisfied"
+      }
+    ],
+    "evidence": [
+      {
+        "acquisition_ref": "fixture-acquisition:src_north_coast_league:2026-09-27:v1",
+        "as_of": "2026-09-27T12:59:00Z",
+        "competition_identity": "competition_north_coast_league",
+        "consumer_exposure": {
+          "auditor": "claim_only",
+          "planner": "claim_only",
+          "writer": "claim_only"
+        },
+        "content_hash": "5dfd65df76fdcd9b3fa8b2ab730cb38712f3941875ad2ae1319d788d256bd1a3",
+        "entity_identity": "entity_northbridge_fc",
+        "event_identity": "event_fixture_001",
+        "evidence_type": "fact",
+        "evidence_unit_id": "d1250007-0000-4000-8000-000000000001",
+        "language": "en-GB",
+        "locator": {
+          "body_codepoint_end": 46,
+          "body_codepoint_start": 0,
+          "evidence_unit_id": "d1250007-0000-4000-8000-000000000001",
+          "kind": "synthetic_fixture_text",
+          "member": "evidence_store.json"
+        },
+        "modality": "structured_data",
+        "origin": "official_source",
+        "paraphrase_permission": true,
+        "quote_permission": false,
+        "retention_class": "fixture_retained",
+        "retention_declaration": {
+          "canonical_source_bytes": "durable_offline_test_retention",
+          "policy_version": "synthetic-fixture-retention-v1",
+          "purge_behavior": "retain permitted tombstone metadata; no replacement bytes"
+        },
+        "rights_policy_version": "d1250006-0000-4000-8000-000000000004",
+        "rights_version_id": "d1250006-0000-4000-8000-000000000004",
+        "source_identity": "src_north_coast_league",
+        "source_item_identity": "fixture-item:ev_official_result:v1",
+        "source_modality": "structured_data",
+        "source_role": "official",
+        "speaker_identity": null
+      },
+      {
+        "acquisition_ref": "fixture-acquisition:src_fixture_data:2026-09-27:v1",
+        "as_of": "2026-09-27T12:59:00Z",
+        "competition_identity": "competition_north_coast_league",
+        "consumer_exposure": {
+          "auditor": "claim_only",
+          "planner": "claim_only",
+          "writer": "claim_only"
+        },
+        "content_hash": "a5565030c5163db39ffd10a1cd80a07cb30559d898737d23d87fc4f029fefdb0",
+        "entity_identity": "entity_northbridge_fc",
+        "event_identity": "event_fixture_001",
+        "evidence_type": "fact",
+        "evidence_unit_id": "d1250007-0000-4000-8000-000000000002",
+        "language": "en-GB",
+        "locator": {
+          "body_codepoint_end": 38,
+          "body_codepoint_start": 0,
+          "evidence_unit_id": "d1250007-0000-4000-8000-000000000002",
+          "kind": "synthetic_fixture_text",
+          "member": "evidence_store.json"
+        },
+        "modality": "structured_data",
+        "origin": "data_provider",
+        "paraphrase_permission": true,
+        "quote_permission": false,
+        "retention_class": "fixture_retained",
+        "retention_declaration": {
+          "canonical_source_bytes": "durable_offline_test_retention",
+          "policy_version": "synthetic-fixture-retention-v1",
+          "purge_behavior": "retain permitted tombstone metadata; no replacement bytes"
+        },
+        "rights_policy_version": "d1250006-0000-4000-8000-000000000002",
+        "rights_version_id": "d1250006-0000-4000-8000-000000000002",
+        "source_identity": "src_fixture_data",
+        "source_item_identity": "fixture-item:ev_possession:v1",
+        "source_modality": "structured_data",
+        "source_role": "reference",
+        "speaker_identity": null
+      },
+      {
+        "acquisition_ref": "fixture-acquisition:src_north_coast_gazette:2026-09-27:v1",
+        "as_of": "2026-09-27T12:59:00Z",
+        "competition_identity": "competition_north_coast_league",
+        "consumer_exposure": {
+          "auditor": "exact_excerpt",
+          "planner": "paraphrase",
+          "writer": "paraphrase"
+        },
+        "content_hash": "a71d542b57e7edcfe91186a9a934b0301845599b4a40f7fecb8d6e633b4b8578",
+        "entity_identity": "entity_northbridge_fc",
+        "event_identity": "event_fixture_001",
+        "evidence_type": "observation",
+        "evidence_unit_id": "d1250007-0000-4000-8000-000000000003",
+        "language": "en-GB",
+        "locator": {
+          "body_codepoint_end": 98,
+          "body_codepoint_start": 0,
+          "evidence_unit_id": "d1250007-0000-4000-8000-000000000003",
+          "kind": "synthetic_fixture_text",
+          "member": "evidence_store.json"
+        },
+        "modality": "text",
+        "origin": "external_publisher",
+        "paraphrase_permission": true,
+        "quote_permission": false,
+        "retention_class": "fixture_retained",
+        "retention_declaration": {
+          "canonical_source_bytes": "durable_offline_test_retention",
+          "policy_version": "synthetic-fixture-retention-v1",
+          "purge_behavior": "retain permitted tombstone metadata; no replacement bytes"
+        },
+        "rights_policy_version": "d1250006-0000-4000-8000-000000000005",
+        "rights_version_id": "d1250006-0000-4000-8000-000000000005",
+        "source_identity": "src_north_coast_gazette",
+        "source_item_identity": "fixture-item:ev_gazette_shape:v1",
+        "source_modality": "text",
+        "source_role": "journalist",
+        "speaker_identity": null
+      },
+      {
+        "acquisition_ref": "fixture-acquisition:src_matchboard_analysis:2026-09-27:v1",
+        "as_of": "2026-09-27T12:59:00Z",
+        "competition_identity": "competition_north_coast_league",
+        "consumer_exposure": {
+          "auditor": "exact_excerpt",
+          "planner": "paraphrase",
+          "writer": "paraphrase"
+        },
+        "content_hash": "98cc45be73f4be9296b343ad543d249a63fc20f6c31daf0a86b6c90eb1b8e4df",
+        "entity_identity": "entity_northbridge_fc",
+        "event_identity": "event_fixture_001",
+        "evidence_type": "analysis",
+        "evidence_unit_id": "d1250007-0000-4000-8000-000000000004",
+        "language": "en-GB",
+        "locator": {
+          "body_codepoint_end": 126,
+          "body_codepoint_start": 0,
+          "evidence_unit_id": "d1250007-0000-4000-8000-000000000004",
+          "kind": "synthetic_fixture_text",
+          "member": "evidence_store.json"
+        },
+        "modality": "text",
+        "origin": "external_publisher",
+        "paraphrase_permission": true,
+        "quote_permission": false,
+        "retention_class": "fixture_retained",
+        "retention_declaration": {
+          "canonical_source_bytes": "durable_offline_test_retention",
+          "policy_version": "synthetic-fixture-retention-v1",
+          "purge_behavior": "retain permitted tombstone metadata; no replacement bytes"
+        },
+        "rights_policy_version": "d1250006-0000-4000-8000-000000000005",
+        "rights_version_id": "d1250006-0000-4000-8000-000000000005",
+        "source_identity": "src_matchboard_analysis",
+        "source_item_identity": "fixture-item:ev_specialist_wide:v1",
+        "source_modality": "text",
+        "source_role": "analyst",
+        "speaker_identity": null
+      },
+      {
+        "acquisition_ref": "fixture-acquisition:src_supporter_forum_a:2026-09-27:v1",
+        "as_of": "2026-09-27T12:59:00Z",
+        "competition_identity": "competition_north_coast_league",
+        "consumer_exposure": {
+          "auditor": "exact_excerpt",
+          "planner": "paraphrase",
+          "writer": "paraphrase"
+        },
+        "content_hash": "bb010e8fa7d1b2925a142620f20771294db03a6077c78ab72b041a3601cd41f3",
+        "entity_identity": "entity_northbridge_fc",
+        "event_identity": "event_fixture_001",
+        "evidence_type": "sentiment",
+        "evidence_unit_id": "d1250007-0000-4000-8000-000000000005",
+        "language": "en-GB",
+        "locator": {
+          "body_codepoint_end": 30,
+          "body_codepoint_start": 0,
+          "evidence_unit_id": "d1250007-0000-4000-8000-000000000005",
+          "kind": "synthetic_fixture_text",
+          "member": "evidence_store.json"
+        },
+        "modality": "text",
+        "observation_order": 1,
+        "observation_set_identity": "fixture-supporter-reaction-event-001-v1",
+        "observation_window": {
+          "end": "2026-09-27T12:59:00Z",
+          "start": "2026-09-27T12:00:00Z"
+        },
+        "origin": "supporter_source",
+        "paraphrase_permission": true,
+        "quote_permission": false,
+        "retention_class": "fixture_retained",
+        "retention_declaration": {
+          "canonical_source_bytes": "durable_offline_test_retention",
+          "policy_version": "synthetic-fixture-retention-v1",
+          "purge_behavior": "retain permitted tombstone metadata; no replacement bytes"
+        },
+        "rights_policy_version": "d1250006-0000-4000-8000-000000000007",
+        "rights_version_id": "d1250006-0000-4000-8000-000000000007",
+        "source_identity": "src_supporter_forum_a",
+        "source_item_identity": "fixture-item:ev_supporter_1:v1",
+        "source_modality": "text",
+        "source_role": "supporter",
+        "speaker_identity": "anonymous-synthetic-observation-1"
+      },
+      {
+        "acquisition_ref": "fixture-acquisition:src_supporter_podcast_b:2026-09-27:v1",
+        "as_of": "2026-09-27T12:59:00Z",
+        "competition_identity": "competition_north_coast_league",
+        "consumer_exposure": {
+          "auditor": "exact_excerpt",
+          "planner": "paraphrase",
+          "writer": "paraphrase"
+        },
+        "content_hash": "290dca152f388f068d078aca310869cb6aebc6506588f9c9d06de4a5cce1d7e0",
+        "entity_identity": "entity_northbridge_fc",
+        "event_identity": "event_fixture_001",
+        "evidence_type": "sentiment",
+        "evidence_unit_id": "d1250007-0000-4000-8000-000000000006",
+        "language": "en-GB",
+        "locator": {
+          "body_codepoint_end": 19,
+          "body_codepoint_start": 0,
+          "evidence_unit_id": "d1250007-0000-4000-8000-000000000006",
+          "kind": "synthetic_fixture_text",
+          "member": "evidence_store.json"
+        },
+        "modality": "audio",
+        "observation_order": 2,
+        "observation_set_identity": "fixture-supporter-reaction-event-001-v1",
+        "observation_window": {
+          "end": "2026-09-27T12:59:00Z",
+          "start": "2026-09-27T12:00:00Z"
+        },
+        "origin": "supporter_source",
+        "paraphrase_permission": true,
+        "quote_permission": false,
+        "retention_class": "fixture_retained",
+        "retention_declaration": {
+          "canonical_source_bytes": "durable_offline_test_retention",
+          "policy_version": "synthetic-fixture-retention-v1",
+          "purge_behavior": "retain permitted tombstone metadata; no replacement bytes"
+        },
+        "rights_policy_version": "d1250006-0000-4000-8000-000000000007",
+        "rights_version_id": "d1250006-0000-4000-8000-000000000007",
+        "source_identity": "src_supporter_podcast_b",
+        "source_item_identity": "fixture-item:ev_supporter_2:v1",
+        "source_modality": "audio",
+        "source_role": "supporter",
+        "speaker_identity": "anonymous-synthetic-observation-2"
+      },
+      {
+        "acquisition_ref": "fixture-acquisition:src_supporter_blog_c:2026-09-27:v1",
+        "as_of": "2026-09-27T12:59:00Z",
+        "competition_identity": "competition_north_coast_league",
+        "consumer_exposure": {
+          "auditor": "exact_excerpt",
+          "planner": "paraphrase",
+          "writer": "paraphrase"
+        },
+        "content_hash": "3089e7a00a05ca9145a2b83edf9dc3e0fd7d1b7be70df5f5f69ffde049958e21",
+        "entity_identity": "entity_northbridge_fc",
+        "event_identity": "event_fixture_001",
+        "evidence_type": "sentiment",
+        "evidence_unit_id": "d1250007-0000-4000-8000-000000000007",
+        "language": "en-GB",
+        "locator": {
+          "body_codepoint_end": 49,
+          "body_codepoint_start": 0,
+          "evidence_unit_id": "d1250007-0000-4000-8000-000000000007",
+          "kind": "synthetic_fixture_text",
+          "member": "evidence_store.json"
+        },
+        "modality": "text",
+        "observation_order": 3,
+        "observation_set_identity": "fixture-supporter-reaction-event-001-v1",
+        "observation_window": {
+          "end": "2026-09-27T12:59:00Z",
+          "start": "2026-09-27T12:00:00Z"
+        },
+        "origin": "supporter_source",
+        "paraphrase_permission": true,
+        "quote_permission": false,
+        "retention_class": "fixture_retained",
+        "retention_declaration": {
+          "canonical_source_bytes": "durable_offline_test_retention",
+          "policy_version": "synthetic-fixture-retention-v1",
+          "purge_behavior": "retain permitted tombstone metadata; no replacement bytes"
+        },
+        "rights_policy_version": "d1250006-0000-4000-8000-000000000007",
+        "rights_version_id": "d1250006-0000-4000-8000-000000000007",
+        "source_identity": "src_supporter_blog_c",
+        "source_item_identity": "fixture-item:ev_supporter_3:v1",
+        "source_modality": "text",
+        "source_role": "supporter",
+        "speaker_identity": "anonymous-synthetic-observation-3"
+      },
+      {
+        "acquisition_ref": "fixture-acquisition:src_supporter_forum_d:2026-09-27:v1",
+        "as_of": "2026-09-27T12:59:00Z",
+        "competition_identity": "competition_north_coast_league",
+        "consumer_exposure": {
+          "auditor": "exact_excerpt",
+          "planner": "paraphrase",
+          "writer": "paraphrase"
+        },
+        "content_hash": "3a462ce692fcdbdffcb3ce62810b2efbe50a1d18af3460944f46ba00623fdef5",
+        "entity_identity": "entity_northbridge_fc",
+        "event_identity": "event_fixture_001",
+        "evidence_type": "sentiment",
+        "evidence_unit_id": "d1250007-0000-4000-8000-000000000008",
+        "language": "en-GB",
+        "locator": {
+          "body_codepoint_end": 13,
+          "body_codepoint_start": 0,
+          "evidence_unit_id": "d1250007-0000-4000-8000-000000000008",
+          "kind": "synthetic_fixture_text",
+          "member": "evidence_store.json"
+        },
+        "modality": "text",
+        "observation_order": 4,
+        "observation_set_identity": "fixture-supporter-reaction-event-001-v1",
+        "observation_window": {
+          "end": "2026-09-27T12:59:00Z",
+          "start": "2026-09-27T12:00:00Z"
+        },
+        "origin": "supporter_source",
+        "paraphrase_permission": true,
+        "quote_permission": false,
+        "retention_class": "fixture_retained",
+        "retention_declaration": {
+          "canonical_source_bytes": "durable_offline_test_retention",
+          "policy_version": "synthetic-fixture-retention-v1",
+          "purge_behavior": "retain permitted tombstone metadata; no replacement bytes"
+        },
+        "rights_policy_version": "d1250006-0000-4000-8000-000000000007",
+        "rights_version_id": "d1250006-0000-4000-8000-000000000007",
+        "source_identity": "src_supporter_forum_d",
+        "source_item_identity": "fixture-item:ev_supporter_4:v1",
+        "source_modality": "text",
+        "source_role": "supporter",
+        "speaker_identity": "anonymous-synthetic-observation-4"
+      },
+      {
+        "acquisition_ref": "fixture-acquisition:src_east_bank_review_archive:2026-09-27:v1",
+        "as_of": "2026-09-27T12:59:00Z",
+        "competition_identity": "competition_north_coast_league",
+        "consumer_exposure": {
+          "auditor": "exact_excerpt",
+          "planner": "exact_excerpt",
+          "writer": "exact_excerpt"
+        },
+        "content_hash": "413c4fc6bbce8ab3ec6704e07bfc85f7e6800b92ae8f51de1c430b65a74c6ee3",
+        "entity_identity": "entity_northbridge_fc",
+        "event_identity": null,
+        "evidence_type": "context",
+        "evidence_unit_id": "d1250007-0000-4000-8000-000000000009",
+        "language": "en-GB",
+        "locator": {
+          "body_codepoint_end": 110,
+          "body_codepoint_start": 0,
+          "evidence_unit_id": "d1250007-0000-4000-8000-000000000009",
+          "kind": "synthetic_fixture_text",
+          "member": "evidence_store.json"
+        },
+        "modality": "text",
+        "origin": "external_publisher",
+        "paraphrase_permission": true,
+        "permitted_quote": {
+          "span_end": 83,
+          "span_start": 71,
+          "text": "the long ten"
+        },
+        "quote_permission": true,
+        "retention_class": "fixture_retained",
+        "retention_declaration": {
+          "canonical_source_bytes": "durable_offline_test_retention",
+          "policy_version": "synthetic-fixture-retention-v1",
+          "purge_behavior": "retain permitted tombstone metadata; no replacement bytes"
+        },
+        "rights_policy_version": "d1250006-0000-4000-8000-000000000006",
+        "rights_version_id": "d1250006-0000-4000-8000-000000000006",
+        "source_document_date": "2019-12-31",
+        "source_document_identity": "east-bank-2019-season-notes",
+        "source_identity": "src_east_bank_review_archive",
+        "source_item_identity": "fixture-item:ev_lore_long_ten:v1",
+        "source_modality": "text",
+        "source_role": "reference",
+        "speaker_identity": null
+      },
+      {
+        "acquisition_ref": "fixture-acquisition:src_fixture_market:2026-09-27:v1",
+        "as_of": "2026-09-27T12:59:00Z",
+        "competition_identity": "competition_north_coast_league",
+        "consumer_exposure": {
+          "auditor": "claim_only",
+          "planner": "claim_only",
+          "writer": "hidden"
+        },
+        "content_hash": "348f6a219bc56f3d69f86267c1669d9c672f30db7712dc88cd6a8f4ff6e1f8f4",
+        "entity_identity": "entity_northbridge_fc",
+        "event_identity": "event_fixture_001",
+        "evidence_type": "analysis",
+        "evidence_unit_id": "d1250007-0000-4000-8000-000000000010",
+        "language": "en-GB",
+        "locator": {
+          "body_codepoint_end": 32,
+          "body_codepoint_start": 0,
+          "evidence_unit_id": "d1250007-0000-4000-8000-000000000010",
+          "kind": "synthetic_fixture_text",
+          "member": "evidence_store.json"
+        },
+        "market_event_identity": "event_fixture_next_001",
+        "modality": "structured_data",
+        "origin": "data_provider",
+        "paraphrase_permission": false,
+        "quote_permission": false,
+        "reasoning_only": true,
+        "retention_class": "fixture_retained",
+        "retention_declaration": {
+          "canonical_source_bytes": "durable_offline_test_retention",
+          "policy_version": "synthetic-fixture-retention-v1",
+          "purge_behavior": "retain permitted tombstone metadata; no replacement bytes"
+        },
+        "rights_policy_version": "d1250006-0000-4000-8000-000000000003",
+        "rights_version_id": "d1250006-0000-4000-8000-000000000003",
+        "source_identity": "src_fixture_market",
+        "source_item_identity": "fixture-item:ev_market:v1",
+        "source_modality": "structured_data",
+        "source_role": "market",
+        "speaker_identity": null
+      },
+      {
+        "acquisition_ref": "fixture-acquisition:src_malicious_fixture:2026-09-27:v1",
+        "as_of": "2026-09-27T12:59:00Z",
+        "competition_identity": "competition_north_coast_league",
+        "consumer_exposure": {
+          "auditor": "exact_excerpt",
+          "planner": "hidden",
+          "writer": "hidden"
+        },
+        "content_hash": "16c2b0ba472b17e10a395c3aa1800011a4997a26865021c5e75bd5361792da10",
+        "entity_identity": "entity_northbridge_fc",
+        "event_identity": "event_fixture_001",
+        "evidence_type": "context",
+        "evidence_unit_id": "d1250007-0000-4000-8000-000000000011",
+        "language": "en-GB",
+        "locator": {
+          "body_codepoint_end": 106,
+          "body_codepoint_start": 0,
+          "evidence_unit_id": "d1250007-0000-4000-8000-000000000011",
+          "kind": "synthetic_fixture_text",
+          "member": "evidence_store.json"
+        },
+        "modality": "text",
+        "origin": "external_publisher",
+        "paraphrase_permission": false,
+        "quote_permission": false,
+        "retention_class": "fixture_retained",
+        "retention_declaration": {
+          "canonical_source_bytes": "durable_offline_test_retention",
+          "policy_version": "synthetic-fixture-retention-v1",
+          "purge_behavior": "retain permitted tombstone metadata; no replacement bytes"
+        },
+        "rights_policy_version": "d1250006-0000-4000-8000-000000000001",
+        "rights_version_id": "d1250006-0000-4000-8000-000000000001",
+        "source_identity": "src_malicious_fixture",
+        "source_item_identity": "fixture-item:ev_injection:v1",
+        "source_modality": "text",
+        "source_role": "journalist",
+        "speaker_identity": null,
+        "untrusted_injection_specimen": true
+      },
+      {
+        "acquisition_ref": "fixture-acquisition:src_fixture_data:2026-09-27:v1",
+        "as_of": "2026-09-27T12:59:00Z",
+        "competition_identity": "competition_north_coast_league",
+        "consumer_exposure": {
+          "auditor": "claim_only",
+          "planner": "claim_only",
+          "writer": "hidden"
+        },
+        "content_hash": "3c7a7888d1ae4d5c6a40aadae89f0db9cf0732c3a22265c65ac688867c785150",
+        "entity_identity": "entity_northbridge_fc",
+        "event_completed_at": "2026-09-21T12:00:00Z",
+        "event_identity": "event_fixture_previous_1",
+        "evidence_type": "fact",
+        "evidence_unit_id": "d1250007-0000-4000-8000-000000000012",
+        "language": "en-GB",
+        "locator": {
+          "body_codepoint_end": 52,
+          "body_codepoint_start": 0,
+          "evidence_unit_id": "d1250007-0000-4000-8000-000000000012",
+          "kind": "synthetic_fixture_text",
+          "member": "evidence_store.json"
+        },
+        "modality": "structured_data",
+        "origin": "data_provider",
+        "paraphrase_permission": false,
+        "quote_permission": false,
+        "retention_class": "fixture_retained",
+        "retention_declaration": {
+          "canonical_source_bytes": "durable_offline_test_retention",
+          "policy_version": "synthetic-fixture-retention-v1",
+          "purge_behavior": "retain permitted tombstone metadata; no replacement bytes"
+        },
+        "rights_policy_version": "d1250006-0000-4000-8000-000000000002",
+        "rights_version_id": "d1250006-0000-4000-8000-000000000002",
+        "source_identity": "src_fixture_data",
+        "source_item_identity": "fixture-item:ev_prev_1:v1",
+        "source_modality": "structured_data",
+        "source_role": "reference",
+        "speaker_identity": null,
+        "window_identity": "fixture-last-five-league-before-event-001-v1",
+        "window_order": 1
+      },
+      {
+        "acquisition_ref": "fixture-acquisition:src_fixture_data:2026-09-27:v1",
+        "as_of": "2026-09-27T12:59:00Z",
+        "competition_identity": "competition_north_coast_league",
+        "consumer_exposure": {
+          "auditor": "claim_only",
+          "planner": "claim_only",
+          "writer": "hidden"
+        },
+        "content_hash": "ad8cbb012e22007db8c815249f907fbbf2039b63c83d3d9be6a222249a7ffd24",
+        "entity_identity": "entity_northbridge_fc",
+        "event_completed_at": "2026-09-14T12:00:00Z",
+        "event_identity": "event_fixture_previous_2",
+        "evidence_type": "fact",
+        "evidence_unit_id": "d1250007-0000-4000-8000-000000000013",
+        "language": "en-GB",
+        "locator": {
+          "body_codepoint_end": 62,
+          "body_codepoint_start": 0,
+          "evidence_unit_id": "d1250007-0000-4000-8000-000000000013",
+          "kind": "synthetic_fixture_text",
+          "member": "evidence_store.json"
+        },
+        "modality": "structured_data",
+        "origin": "data_provider",
+        "paraphrase_permission": false,
+        "quote_permission": false,
+        "retention_class": "fixture_retained",
+        "retention_declaration": {
+          "canonical_source_bytes": "durable_offline_test_retention",
+          "policy_version": "synthetic-fixture-retention-v1",
+          "purge_behavior": "retain permitted tombstone metadata; no replacement bytes"
+        },
+        "rights_policy_version": "d1250006-0000-4000-8000-000000000002",
+        "rights_version_id": "d1250006-0000-4000-8000-000000000002",
+        "source_identity": "src_fixture_data",
+        "source_item_identity": "fixture-item:ev_prev_2:v1",
+        "source_modality": "structured_data",
+        "source_role": "reference",
+        "speaker_identity": null,
+        "window_identity": "fixture-last-five-league-before-event-001-v1",
+        "window_order": 2
+      },
+      {
+        "acquisition_ref": "fixture-acquisition:src_fixture_data:2026-09-27:v1",
+        "as_of": "2026-09-27T12:59:00Z",
+        "competition_identity": "competition_north_coast_league",
+        "consumer_exposure": {
+          "auditor": "claim_only",
+          "planner": "claim_only",
+          "writer": "hidden"
+        },
+        "content_hash": "c5ff2da2639e0f56c53a2812dda8e435f5c7ccfd1df7fe306ace66e075652fba",
+        "entity_identity": "entity_northbridge_fc",
+        "event_completed_at": "2026-09-07T12:00:00Z",
+        "event_identity": "event_fixture_previous_3",
+        "evidence_type": "fact",
+        "evidence_unit_id": "d1250007-0000-4000-8000-000000000014",
+        "language": "en-GB",
+        "locator": {
+          "body_codepoint_end": 52,
+          "body_codepoint_start": 0,
+          "evidence_unit_id": "d1250007-0000-4000-8000-000000000014",
+          "kind": "synthetic_fixture_text",
+          "member": "evidence_store.json"
+        },
+        "modality": "structured_data",
+        "origin": "data_provider",
+        "paraphrase_permission": false,
+        "quote_permission": false,
+        "retention_class": "fixture_retained",
+        "retention_declaration": {
+          "canonical_source_bytes": "durable_offline_test_retention",
+          "policy_version": "synthetic-fixture-retention-v1",
+          "purge_behavior": "retain permitted tombstone metadata; no replacement bytes"
+        },
+        "rights_policy_version": "d1250006-0000-4000-8000-000000000002",
+        "rights_version_id": "d1250006-0000-4000-8000-000000000002",
+        "source_identity": "src_fixture_data",
+        "source_item_identity": "fixture-item:ev_prev_3:v1",
+        "source_modality": "structured_data",
+        "source_role": "reference",
+        "speaker_identity": null,
+        "window_identity": "fixture-last-five-league-before-event-001-v1",
+        "window_order": 3
+      },
+      {
+        "acquisition_ref": "fixture-acquisition:src_fixture_data:2026-09-27:v1",
+        "as_of": "2026-09-27T12:59:00Z",
+        "competition_identity": "competition_north_coast_league",
+        "consumer_exposure": {
+          "auditor": "claim_only",
+          "planner": "claim_only",
+          "writer": "hidden"
+        },
+        "content_hash": "fa9d0a653d449f5d4b599799dffcc487e04f2cc24dbcec7e0451bb102eebdc6b",
+        "entity_identity": "entity_northbridge_fc",
+        "event_completed_at": "2026-08-31T12:00:00Z",
+        "event_identity": "event_fixture_previous_4",
+        "evidence_type": "fact",
+        "evidence_unit_id": "d1250007-0000-4000-8000-000000000015",
+        "language": "en-GB",
+        "locator": {
+          "body_codepoint_end": 62,
+          "body_codepoint_start": 0,
+          "evidence_unit_id": "d1250007-0000-4000-8000-000000000015",
+          "kind": "synthetic_fixture_text",
+          "member": "evidence_store.json"
+        },
+        "modality": "structured_data",
+        "origin": "data_provider",
+        "paraphrase_permission": false,
+        "quote_permission": false,
+        "retention_class": "fixture_retained",
+        "retention_declaration": {
+          "canonical_source_bytes": "durable_offline_test_retention",
+          "policy_version": "synthetic-fixture-retention-v1",
+          "purge_behavior": "retain permitted tombstone metadata; no replacement bytes"
+        },
+        "rights_policy_version": "d1250006-0000-4000-8000-000000000002",
+        "rights_version_id": "d1250006-0000-4000-8000-000000000002",
+        "source_identity": "src_fixture_data",
+        "source_item_identity": "fixture-item:ev_prev_4:v1",
+        "source_modality": "structured_data",
+        "source_role": "reference",
+        "speaker_identity": null,
+        "window_identity": "fixture-last-five-league-before-event-001-v1",
+        "window_order": 4
+      },
+      {
+        "acquisition_ref": "fixture-acquisition:src_fixture_data:2026-09-27:v1",
+        "as_of": "2026-09-27T12:59:00Z",
+        "competition_identity": "competition_north_coast_league",
+        "consumer_exposure": {
+          "auditor": "claim_only",
+          "planner": "claim_only",
+          "writer": "hidden"
+        },
+        "content_hash": "b21989b1b1461ca40d2ce84498250648e5f03949881d9fc3e82167fbf36acba5",
+        "entity_identity": "entity_northbridge_fc",
+        "event_completed_at": "2026-08-24T12:00:00Z",
+        "event_identity": "event_fixture_previous_5",
+        "evidence_type": "fact",
+        "evidence_unit_id": "d1250007-0000-4000-8000-000000000016",
+        "language": "en-GB",
+        "locator": {
+          "body_codepoint_end": 52,
+          "body_codepoint_start": 0,
+          "evidence_unit_id": "d1250007-0000-4000-8000-000000000016",
+          "kind": "synthetic_fixture_text",
+          "member": "evidence_store.json"
+        },
+        "modality": "structured_data",
+        "origin": "data_provider",
+        "paraphrase_permission": false,
+        "quote_permission": false,
+        "retention_class": "fixture_retained",
+        "retention_declaration": {
+          "canonical_source_bytes": "durable_offline_test_retention",
+          "policy_version": "synthetic-fixture-retention-v1",
+          "purge_behavior": "retain permitted tombstone metadata; no replacement bytes"
+        },
+        "rights_policy_version": "d1250006-0000-4000-8000-000000000002",
+        "rights_version_id": "d1250006-0000-4000-8000-000000000002",
+        "source_identity": "src_fixture_data",
+        "source_item_identity": "fixture-item:ev_prev_5:v1",
+        "source_modality": "structured_data",
+        "source_role": "reference",
+        "speaker_identity": null,
+        "window_identity": "fixture-last-five-league-before-event-001-v1",
+        "window_order": 5
+      }
+    ],
+    "schema": "evidence-package/2.0",
+    "scope": {
+      "competition_ids": [
+        "competition_north_coast_league"
+      ],
+      "entity_ids": [
+        "entity_northbridge_fc"
+      ],
+      "event_ids": [
+        "event_fixture_001"
+      ],
+      "locale": "en-GB",
+      "scheduled_default_mode": "normal_post_event",
+      "scope_type": "event",
+      "show_id": "d1250002-0000-4000-8000-000000000001",
+      "target_publication_slot_ref": "fixture_slot_001"
+    },
+    "selection_provenance": {
+      "context_retrieval_version": "fixture.manual.v1",
+      "live_search": false,
+      "match_window_proof": {
+        "as_of": "2026-09-27T12:59:00Z",
+        "competition_identity": "competition_north_coast_league",
+        "complete_prior_schedule_assertion": true,
+        "current_event": {
+          "competition_identity": "competition_north_coast_league",
+          "completed_at": "2026-09-27T12:00:00Z",
+          "completion_status": "final",
+          "event_identity": "event_fixture_001",
+          "participant_entities": [
+            "entity_northbridge_fc",
+            "entity_southbank_athletic"
+          ]
+        },
+        "current_event_identity": "event_fixture_001",
+        "entity_identity": "entity_northbridge_fc",
+        "ordered_prior_schedule": [
+          {
+            "competition_identity": "competition_north_coast_league",
+            "completed_at": "2026-09-21T12:00:00Z",
+            "completion_status": "final",
+            "entity_identity": "entity_northbridge_fc",
+            "event_identity": "event_fixture_previous_1",
+            "rank_before_current_event": 1
+          },
+          {
+            "competition_identity": "competition_north_coast_league",
+            "completed_at": "2026-09-14T12:00:00Z",
+            "completion_status": "final",
+            "entity_identity": "entity_northbridge_fc",
+            "event_identity": "event_fixture_previous_2",
+            "rank_before_current_event": 2
+          },
+          {
+            "competition_identity": "competition_north_coast_league",
+            "completed_at": "2026-09-07T12:00:00Z",
+            "completion_status": "final",
+            "entity_identity": "entity_northbridge_fc",
+            "event_identity": "event_fixture_previous_3",
+            "rank_before_current_event": 3
+          },
+          {
+            "competition_identity": "competition_north_coast_league",
+            "completed_at": "2026-08-31T12:00:00Z",
+            "completion_status": "final",
+            "entity_identity": "entity_northbridge_fc",
+            "event_identity": "event_fixture_previous_4",
+            "rank_before_current_event": 4
+          },
+          {
+            "competition_identity": "competition_north_coast_league",
+            "completed_at": "2026-08-24T12:00:00Z",
+            "completion_status": "final",
+            "entity_identity": "entity_northbridge_fc",
+            "event_identity": "event_fixture_previous_5",
+            "rank_before_current_event": 5
+          },
+          {
+            "competition_identity": "competition_north_coast_league",
+            "completed_at": "2026-08-17T12:00:00Z",
+            "completion_status": "final",
+            "entity_identity": "entity_northbridge_fc",
+            "event_identity": "event_fixture_previous_6",
+            "rank_before_current_event": 6
+          }
+        ],
+        "schedule_scope": "complete six most recent prior completed league matches in this synthetic fixture",
+        "selected_event_identities": [
+          "event_fixture_previous_1",
+          "event_fixture_previous_2",
+          "event_fixture_previous_3",
+          "event_fixture_previous_4",
+          "event_fixture_previous_5"
+        ],
+        "selection_rule": "last five completed league matches before current event; descending completion time",
+        "source_identity": "src_fixture_data",
+        "source_record_ref": "fixture-schedule-ledger-v1",
+        "synthetic": true,
+        "window_identity": "fixture-last-five-league-before-event-001-v1"
+      },
+      "operator": "fixture_builder",
+      "selector_version": "fixture.manual.v2"
+    },
+    "sensitivities": [
+      {
+        "applies_to": "event_fixture_001",
+        "note": "No in-scope serious incident or protected sensitivity at freeze.",
+        "sensitivity_id": "sens_none",
+        "state": "none"
+      }
+    ],
+    "signals": [
+      {
+        "ref": "artifact:d1250005-0000-4000-8000-000000000017",
+        "signal_id": "sig_tenor",
+        "type": "tenor_reading"
+      },
+      {
+        "ref": "d1250009-0000-4000-8000-000000000001",
+        "signal_id": "sig_late_pattern",
+        "type": "derivation_run"
+      }
+    ],
+    "silent_inputs": [
+      {
+        "allowed_consumers": [
+          "planner",
+          "auditor"
+        ],
+        "claim_id": "d1250008-0000-4000-8000-000000000008",
+        "effective_usage_class": "silent",
+        "purpose": "calibration_only",
+        "support_refs": [
+          "d1250007-0000-4000-8000-000000000010"
+        ]
+      }
+    ],
+    "source_attribution": [
+      {
+        "display_name": "North Coast Gazette",
+        "source_id": "src_north_coast_gazette",
+        "source_role": "journalist"
+      },
+      {
+        "display_name": "Matchboard Analysis",
+        "source_id": "src_matchboard_analysis",
+        "source_role": "analyst"
+      },
+      {
+        "display_name": "East Bank Review Archive",
+        "source_id": "src_east_bank_review_archive",
+        "source_role": "reference"
+      }
+    ],
+    "version_refs": {
+      "claims_policy": "0.1.2",
+      "evidence_package_spec": "0.2.2",
+      "lens_definition": "fixture-lens-v1",
+      "rights_registry": "fixture-rights-v1",
+      "show_version": "postmatch-fixture-v4"
+    }
+  },
+  "package_hash": "a8655c0e8bd72094a823b367a0c21cd665d3d99c271341286a92dbdc2ea304ab",
+  "schema_version": "evidence-package/2.0",
+  "scope_hash": "ecb1eb2b675a9e383dfe88e6311f8cc88cc97eb17183df9a8cae935d8d1f8979",
+  "selector_run_id": "selector_fixture_004"
+}

@@ -1,0 +1,434 @@
+{
+  "artifact_id": "595870e7-1b3c-4abc-a794-fc864e0c95b2",
+  "attempt_id": "e5aaee76-ec19-4917-b293-24a0435b3a92",
+  "brief_hash": "36fb22d03300206d3181959a100f2911c2b27d9ff72379f21831d32a4bd5c475",
+  "central_question": "Did Northbridge solve their late-game control problem, or merely survive it again?",
+  "comprehension_targets": [
+    {
+      "closing_synthesis_candidate": true,
+      "comprehension_target_id": "ct_late_control",
+      "forward_horizon": "near_term",
+      "listener_question": "Does this win meaningfully change the late-game-control concern, and what should be watched the next time Northbridge are protecting something late?",
+      "priority": "primary",
+      "related_beat_ids": [
+        "beat_control",
+        "beat_supporter"
+      ],
+      "supporting_claim_refs": [
+        "d1250008-0000-4000-8000-000000000007",
+        "d1250008-0000-4000-8000-000000000003",
+        "d1250008-0000-4000-8000-000000000004",
+        "d1250008-0000-4000-8000-000000000005",
+        "d1250008-0000-4000-8000-000000000009"
+      ],
+      "useful_treatment_lenses": [
+        "mechanism",
+        "supporter_consequence",
+        "club_texture",
+        "closing_synthesis"
+      ]
+    }
+  ],
+  "context_selections": [
+    {
+      "context_id": "ctx_latepattern",
+      "context_selection_id": "cs01",
+      "function": "continuity",
+      "program_block_id": "479c96f1-0cc6-4e9d-a111-e8b44283c56e"
+    },
+    {
+      "context_id": "ctx_lore",
+      "context_selection_id": "cs02",
+      "function": "meaning",
+      "program_block_id": "b6d74c53-1961-460c-9d1f-ef02204a3942"
+    },
+    {
+      "context_id": "ctx_continuity",
+      "context_selection_id": "cs03",
+      "function": "continuity",
+      "program_block_id": "b587f46a-fd0e-4372-ab26-c9baf908b109"
+    }
+  ],
+  "continuity_instructions": [
+    {
+      "continuity_id": "artifact:d1250005-0000-4000-8000-000000000018",
+      "instruction": "Treat the prior position as unresolved program history, not proof of today's match."
+    }
+  ],
+  "created_at": "2026-09-27T13:01:21Z",
+  "evidence_package_id": "d1250004-0000-4000-8000-000000000001",
+  "feature_selections": [],
+  "known_gaps": [
+    {
+      "state": "not_applicable",
+      "type": "tracking_data"
+    }
+  ],
+  "orientation_job": "State the 2-1 result briefly, then move immediately to whether the ending changes the late-game-control concern.",
+  "package_hash": "a8655c0e8bd72094a823b367a0c21cd665d3d99c271341286a92dbdc2ea304ab",
+  "planner_model_run_id": "18cf2189-1aac-4bc5-a532-fcf16a902a21",
+  "planning_exclusions": [
+    {
+      "effect": "forbidden_to_writer",
+      "exclusion_id": "ex01",
+      "reason_code": "silent_usage_class",
+      "scope_ref": "d1250008-0000-4000-8000-000000000008",
+      "scope_type": "claim",
+      "source": "claims_policy"
+    },
+    {
+      "effect": "omit_from_programming",
+      "exclusion_id": "ex02",
+      "reason_code": "outside_current_show_editorial_policy",
+      "scope_ref": "beat_market",
+      "scope_type": "beat",
+      "source": "planning_choice"
+    },
+    {
+      "effect": "forbidden_to_writer",
+      "exclusion_id": "ex03",
+      "reason_code": "audit_only_untrusted_fixture",
+      "scope_ref": "d1250007-0000-4000-8000-000000000011",
+      "scope_type": "evidence",
+      "source": "package_policy"
+    }
+  ],
+  "planning_policy_version": "showrunner-0.1.3",
+  "program_blocks": [
+    {
+      "block_type": "cold_open",
+      "claim_evidence_assignments": [],
+      "context_selection_ids": [],
+      "job": "Low-stakes opening texture; no fabricated biography.",
+      "participant_leads": [
+        {
+          "job": "supporter/personality lens",
+          "participant_id": "simon"
+        },
+        {
+          "job": "analytical/comic counterweight",
+          "participant_id": "gaz"
+        }
+      ],
+      "primary_question": null,
+      "program_block_id": "cbe4f84a-85e8-4720-861f-ed11f39fbc84",
+      "required_cautions": [],
+      "selected_beat_ids": [],
+      "sequence": 1,
+      "target_duration_or_words": {
+        "seconds": 30
+      },
+      "template_slot_id": "cold_open",
+      "topic_thread_ids": [],
+      "transition_goal": "Let Gaz puncture Simon gently and hand Tully the room."
+    },
+    {
+      "block_type": "host_cut_in",
+      "claim_evidence_assignments": [],
+      "context_selection_ids": [],
+      "job": "Tully cuts in and formally starts the club discussion.",
+      "participant_leads": [
+        {
+          "job": "host/anchor job",
+          "participant_id": "tully"
+        }
+      ],
+      "primary_question": null,
+      "program_block_id": "c3df1781-d7e5-44e3-b33e-401f766dd80b",
+      "required_cautions": [],
+      "selected_beat_ids": [],
+      "sequence": 2,
+      "target_duration_or_words": {
+        "seconds": 30
+      },
+      "template_slot_id": "host_cut_in",
+      "topic_thread_ids": [],
+      "transition_goal": "Move immediately into orientation."
+    },
+    {
+      "block_type": "orientation",
+      "claim_evidence_assignments": [
+        {
+          "claim_ids": [
+            "d1250008-0000-4000-8000-000000000001",
+            "d1250008-0000-4000-8000-000000000002",
+            "d1250008-0000-4000-8000-000000000007"
+          ],
+          "participant_id": "tully"
+        }
+      ],
+      "context_selection_ids": [],
+      "job": "State result/key statistic briefly and establish the late-control question.",
+      "participant_leads": [
+        {
+          "job": "host/anchor job",
+          "participant_id": "tully"
+        }
+      ],
+      "primary_question": null,
+      "program_block_id": "479c96f1-0cc6-4e9d-a111-e8b44283c56e",
+      "required_cautions": [],
+      "selected_beat_ids": [
+        "beat_control"
+      ],
+      "sequence": 3,
+      "target_duration_or_words": {
+        "seconds": 30
+      },
+      "template_slot_id": "orientation",
+      "topic_thread_ids": [
+        "thr_late_game_control"
+      ],
+      "transition_goal": "Move from result to why the ending matters."
+    },
+    {
+      "block_type": "analysis",
+      "claim_evidence_assignments": [
+        {
+          "claim_ids": [
+            "d1250008-0000-4000-8000-000000000003",
+            "d1250008-0000-4000-8000-000000000004"
+          ],
+          "participant_id": "gaz"
+        }
+      ],
+      "context_selection_ids": [],
+      "job": "Test the closing plan and competing tactical explanation.",
+      "participant_leads": [
+        {
+          "job": "test explanation and uncertainty",
+          "participant_id": "gaz"
+        },
+        {
+          "job": "frame and challenge",
+          "participant_id": "tully"
+        }
+      ],
+      "primary_question": null,
+      "program_block_id": "71d90cda-d830-400b-a85f-23b322cea6ea",
+      "required_cautions": [],
+      "selected_beat_ids": [
+        "beat_control"
+      ],
+      "sequence": 4,
+      "target_duration_or_words": {
+        "seconds": 60
+      },
+      "template_slot_id": "analysis_1",
+      "topic_thread_ids": [
+        "thr_late_game_control"
+      ],
+      "transition_goal": "Separate intention from proof."
+    },
+    {
+      "block_type": "recap_turn",
+      "claim_evidence_assignments": [],
+      "context_selection_ids": [],
+      "job": "Compress the first argument into the distinction that matters.",
+      "participant_leads": [
+        {
+          "job": "host/anchor job",
+          "participant_id": "tully"
+        }
+      ],
+      "primary_question": null,
+      "program_block_id": "8bec3a45-6db4-4189-b57a-ef6767538a19",
+      "required_cautions": [],
+      "selected_beat_ids": [
+        "beat_control"
+      ],
+      "sequence": 5,
+      "target_duration_or_words": {
+        "seconds": 30
+      },
+      "template_slot_id": "recap_turn",
+      "topic_thread_ids": [
+        "thr_late_game_control"
+      ],
+      "transition_goal": "Bridge from mechanism to supporter consequence."
+    },
+    {
+      "block_type": "feature_or_analysis",
+      "claim_evidence_assignments": [
+        {
+          "claim_ids": [
+            "d1250008-0000-4000-8000-000000000005",
+            "d1250008-0000-4000-8000-000000000006",
+            "d1250008-0000-4000-8000-000000000007"
+          ],
+          "participant_id": "simon"
+        }
+      ],
+      "context_selection_ids": [],
+      "job": "Let supporter feeling, lore and recent pattern interact without compulsory conflict.",
+      "participant_leads": [
+        {
+          "job": "supporter/personality lens",
+          "participant_id": "simon"
+        },
+        {
+          "job": "analytical/comic counterweight",
+          "participant_id": "gaz"
+        }
+      ],
+      "primary_question": null,
+      "program_block_id": "b6d74c53-1961-460c-9d1f-ef02204a3942",
+      "required_cautions": [],
+      "selected_beat_ids": [
+        "beat_supporter"
+      ],
+      "sequence": 6,
+      "target_duration_or_words": {
+        "seconds": 60
+      },
+      "template_slot_id": "analysis_2_or_feature",
+      "topic_thread_ids": [
+        "thr_late_game_control"
+      ],
+      "transition_goal": "Hand Tully an unresolved but memorable forward question."
+    },
+    {
+      "block_type": "wrap",
+      "claim_evidence_assignments": [
+        {
+          "claim_ids": [
+            "d1250008-0000-4000-8000-000000000001",
+            "d1250008-0000-4000-8000-000000000009"
+          ],
+          "participant_id": "tully"
+        }
+      ],
+      "context_selection_ids": [],
+      "job": "Closing synthesis: bank result, preserve uncertainty, point the insight forward.",
+      "participant_leads": [
+        {
+          "job": "host/anchor job",
+          "participant_id": "tully"
+        }
+      ],
+      "primary_question": null,
+      "program_block_id": "b587f46a-fd0e-4372-ab26-c9baf908b109",
+      "required_cautions": [],
+      "selected_beat_ids": [
+        "beat_control",
+        "beat_supporter"
+      ],
+      "sequence": 7,
+      "target_duration_or_words": {
+        "seconds": 30
+      },
+      "template_slot_id": "wrap",
+      "topic_thread_ids": [
+        "thr_late_game_control"
+      ],
+      "transition_goal": "Move into explicit forward calls without repeating a recap list."
+    },
+    {
+      "block_type": "predictions",
+      "claim_evidence_assignments": [],
+      "context_selection_ids": [],
+      "job": "Make bounded forward-looking calls suitable for continuity/Receipts.",
+      "participant_leads": [
+        {
+          "job": "supporter/personality lens",
+          "participant_id": "simon"
+        },
+        {
+          "job": "analytical/comic counterweight",
+          "participant_id": "gaz"
+        }
+      ],
+      "primary_question": null,
+      "program_block_id": "808e22d6-795a-4cd5-9ef5-b1c9fec99b10",
+      "required_cautions": [],
+      "selected_beat_ids": [],
+      "sequence": 8,
+      "target_duration_or_words": {
+        "seconds": 30
+      },
+      "template_slot_id": "predictions",
+      "topic_thread_ids": [],
+      "transition_goal": "Leave one clean thing to watch next time."
+    },
+    {
+      "block_type": "sign_off",
+      "claim_evidence_assignments": [
+        {
+          "claim_ids": [
+            "d1250008-0000-4000-8000-000000000001"
+          ],
+          "participant_id": "tully"
+        }
+      ],
+      "context_selection_ids": [],
+      "job": "Tully closes the show with a compact club-specific callback.",
+      "participant_leads": [
+        {
+          "job": "host/anchor job",
+          "participant_id": "tully"
+        }
+      ],
+      "primary_question": null,
+      "program_block_id": "afd6db20-2275-4352-b613-e2f7dcda0cf7",
+      "required_cautions": [],
+      "selected_beat_ids": [],
+      "sequence": 9,
+      "target_duration_or_words": {
+        "seconds": 30
+      },
+      "template_slot_id": "sign_off",
+      "topic_thread_ids": [],
+      "transition_goal": "End cleanly."
+    }
+  ],
+  "program_run_id": "56177a16-59d3-4bf1-b049-5b5e2ee52c92",
+  "programming_constraints": [
+    {
+      "type": "no_live_search"
+    },
+    {
+      "type": "no_implied_access"
+    },
+    {
+      "claim_id": "d1250008-0000-4000-8000-000000000008",
+      "type": "silent_claim_non_speak"
+    }
+  ],
+  "purpose": "evaluation",
+  "revision_parent_id": null,
+  "revision_reason": null,
+  "rundown_template_version_id": "post-event-launch-v2",
+  "runtime_target": {
+    "purpose": "evaluation_fixture",
+    "seconds": 240
+  },
+  "selected_beats": [
+    {
+      "beat_id": "beat_control",
+      "reason_code": "central_question",
+      "treatment": "full_discussion"
+    },
+    {
+      "beat_id": "beat_supporter",
+      "reason_code": "supporter_consequence",
+      "treatment": "full_discussion"
+    }
+  ],
+  "selected_mode": "normal_post_event",
+  "show_version": "postmatch-fixture-v4",
+  "showrunner_brief_version_id": "c063d0fe-ac04-4c81-8fd6-6724e6139c1a",
+  "topic_thread_mappings": [
+    {
+      "block_ids": [
+        "479c96f1-0cc6-4e9d-a111-e8b44283c56e",
+        "71d90cda-d830-400b-a85f-23b322cea6ea",
+        "8bec3a45-6db4-4189-b57a-ef6767538a19",
+        "b6d74c53-1961-460c-9d1f-ef02204a3942",
+        "b587f46a-fd0e-4372-ab26-c9baf908b109",
+        "808e22d6-795a-4cd5-9ef5-b1c9fec99b10"
+      ],
+      "notability": "high",
+      "topic_thread_id": "thr_late_game_control"
+    }
+  ]
+}

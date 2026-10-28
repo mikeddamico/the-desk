@@ -1,0 +1,340 @@
+{
+  "artifact_id": "1ba12679-bd91-484c-9cde-273d27b1ce4b",
+  "attempt_id": "e5aaee76-ec19-4917-b293-24a0435b3a92",
+  "brief_hash": "36fb22d03300206d3181959a100f2911c2b27d9ff72379f21831d32a4bd5c475",
+  "created_at": "2026-09-27T13:05:21Z",
+  "evidence_package_id": "d1250004-0000-4000-8000-000000000001",
+  "package_hash": "a8655c0e8bd72094a823b367a0c21cd665d3d99c271341286a92dbdc2ea304ab",
+  "prediction_candidates": [
+    {
+      "horizon": "next_relevant_event",
+      "participant_id": "gaz",
+      "prediction_candidate_id": "pred_gaz_late_control",
+      "prediction_text": "My prediction is dull on purpose: next time they are ahead late, I want ten ordinary minutes before I upgrade the diagnosis.",
+      "topic_thread_id": "thr_late_game_control",
+      "turn_id": "3693528a-3bb1-46bf-a1f0-b5a4fdcbe8e8"
+    },
+    {
+      "horizon": "next_relevant_event",
+      "participant_id": "simon",
+      "prediction_candidate_id": "pred_simon_anxiety",
+      "prediction_text": "Mine is less scientific. If it gets frantic again, supporters will be anxious before the first clearance lands. And, for once, I would quite like Gaz to be boringly right.",
+      "topic_thread_id": "thr_late_game_control",
+      "turn_id": "69abf0c0-b566-4422-a6f8-6b7ff497d429"
+    }
+  ],
+  "program_block_refs": [
+    "cbe4f84a-85e8-4720-861f-ed11f39fbc84",
+    "c3df1781-d7e5-44e3-b33e-401f766dd80b",
+    "479c96f1-0cc6-4e9d-a111-e8b44283c56e",
+    "71d90cda-d830-400b-a85f-23b322cea6ea",
+    "8bec3a45-6db4-4189-b57a-ef6767538a19",
+    "b6d74c53-1961-460c-9d1f-ef02204a3942",
+    "b587f46a-fd0e-4372-ab26-c9baf908b109",
+    "808e22d6-795a-4cd5-9ef5-b1c9fec99b10",
+    "afd6db20-2275-4352-b613-e2f7dcda0cf7"
+  ],
+  "program_run_id": "56177a16-59d3-4bf1-b049-5b5e2ee52c92",
+  "purpose": "evaluation",
+  "revision_parent_content_identity": "f788e07dd1ccae557ad4d9b0f681e6905630ac25b76eca0a7f34a7670d2fe359",
+  "revision_parent_id": "a0773e27-df66-4010-9870-20609db6b740",
+  "revision_reason": "speech_texture_pass",
+  "script_hash": "883cbe121635364f72072b29264f00af9b79eb32fd7ebd3d7e8462f829f50677",
+  "script_phase": "speech_texture",
+  "script_version_id": "b9a7be59-70b8-45ae-bb38-190c3b8ab94c",
+  "showrunner_brief_version_id": "c063d0fe-ac04-4c81-8fd6-6724e6139c1a",
+  "turn_claim_uses": [
+    {
+      "claim_id": "d1250008-0000-4000-8000-000000000001",
+      "claim_state_hash": "2239630f0ed9835266704ae1432d3b269dccfdd2d43b946a2b969aae310e9e94",
+      "semantic_turn_id": "t04",
+      "span_end": 19,
+      "span_start": 0,
+      "turn_claim_use_id": "05661230-91ed-4133-bc58-c4eda92d3ae1",
+      "turn_id": "67bb27be-e82e-4290-8e77-656d2a55cfd3",
+      "use_mode": "asserted"
+    },
+    {
+      "claim_id": "d1250008-0000-4000-8000-000000000002",
+      "claim_state_hash": "db0710627bea350c1ca0d9c3344c951c9bb57d7740dd8c23bbc91a7060fd732f",
+      "semantic_turn_id": "t04",
+      "span_end": 130,
+      "span_start": 109,
+      "turn_claim_use_id": "5e404d85-381c-40f8-b351-3415892d9ca1",
+      "turn_id": "67bb27be-e82e-4290-8e77-656d2a55cfd3",
+      "use_mode": "asserted"
+    },
+    {
+      "claim_id": "d1250008-0000-4000-8000-000000000007",
+      "claim_state_hash": "98fa9d6b3406e2b5734cc8fcc12cdd9038e9976838d95f1d4b7f8321ecfb833e",
+      "semantic_turn_id": "t05",
+      "span_end": 136,
+      "span_start": 49,
+      "turn_claim_use_id": "07327be4-7d72-47ef-8ad3-839ab59e5017",
+      "turn_id": "07756265-4976-4c75-ac88-0dd9f5a9099f",
+      "use_mode": "asserted"
+    },
+    {
+      "claim_id": "d1250008-0000-4000-8000-000000000003",
+      "claim_state_hash": "3de1334c7a8e5c58ba2cbdd531d6541bec7e1a7f5fc7447714b41b584af2bae4",
+      "semantic_turn_id": "t06",
+      "span_end": 118,
+      "span_start": 27,
+      "turn_claim_use_id": "79c1090c-381f-4fdc-b5f3-f7052eafe381",
+      "turn_id": "1db2d67a-3bb1-44ed-aa80-7105a16d153f",
+      "use_mode": "attributed"
+    },
+    {
+      "claim_id": "d1250008-0000-4000-8000-000000000004",
+      "claim_state_hash": "59580d5287ca5d6d8c428d73936fc442c21454be258e5b0c6d4b5209b2fca4cd",
+      "semantic_turn_id": "t07",
+      "span_end": 159,
+      "span_start": 0,
+      "turn_claim_use_id": "526e1b98-533a-4db1-b900-acf8d75da0fd",
+      "turn_id": "3a07f651-c708-4718-8a46-8b1456d64be9",
+      "use_mode": "hedged"
+    },
+    {
+      "claim_id": "d1250008-0000-4000-8000-000000000005",
+      "claim_state_hash": "4a32d360454d615f54c7b467e95338c8cde8c9388c67919aa9bc4bcf8fa41a8e",
+      "semantic_turn_id": "t10",
+      "span_end": 96,
+      "span_start": 0,
+      "turn_claim_use_id": "2a761c7e-d73d-40d4-a5e0-8fabdd7ab85f",
+      "turn_id": "eb2672e4-d68e-4999-96be-7eeb57ad59dd",
+      "use_mode": "attributed"
+    },
+    {
+      "claim_id": "d1250008-0000-4000-8000-000000000006",
+      "claim_state_hash": "2999b750b23ef1a6c98b3b6ab029a0cf734ea6d2ca9a823f5420dce700bcfc5f",
+      "semantic_turn_id": "t11",
+      "span_end": 87,
+      "span_start": 73,
+      "turn_claim_use_id": "d8ba779f-81bd-4891-a41c-2ac55f00e168",
+      "turn_id": "bc404dcc-7f02-45b5-bdc5-e38940f3da5c",
+      "use_mode": "asserted"
+    },
+    {
+      "claim_id": "d1250008-0000-4000-8000-000000000006",
+      "claim_state_hash": "2999b750b23ef1a6c98b3b6ab029a0cf734ea6d2ca9a823f5420dce700bcfc5f",
+      "semantic_turn_id": "t12",
+      "span_end": 60,
+      "span_start": 9,
+      "turn_claim_use_id": "c3b3bf1d-28bd-4d25-8176-eab05ee4ef0c",
+      "turn_id": "1f900632-fb8f-4f12-98af-e9cd453b8237",
+      "use_mode": "asserted"
+    },
+    {
+      "claim_id": "d1250008-0000-4000-8000-000000000007",
+      "claim_state_hash": "98fa9d6b3406e2b5734cc8fcc12cdd9038e9976838d95f1d4b7f8321ecfb833e",
+      "semantic_turn_id": "t13",
+      "span_end": 128,
+      "span_start": 98,
+      "turn_claim_use_id": "0ce6f8b4-ddc3-4975-a0fe-ce9cde264c68",
+      "turn_id": "55eca47e-786b-4b81-97c1-8273ce470823",
+      "use_mode": "asserted"
+    },
+    {
+      "claim_id": "d1250008-0000-4000-8000-000000000001",
+      "claim_state_hash": "2239630f0ed9835266704ae1432d3b269dccfdd2d43b946a2b969aae310e9e94",
+      "semantic_turn_id": "t14",
+      "span_end": 11,
+      "span_start": 4,
+      "turn_claim_use_id": "5c7f5a9c-f7a2-4926-9cb3-a6aa2d5ebeb9",
+      "turn_id": "bdd0b7a2-b590-4731-9df9-7ac6a6442bb4",
+      "use_mode": "asserted"
+    },
+    {
+      "claim_id": "d1250008-0000-4000-8000-000000000009",
+      "claim_state_hash": "dfa61e2a799d3966fe4eccb6998b9d4925e074a04ad07724d95957d4052d8231",
+      "semantic_turn_id": "t14",
+      "span_end": 88,
+      "span_start": 24,
+      "turn_claim_use_id": "225266c2-fa72-4ca3-b34d-511c87dddb24",
+      "turn_id": "bdd0b7a2-b590-4731-9df9-7ac6a6442bb4",
+      "use_mode": "asserted"
+    },
+    {
+      "claim_id": "d1250008-0000-4000-8000-000000000001",
+      "claim_state_hash": "2239630f0ed9835266704ae1432d3b269dccfdd2d43b946a2b969aae310e9e94",
+      "semantic_turn_id": "t17",
+      "span_end": 29,
+      "span_start": 26,
+      "turn_claim_use_id": "a6eac446-d7b3-4483-9712-bfd6635fde0a",
+      "turn_id": "d45d42b2-0a89-4beb-a3f4-5ac62f63d19c",
+      "use_mode": "asserted"
+    }
+  ],
+  "turn_evidence_uses": [
+    {
+      "evidence_unit_id": "d1250007-0000-4000-8000-000000000003",
+      "rights_policy_version": "d1250006-0000-4000-8000-000000000005",
+      "semantic_turn_id": "t06",
+      "span_end": 118,
+      "span_start": 27,
+      "turn_evidence_use_id": "725c2f37-f344-45ed-8ab7-a08467205a73",
+      "turn_id": "1db2d67a-3bb1-44ed-aa80-7105a16d153f",
+      "use_mode": "paraphrased"
+    },
+    {
+      "evidence_unit_id": "d1250007-0000-4000-8000-000000000004",
+      "rights_policy_version": "d1250006-0000-4000-8000-000000000005",
+      "semantic_turn_id": "t07",
+      "span_end": 159,
+      "span_start": 0,
+      "turn_evidence_use_id": "4996e227-7592-4e63-a730-0787a1cf6cda",
+      "turn_id": "3a07f651-c708-4718-8a46-8b1456d64be9",
+      "use_mode": "paraphrased"
+    },
+    {
+      "evidence_unit_id": "d1250007-0000-4000-8000-000000000009",
+      "rights_policy_version": "d1250006-0000-4000-8000-000000000006",
+      "semantic_turn_id": "t11",
+      "span_end": 87,
+      "span_start": 73,
+      "turn_evidence_use_id": "eb6366a4-4b1d-4977-a586-890a315bb0aa",
+      "turn_id": "bc404dcc-7f02-45b5-bdc5-e38940f3da5c",
+      "use_mode": "quoted"
+    }
+  ],
+  "turns": [
+    {
+      "participant_id": "simon",
+      "program_block_id": "cbe4f84a-85e8-4720-861f-ed11f39fbc84",
+      "semantic_turn_id": "t01",
+      "sequence": 1,
+      "spoken_text": "I have a small complaint about the phrase 'comfortable lead'. Football has spent years proving the second word can survive perfectly well without the first.",
+      "turn_id": "4effbf95-e328-468a-b2d4-3981cc6b7020"
+    },
+    {
+      "participant_id": "gaz",
+      "program_block_id": "cbe4f84a-85e8-4720-861f-ed11f39fbc84",
+      "semantic_turn_id": "t02",
+      "sequence": 2,
+      "spoken_text": "That's not really a complaint. It's a sample-size problem.",
+      "turn_id": "fa1950ac-07d3-4c37-bc68-f667ed9e27c8"
+    },
+    {
+      "participant_id": "tully",
+      "program_block_id": "c3df1781-d7e5-44e3-b33e-401f766dd80b",
+      "semantic_turn_id": "t03",
+      "sequence": 3,
+      "spoken_text": "Right. Before Simon opens a statistical grievance department, Northbridge.",
+      "turn_id": "adc5801e-1ea6-4be2-b4c4-a07265ae0197"
+    },
+    {
+      "participant_id": "tully",
+      "program_block_id": "479c96f1-0cc6-4e9d-a111-e8b44283c56e",
+      "semantic_turn_id": "t04",
+      "sequence": 4,
+      "spoken_text": "Northbridge won 2-1. If all you wanted was the score, lovely, we're done. The interesting bit is the ending: 43 percent possession, and ten minutes that still felt more like survival than control.",
+      "turn_id": "67bb27be-e82e-4290-8e77-656d2a55cfd3"
+    },
+    {
+      "participant_id": "gaz",
+      "program_block_id": "479c96f1-0cc6-4e9d-a111-e8b44283c56e",
+      "semantic_turn_id": "t05",
+      "sequence": 5,
+      "spoken_text": "Possession alone doesn't settle it. More useful: Northbridge have now conceded after the 80th minute in 3 of their last 5 league matches. That's a pattern. It is not yet a diagnosis.",
+      "turn_id": "07756265-4976-4c75-ac88-0dd9f5a9099f"
+    },
+    {
+      "participant_id": "tully",
+      "program_block_id": "71d90cda-d830-400b-a85f-23b322cea6ea",
+      "semantic_turn_id": "t06",
+      "sequence": 6,
+      "spoken_text": "There was at least a plan. The North Coast Gazette reports Northbridge had rehearsed a 5-4-1 closing shape in training.",
+      "turn_id": "1db2d67a-3bb1-44ed-aa80-7105a16d153f"
+    },
+    {
+      "participant_id": "gaz",
+      "program_block_id": "71d90cda-d830-400b-a85f-23b322cea6ea",
+      "semantic_turn_id": "t07",
+      "sequence": 7,
+      "spoken_text": "One specialist analysis in the package suggests Southbank's wider second-half attacks may have been a deliberate response to Northbridge narrowing the midfield. May. I'd keep that word.",
+      "turn_id": "3a07f651-c708-4718-8a46-8b1456d64be9"
+    },
+    {
+      "participant_id": "simon",
+      "program_block_id": "71d90cda-d830-400b-a85f-23b322cea6ea",
+      "semantic_turn_id": "t08",
+      "sequence": 8,
+      "spoken_text": "Fine. But if the last ten still feel like someone has loosened the floorboards, supporters are not going home hugging the whiteboard.",
+      "turn_id": "990f64bf-72a1-47c7-ac21-17562bed3c92"
+    },
+    {
+      "participant_id": "tully",
+      "program_block_id": "8bec3a45-6db4-4189-b57a-ef6767538a19",
+      "semantic_turn_id": "t09",
+      "sequence": 9,
+      "spoken_text": "So the useful distinction is intention versus proof. Whatever the intention, the proof's still pending.",
+      "turn_id": "5dc388eb-99bf-4b0c-b5e3-d8f240f46b0f"
+    },
+    {
+      "participant_id": "simon",
+      "program_block_id": "b6d74c53-1961-460c-9d1f-ef02204a3942",
+      "semantic_turn_id": "t10",
+      "sequence": 10,
+      "spoken_text": "Across four supporter sources in the package, the dominant note was relief more than celebration. They've won the match and people are still exhaling. That's not exactly champagne behaviour.",
+      "turn_id": "eb2672e4-d68e-4999-96be-7eeb57ad59dd"
+    },
+    {
+      "participant_id": "tully",
+      "program_block_id": "b6d74c53-1961-460c-9d1f-ef02204a3942",
+      "semantic_turn_id": "t11",
+      "sequence": 11,
+      "spoken_text": "There is a phrase in the club's supporter history for this, isn't there? 'the long ten'.",
+      "turn_id": "bc404dcc-7f02-45b5-bdc5-e38940f3da5c"
+    },
+    {
+      "participant_id": "simon",
+      "program_block_id": "b6d74c53-1961-460c-9d1f-ef02204a3942",
+      "semantic_turn_id": "t12",
+      "sequence": 12,
+      "spoken_text": "Exactly. One approved lore source traces it to at least 2019. The ten minutes where the clock appears to have applied for an extension and every clearance comes back with friends.",
+      "turn_id": "1f900632-fb8f-4f12-98af-e9cd453b8237"
+    },
+    {
+      "participant_id": "gaz",
+      "program_block_id": "b6d74c53-1961-460c-9d1f-ef02204a3942",
+      "semantic_turn_id": "t13",
+      "sequence": 13,
+      "spoken_text": "For once, the feeling and the pattern are not arguing. Which is deeply inconvenient for my brand. Three late concessions in five keeps the question open. It does not prove the answer.",
+      "turn_id": "55eca47e-786b-4b81-97c1-8273ce470823"
+    },
+    {
+      "participant_id": "tully",
+      "program_block_id": "b587f46a-fd0e-4372-ab26-c9baf908b109",
+      "semantic_turn_id": "t14",
+      "sequence": 14,
+      "spoken_text": "So, the win counts. But the previous published episode left late-game control unresolved, and this one doesn't magically close the file. The next time Northbridge are protecting something late, listen for the difference between intention and control.",
+      "turn_id": "bdd0b7a2-b590-4731-9df9-7ac6a6442bb4"
+    },
+    {
+      "participant_id": "gaz",
+      "program_block_id": "808e22d6-795a-4cd5-9ef5-b1c9fec99b10",
+      "semantic_turn_id": "t15",
+      "sequence": 15,
+      "spoken_text": "My prediction is dull on purpose: next time they are ahead late, I want ten ordinary minutes before I upgrade the diagnosis.",
+      "turn_id": "3693528a-3bb1-46bf-a1f0-b5a4fdcbe8e8"
+    },
+    {
+      "participant_id": "simon",
+      "program_block_id": "808e22d6-795a-4cd5-9ef5-b1c9fec99b10",
+      "semantic_turn_id": "t16",
+      "sequence": 16,
+      "spoken_text": "Mine is less scientific. If it gets frantic again, supporters will be anxious before the first clearance lands. And, for once, I would quite like Gaz to be boringly right.",
+      "turn_id": "69abf0c0-b566-4422-a6f8-6b7ff497d429"
+    },
+    {
+      "participant_id": "tully",
+      "program_block_id": "afd6db20-2275-4352-b613-e2f7dcda0cf7",
+      "semantic_turn_id": "t17",
+      "sequence": 17,
+      "spoken_text": "That is the file for now: 2-1 banked, question still open. We'll find out whether the ending was progress the next time the clock gets loud. From The Desk, good night.",
+      "turn_id": "d45d42b2-0a89-4beb-a3f4-5ac62f63d19c"
+    }
+  ],
+  "writer_model_run_id": "168af8a4-06e8-4939-950a-490471ce6b58",
+  "writing_policy_version": "writing-0.2.3"
+}

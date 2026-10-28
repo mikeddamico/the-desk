@@ -1,0 +1,30 @@
+{
+  "canonical_payload": {
+    "autonomous_operation_policy_version": "adr-003a-v1",
+    "configured_runtime_seconds": {
+      "fixture_override": true,
+      "max": 330,
+      "min": 60
+    },
+    "default_episode_mode": "normal_post_event",
+    "default_output_language": "en-GB",
+    "default_rundown_template_version_id": "post-event-launch-v2",
+    "name": "Northbridge Post-Match",
+    "operator_repair_policy_version": "operator-repair-0.1.1",
+    "pre_publish_review_policy": "required",
+    "pre_publish_review_required": true,
+    "pre_publish_review_timeout_seconds": 3600,
+    "publication_enabled": false,
+    "show_id": "d1250002-0000-4000-8000-000000000001",
+    "show_version": "postmatch-fixture-v4",
+    "writing_craft_policy_version": "writing-craft-0.1"
+  },
+  "config_hash": "d1f022782d543d1b8d9a7fd3d56895b57ca1f2b8381457d84261508e75b36719",
+  "created_at": "2026-09-27T12:00:02Z",
+  "parent_version_id": "d1250003-0000-4000-8000-000000000001",
+  "pre_publish_review_required": true,
+  "schema_version": "show-config/1",
+  "show_config_version_id": "46238a92-dc6b-4fc5-80cc-84156dd9078a",
+  "show_id": "d1250002-0000-4000-8000-000000000001",
+  "version_number": 2
+}
