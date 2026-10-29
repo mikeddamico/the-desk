@@ -23,6 +23,7 @@ both audit and Gitleaks to have succeeded.
 """
 import ast
 import contextlib
+import hashlib
 import io
 import json
 import os
@@ -2462,6 +2463,21 @@ class Fixture046ConstructionShape(unittest.TestCase):
         helper = ci.ROOT / 'test/support/fixture046-ffmpeg-supply.py'
         source = helper.read_text()
         tree = ast.parse(source)
+        scripts = {node.targets[0].id: ast.literal_eval(node.value) for node in tree.body
+                   if isinstance(node, ast.Assign) and isinstance(node.targets[0], ast.Name)
+                   and node.targets[0].id in ('INSTALL', 'IDENTIFY')}
+        install_lines = scripts['INSTALL'].splitlines()
+        self.assertEqual(install_lines[-3:], [
+            'PATH=/usr/sbin:/usr/bin:/sbin:/bin /usr/bin/dpkg --unpack /packages/*.deb',
+            'PATH=/usr/sbin:/usr/bin:/sbin:/bin /usr/bin/dpkg --configure --pending',
+            'PATH=/usr/sbin:/usr/bin:/sbin:/bin /usr/bin/dpkg --audit > /evidence/audit.txt'])
+        self.assertEqual(scripts['INSTALL'].count('PATH='), 3)
+        self.assertNotIn('$PATH', scripts['INSTALL'])
+        self.assertNotIn('export PATH', scripts['INSTALL'])
+        self.assertNotIn('/usr/local/sbin', scripts['INSTALL'])
+        self.assertEqual(source.count("[image, '/usr/bin/env', '-i', 'PATH=/usr/bin:/bin', 'LC_ALL=C', 'TZ=UTC',"), 1)
+        self.assertEqual(hashlib.sha256(scripts['IDENTIFY'].encode()).hexdigest(),
+                         'da034e8d3be28bcc5c6cc77284cdc757cf77c4924790a0d1e4260cbca1e91ff8')
         self.assertNotIn('apt-get', source)
         self.assertNotIn('apt update', source)
         self.assertNotIn('check-valid-until', source.lower())

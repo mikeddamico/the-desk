@@ -271,9 +271,9 @@ while IFS= read -r library; do /usr/bin/sha256sum "$library"; done < /evidence/l
 INSTALL = r'''set -eu
 export LC_ALL=C DEBIAN_FRONTEND=noninteractive
 /usr/bin/dpkg-query -W -f='${Package}\t${Version}\t${Architecture}\t${db:Status-Status}\n' > /evidence/base-inventory.tsv
-/usr/bin/dpkg --unpack /packages/*.deb
-/usr/bin/dpkg --configure --pending
-/usr/bin/dpkg --audit > /evidence/audit.txt
+PATH=/usr/sbin:/usr/bin:/sbin:/bin /usr/bin/dpkg --unpack /packages/*.deb
+PATH=/usr/sbin:/usr/bin:/sbin:/bin /usr/bin/dpkg --configure --pending
+PATH=/usr/sbin:/usr/bin:/sbin:/bin /usr/bin/dpkg --audit > /evidence/audit.txt
 '''
 
 
