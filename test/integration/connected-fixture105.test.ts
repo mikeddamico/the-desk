@@ -1740,10 +1740,192 @@ async function runConnectedFixture105(): ReturnType<
   );
 }
 
+interface FixtureTargetIdentity {
+  readonly database_oid: string;
+  readonly database: string;
+  readonly server_start_utc: string;
+}
+const TARGET_IDENTITY_SQL = `SELECT d.oid::text AS database_oid, d.datname AS database,
+       to_char(pg_postmaster_start_time() AT TIME ZONE 'UTC',
+         'YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS server_start_utc
+FROM pg_database d WHERE d.datname = $1`;
+const TARGET_READY_SQL = `SELECT d.oid::text AS database_oid, d.datname AS database,
+       to_char(pg_postmaster_start_time() AT TIME ZONE 'UTC',
+         'YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS server_start_utc,
+       (SELECT count(*)::integer FROM pg_stat_activity a
+        WHERE a.datid = d.oid) AS target_backends
+FROM pg_database d
+WHERE d.oid = $1::oid AND d.datname = $2`;
+function targetIdentity(
+  rows: readonly Obj[],
+  name: string,
+): FixtureTargetIdentity {
+  const row =
+    rows.length === 1
+      ? targetData(rows[0], ["database_oid", "database", "server_start_utc"])
+      : undefined;
+  if (
+    !row ||
+    typeof row.database_oid !== "string" ||
+    !/^[1-9][0-9]{0,9}$/u.test(row.database_oid) ||
+    Number(row.database_oid) > 4294967295 ||
+    row.database !== name ||
+    !maintenanceStamp(row.server_start_utc)
+  )
+    throw new Error("fixture allocation identity invalid");
+  return Object.freeze({
+    database_oid: row.database_oid,
+    database: name,
+    server_start_utc: row.server_start_utc,
+  });
+}
+function targetReadyCount(
+  rows: readonly Obj[],
+  identity: FixtureTargetIdentity,
+): number {
+  const row =
+    rows.length === 1
+      ? targetData(rows[0], [
+          "database_oid",
+          "database",
+          "server_start_utc",
+          "target_backends",
+        ])
+      : undefined;
+  if (
+    row?.database_oid !== identity.database_oid ||
+    row.database !== identity.database ||
+    row.server_start_utc !== identity.server_start_utc ||
+    !targetInt(row.target_backends)
+  )
+    throw new Error("fixture target readiness identity invalid");
+  return row.target_backends;
+}
+// Test-local seams exercise this finite readiness check, never the runtime admission.
+async function awaitTargetReady(
+  identity: FixtureTargetIdentity,
+  read: () => Promise<readonly Obj[]>,
+  now: () => number = () => performance.now(),
+  sleep: () => Promise<void> = () =>
+    new Promise<void>((resolve) => setTimeout(resolve, 250)),
+): Promise<void> {
+  const deadline = now() + 5000;
+  for (let observation = 0; observation < 21; observation++) {
+    if (now() >= deadline) throw new Error("fixture target readiness deadline");
+    const rows = await read(); // Rejections preserve the original value and are never retried.
+    if (now() >= deadline) throw new Error("fixture target readiness deadline");
+    if (targetReadyCount(rows, identity) === 0) return;
+    if (observation < 20) await sleep();
+  }
+  throw new Error("fixture target readiness observations exhausted");
+}
+async function targetReadinessControls(): Promise<void> {
+  const identity = Object.freeze({
+    database_oid: "16384",
+    database: "fixed_ready",
+    server_start_utc: "2026-09-27T13:00:00.000000Z",
+  });
+  const zero = Object.freeze([{ ...identity, target_backends: 0 }]);
+  const positive = Object.freeze([{ ...identity, target_backends: 1 }]);
+  const read = vi.fn((): Promise<readonly Obj[]> => Promise.resolve(zero));
+  const sleep = vi.fn(() => Promise.resolve());
+
+  // 1. Immediate zero needs exactly one read and no delay.
+  await awaitTargetReady(identity, read, () => 0, sleep);
+  expect(read).toHaveBeenCalledTimes(1);
+  expect(sleep).not.toHaveBeenCalled();
+
+  // 2. A positive observation is unchanged; the next observation can be zero.
+  read.mockReset().mockResolvedValueOnce(positive).mockResolvedValue(zero);
+  const before = canonicalJson(positive);
+  await awaitTargetReady(identity, read, () => 0, sleep);
+  expect(read).toHaveBeenCalledTimes(2);
+  expect(sleep).toHaveBeenCalledTimes(1);
+  expect(canonicalJson(positive)).toBe(before);
+
+  // 3. Observation exhaustion and both deadline checks are binding, even for zero.
+  read.mockReset().mockResolvedValue(positive);
+  sleep.mockClear();
+  await expect(
+    awaitTargetReady(identity, read, () => 0, sleep),
+  ).rejects.toThrow("fixture target readiness observations exhausted");
+  expect(read).toHaveBeenCalledTimes(21);
+  expect(sleep).toHaveBeenCalledTimes(20);
+  let clock = 0;
+  read.mockReset().mockImplementation(() => {
+    clock = 5000;
+    return Promise.resolve(zero);
+  });
+  sleep.mockClear();
+  await expect(
+    awaitTargetReady(identity, read, () => clock, sleep),
+  ).rejects.toThrow("fixture target readiness deadline");
+  expect(read).toHaveBeenCalledTimes(1);
+  expect(sleep).not.toHaveBeenCalled();
+  read.mockReset().mockResolvedValue(zero);
+  const elapsed = vi.fn(() => 5000).mockReturnValueOnce(0);
+  await expect(
+    awaitTargetReady(identity, read, elapsed, sleep),
+  ).rejects.toThrow("fixture target readiness deadline");
+  expect(read).not.toHaveBeenCalled();
+  expect(sleep).not.toHaveBeenCalled();
+
+  // 4. Query rejection preserves the original value, with no retry or delay.
+  const primary = new Error("controlled readiness query failure");
+  read.mockReset().mockRejectedValue(primary);
+  await expect(awaitTargetReady(identity, read, () => 0, sleep)).rejects.toBe(
+    primary,
+  );
+  expect(read).toHaveBeenCalledTimes(1);
+  expect(sleep).not.toHaveBeenCalled();
+
+  // 5. Missing, replaced and malformed targets are not empty successful targets.
+  expect(
+    Object.isFrozen(targetIdentity([{ ...identity }], identity.database)),
+  ).toBe(true);
+  for (const rows of [
+    [],
+    [{ ...identity, database_oid: "0" }],
+    [{ ...identity, database_oid: "4294967296" }],
+    [{ ...identity, database: "replaced" }],
+    [{ ...identity, server_start_utc: "invalid" }],
+  ]) {
+    expect(() => targetIdentity(rows, identity.database)).toThrow(
+      "fixture allocation identity invalid",
+    );
+  }
+  for (const rows of [
+    [],
+    [...zero, ...zero],
+    [{ ...identity, database_oid: "16385", target_backends: 0 }],
+    [{ ...identity, database: "replaced", target_backends: 0 }],
+    [
+      {
+        ...identity,
+        server_start_utc: "2026-09-27T13:00:01.000000Z",
+        target_backends: 0,
+      },
+    ],
+    [{ ...identity, target_backends: -1 }],
+    [{ ...identity, target_backends: 0.5 }],
+    [{ ...identity, target_backends: "0" }],
+    [{ ...identity }],
+    [{ ...identity, target_backends: 0, extra: true }],
+  ]) {
+    read.mockReset().mockResolvedValue(rows);
+    await expect(
+      awaitTargetReady(identity, read, () => 0, sleep),
+    ).rejects.toThrow("fixture target readiness identity invalid");
+    expect(read).toHaveBeenCalledTimes(1);
+    expect(sleep).not.toHaveBeenCalled();
+  }
+}
+
 interface FixtureAllocation {
   name: string;
   pools: pg.Pool[];
   allocated: boolean;
+  identity?: FixtureTargetIdentity;
   settle?: Promise<void>;
   close?: Promise<void>;
 }
@@ -1835,6 +2017,10 @@ class TrackedFixtureCluster {
       throw new Error("owned database collision");
     row.allocated = true; // A possibly committed CREATE is reconciled by this exact owned name.
     await this.admin.query(`CREATE DATABASE "${name}" TEMPLATE template0`);
+    row.identity = targetIdentity(
+      (await this.admin.query<Obj>(TARGET_IDENTITY_SQL, [name])).rows,
+      name,
+    );
     await faultPoint("fixture105_test_after_database_create");
     const owner = new pg.Pool({
       connectionString: this.urlFor(name),
@@ -1875,6 +2061,20 @@ class TrackedFixtureCluster {
     if (row === undefined) throw new Error("unowned allocation");
     row.settle ??= this.retainFailures(row.pools.map((pool) => this.end(pool)));
     return row.settle;
+  }
+  async awaitTargetReady(name: string): Promise<void> {
+    const identity = this.allocations.find(
+      (row) => row.name === name,
+    )?.identity;
+    if (identity === undefined)
+      throw new Error("fixture allocation identity unavailable");
+    await awaitTargetReady(identity, async () => {
+      const result = await this.admin.query<Obj>(TARGET_READY_SQL, [
+        identity.database_oid,
+        identity.database,
+      ]);
+      return result.rows;
+    });
   }
   private closeAllocation(row: FixtureAllocation): Promise<void> {
     row.close ??= (async () => {
@@ -1958,6 +2158,7 @@ suite("connected fixture105 native ownership", () => {
 
   beforeAll(async () => {
     await TargetObserver.selftest();
+    await targetReadinessControls();
     if (bootstrapUrl === undefined)
       throw new Error("TEST_DATABASE_URL required");
     const savedBinding = process.env.DESK_FIXTURE105_BINDING;
@@ -2058,6 +2259,7 @@ suite("connected fixture105 native ownership", () => {
       }
     }
     await requireCluster().settle(env.name); // One memoized outcome; no second pool.end.
+    await requireCluster().awaitTargetReady(env.name);
     process.env.DESK_ENV = "test";
     process.env.DATABASE_URL = env.runtimeUrl;
     process.env.PROVIDERS_ENABLED = "false";
@@ -3667,6 +3869,91 @@ suite("connected fixture105 native ownership", () => {
             )
           ).rows,
         ).toEqual([]);
+
+        if (bootstrapUrl === undefined) throw new Error("bootstrap missing");
+        const isolated = new TrackedFixtureCluster(bootstrapUrl);
+        isolatedClusters.push(isolated);
+        const descriptor = Object.getOwnPropertyDescriptor(
+          isolated.admin,
+          "query",
+        );
+        const original: unknown = Reflect.get(isolated.admin, "query");
+        if (typeof original !== "function")
+          throw new Error("controlled query unavailable");
+        let identity: FixtureTargetIdentity | undefined;
+        let controlled: DbEnv | undefined;
+        let settled = false;
+        const order: string[] = [];
+        await withTestCleanup(
+          async () => {
+            Object.defineProperty(isolated.admin, "query", {
+              configurable: true,
+              writable: true,
+              value: async function (
+                this: pg.Pool,
+                ...args: unknown[]
+              ): Promise<pg.QueryResult<Obj>> {
+                const result = (await Reflect.apply(
+                  original,
+                  this,
+                  args,
+                )) as pg.QueryResult<Obj>;
+                if (args[0] === TARGET_IDENTITY_SQL) {
+                  const values = args[1];
+                  if (!Array.isArray(values) || typeof values[0] !== "string")
+                    throw new Error(
+                      "controlled allocation identity unavailable",
+                    );
+                  identity = targetIdentity(result.rows, values[0]);
+                } else if (args[0] === TARGET_READY_SQL) {
+                  if (identity === undefined || controlled === undefined)
+                    throw new Error("controlled target unavailable");
+                  const count = targetReadyCount(result.rows, identity);
+                  if (count > 0 && !settled) {
+                    order.push("positive");
+                    await isolated.settle(controlled.name);
+                    settled = true;
+                    order.push("settled");
+                  } else if (count === 0) {
+                    expect(settled).toBe(true);
+                    order.push("zero");
+                  }
+                }
+                return result; // Return the actual positive result unchanged, even after settlement.
+              },
+            });
+            controlled = await isolated.create({ migrate: false });
+            await isolated.awaitTargetReady(controlled.name); // Deliberately before settle in this control only.
+            order.push("resolved");
+            expect(order).toEqual(["positive", "settled", "zero", "resolved"]);
+          },
+          async () => {
+            await withTestCleanup(
+              () => {
+                if (descriptor === undefined) {
+                  if (!Reflect.deleteProperty(isolated.admin, "query"))
+                    throw new Error("controlled query restoration failed");
+                } else
+                  Object.defineProperty(isolated.admin, "query", descriptor);
+                expect(
+                  Object.getOwnPropertyDescriptor(isolated.admin, "query"),
+                ).toEqual(descriptor);
+                expect(Reflect.get(isolated.admin, "query") as unknown).toBe(
+                  original,
+                );
+                return Promise.resolve();
+              },
+              async () => {
+                await withTestCleanup(
+                  async () => {
+                    await controlled?.close();
+                  },
+                  () => isolated.shutdown(),
+                );
+              },
+            );
+          },
+        );
       },
     ),
     LIMIT,

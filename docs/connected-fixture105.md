@@ -2,7 +2,63 @@
 
 This fixed, fully disclosed fictional fixture connects actual deterministic Claims/Writing evaluation to persisted Performance Direction and a labelled audit-interface stub. It is conformance evidence only. H04/H13 semantic acceptance remains unestablished. Render, READY, production, models and audio remain outside the path. Source-only and UNRUN statements in the historical sections below describe their recorded preparation phase; current validation status follows.
 
-## Current normal-validation candidate (pending)
+## Current CI124 setup-readiness candidate (source preparation; UNRUN)
+
+Accepted main is `8fd7ea16e0fa67c1e6708a6f3a845a19c22b3777`, tree
+`70e5ae8849e8b909c1dccbebb2d39f5652bcda7c`. CI124's root variant in the live
+capability-context case refused target admission before reaching its intended
+package hook or root mutation. The failing predicate/backend was not captured.
+Neither CI120 nor CI124 has an established historical cause.
+
+This candidate closes one setup-handoff gap: awaited local `pool.end()` does
+not itself establish that PostgreSQL has no remaining backend in the target.
+Immediately after successful CREATE, the allocation retains a frozen identity
+from the existing maintenance admin connection: exact name, OID text and UTC
+server start. Missing or malformed identity fails registered setup cleanup.
+After migrations/seeding and successful memoized setup-pool settlement,
+`fresh()` awaits a fixed parameterized admin observation of that same target.
+It requires one identity-matching row and counts all target backends, with no
+backend-type/PID exclusions. Missing/replaced targets cannot count as ready.
+
+Readiness permits at most 21 observations and an awaited 250 ms delay only
+after a nonzero count when another observation remains. A monotonic 5,000 ms
+budget is checked before each query and after completion; even a zero returned
+after the deadline fails. Query rejection or invalid identity fails immediately,
+with the original query error preserved. There is no runtime-operation retry,
+repeated `pool.end()`, detached timer, session termination or maintenance filter.
+Existing admin checkout/query limits of 10,000/20,000 ms and 120,000 ms native
+case/hook limits remain unchanged. The five-second budget is not a hard return
+bound: an already-started query can settle later and then fail the budget.
+One verified zero is sufficient and does not guarantee future exclusion.
+
+Five finite fake readiness groups run in the existing native `beforeAll`, after
+the unchanged 20 observer groups. They cover immediate zero, positive then zero
+with unchanged observations, observation/deadline exhaustion including a late
+zero, original query rejection, and missing/replaced/malformed identities.
+No standalone runner or new output marker is added. All five groups remain
+UNRUN in this source preparation.
+
+The existing setup-pool tracking case retains its failure-injection half and
+adds one successful isolated allocation tracked by existing cleanup. Its real
+setup owner is still connected when the first readiness query observes a
+positive count. A narrow admin-query wrapper awaits memoized settlement, then
+returns that original positive result unchanged; a later real query must
+observe zero. The asserted order is positive, settled, zero, resolved. Cleanup
+restores the query descriptor and closes the target/cluster while preserving
+primary failures. Existing independent afterAll checks cover its database and
+role allocations. Ambient activity is not replaced by a fabricated zero.
+
+All 34 native cases, expected invocation lists, 3,781 rest tests and 8,689 total
+tests remain unchanged. The held-client regression remains last, creates its
+client after `fresh()`, and must still receive the strict isolation refusal.
+No runtime SQL, settings, grants, receipts, CI selectors or route changes occur.
+Future clients or autonomous maintenance can still fail the original runtime
+predicate; this is readiness improvement, not an autovacuum policy or proven
+root-cause fix. Actual-source review and existing bounded static gates precede
+one separately authorized normal full acceptance through the unchanged route.
+Any subsequent failure requires adjudication before another run.
+
+## Historical normal-validation candidate (pending at source preparation)
 
 [CI122, run 40801832684](https://github.com/mikeddamico/the-desk/actions/runs/40801832684)
 passed all 20 observer fake groups and the one held-client native control at
