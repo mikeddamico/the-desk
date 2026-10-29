@@ -1382,6 +1382,58 @@ class Fixture105Tooling(unittest.TestCase):
         allocations = list(re.finditer(r'cluster\s*=\s*new\s+TrackedFixtureCluster\s*\(bootstrapUrl\)', body))
         self.assertEqual((len(root_calls), len(allocations)), (1, 1))
         self.assertLess(root_calls[0].start(), allocations[0].start())
+        identity_sql = body[body.index('const TARGET_IDENTITY_SQL ='):body.index('function targetIdentity(')]
+        ready_sql = identity_sql[identity_sql.index('const TARGET_READY_SQL ='):]
+        self.assertEqual(ready_sql.count('FROM pg_stat_activity'), 1)
+        self.assertIn('WHERE a.datid = d.oid', ready_sql)
+        self.assertIn('WHERE d.oid = $1::oid AND d.datname = $2', ready_sql)
+        self.assertNotIn('backend_type', ready_sql)
+        self.assertNotIn('pid <>', ready_sql)
+        self.assertNotIn('pg_terminate_backend', body)
+        cluster = body[body.index('class TrackedFixtureCluster'):body.index('suite("connected fixture105 native ownership"')]
+        self.assertLess(cluster.index('await this.admin.query(`CREATE DATABASE'), cluster.index('row.identity = targetIdentity('))
+        self.assertLess(cluster.index('row.identity = targetIdentity('), cluster.index('await faultPoint("fixture105_test_after_database_create");'))
+        self.assertIn('Object.freeze({\n    database_oid: row.database_oid,', body)
+        readiness = body[body.index('async function awaitTargetReady('):body.index('async function targetReadinessControls(')]
+        self.assertIn('const deadline = now() + 5000;', readiness)
+        self.assertIn('observation < 21', readiness)
+        self.assertEqual(readiness.count('if (now() >= deadline)'), 2)
+        self.assertLess(readiness.index('if (now() >= deadline)'), readiness.index('const rows = await read();'))
+        self.assertLess(readiness.index('const rows = await read();'), readiness.rindex('if (now() >= deadline)'))
+        self.assertLess(readiness.rindex('if (now() >= deadline)'), readiness.index('if (targetReadyCount(rows, identity) === 0) return;'))
+        self.assertIn('if (observation < 20) await sleep();', readiness)
+        self.assertIn('setTimeout(resolve, 250)', readiness)
+        for forbidden in ('Promise.race', '.end(', 'catch', 'runConnectedFixture105'):
+            self.assertNotIn(forbidden, readiness)
+        fresh = body[body.index('  async function fresh('):body.index('  async function inspect<')]
+        self.assertEqual(fresh.count('await requireCluster().settle(env.name);'), 1)
+        self.assertEqual(fresh.count('await requireCluster().awaitTargetReady(env.name);'), 1)
+        self.assertLess(fresh.index('await requireCluster().settle(env.name);'), fresh.index('await requireCluster().awaitTargetReady(env.name);'))
+        self.assertLess(fresh.index('await requireCluster().awaitTargetReady(env.name);'), fresh.index('return env;'))
+        self.assertEqual(body.count('await targetReadinessControls();'), 1)
+        self.assertLess(body.index('await targetReadinessControls();'), body.index('await cluster.bootstrap();'))
+        controls = body[body.index('async function targetReadinessControls('):body.index('interface FixtureAllocation')]
+        self.assertEqual(re.findall(r'^  // ([1-5])\.', controls, re.M), ['1', '2', '3', '4', '5'])
+        self.assertIn('.rejects.toBe(\n    primary,\n  );', controls)
+        self.assertIn('expect(read).toHaveBeenCalledTimes(21);', controls)
+        self.assertIn('expect(sleep).toHaveBeenCalledTimes(20);', controls)
+        self.assertIn('clock = 5000;', controls)
+        name = 'tracks a setup pool before roles SQL or migration can fail'
+        start = body.index('  it(\n    "' + name + '"')
+        case = body[start:body.index('  it(', start + 6)]
+        self.assertEqual(case.count('fixture105_test_after_setup_pool'), 1)
+        self.assertEqual(case.count('allocated setup pool failure'), 2)
+        self.assertEqual(case.count('await isolated.settle(controlled.name);'), 1)
+        self.assertEqual(case.count('await isolated.awaitTargetReady(controlled.name);'), 1)
+        self.assertIn('expect(order).toEqual(["positive", "settled", "zero", "resolved"]);', case)
+        self.assertIn('const count = targetReadyCount(result.rows, identity);', case)
+        self.assertIn('return result; // Return the actual positive result unchanged', case)
+        self.assertIn('Reflect.deleteProperty(isolated.admin, "query")', case)
+        self.assertIn('expect(Reflect.get(isolated.admin, "query") as unknown).toBe(\n                  original,\n                );', case)
+        self.assertLess(case.index('expect(Reflect.get(isolated.admin, "query") as unknown).toBe(\n                  original,\n                );'), case.index('await controlled?.close();'))
+        self.assertLess(case.index('await controlled?.close();'), case.index('() => isolated.shutdown()'))
+        for forbidden in ('new pg.Client(', 'runConnectedFixture105(', 'maintenanceLatch', 'setTimeout('):
+            self.assertNotIn(forbidden, case)
         host = (ci.ROOT / 'src/runtime/connected-fixture105.ts').read_text()
         self.assertNotIn('.fixture105-execution', host)
         intent = re.search(r'journalIntent\(\s*this\.binding\s*,\s*this\.target\s*\)', host)
