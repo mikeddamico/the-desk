@@ -983,10 +983,12 @@ describe("technical master admission", () => {
             child.emit("error", new Error("fixed unreaped client"));
             return;
           }
-          if (args[0] === "image")
-            stdout.write(
-              "sha256:9cfb2ec0ff3d93fbfdf1b0e1845044a2857fb3e017f36256a765a56c0cd7bedc\n",
-            );
+          if (args[0] === "image") {
+            const image = args.at(-1);
+            if (typeof image !== "string")
+              throw new Error("missing fixed inspection image");
+            stdout.write(image + "\n");
+          }
           if (args[0] === "create") {
             const mount = args.find(
               (value) =>
