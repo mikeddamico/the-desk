@@ -17,6 +17,7 @@ import {
   unlinkSync,
   symlinkSync,
   existsSync,
+  readdirSync,
 } from "node:fs";
 import * as claimsOwner from "../../src/runtime/claims-writing-gate.js";
 import { readFile } from "node:fs/promises";
@@ -31,7 +32,11 @@ import {
 } from "vitest";
 
 import { migrate } from "../../src/db/migrations.js";
-import { canonicalJson, sha256 } from "../../src/identity/canonical-json.js";
+import {
+  canonicalJson,
+  canonicalTimestamp,
+  sha256,
+} from "../../src/identity/canonical-json.js";
 import {
   persistEvidencePackage,
   persistConnectedFixture105Package,
@@ -52,6 +57,7 @@ import {
   connectedFixture105CleanupDiagnostics,
   takeConnectedFixture105PackageBorrow,
   ConnectedFixture105ClaimsFailure,
+  ConnectedFixture105Refusal,
   runConnectedFixture105 as runObservedConnectedFixture105,
   reconcileConnectedFixture105,
 } from "../../src/runtime/connected-fixture105.js";
@@ -153,6 +159,7 @@ type TargetVector =
       otherSessions: number | null;
     };
 const TARGET_SCOPES = [
+  "held_client_control",
   "preseed_foreign_claim",
   "preseed_missing_config",
   "preseed_changed_show",
@@ -226,8 +233,13 @@ function targetSupplement(value: unknown): TargetSupplement {
     "other_sessions",
     "other_backend_sample",
     "other_backend_sample_truncated",
+    "diagnostic_server_start_utc",
   ]);
-  if (!row || !targetInt(row.other_sessions))
+  if (
+    !row ||
+    !targetInt(row.other_sessions) ||
+    !maintenanceStamp(row.diagnostic_server_start_utc)
+  )
     return targetUnknown("invalid_metadata");
   const sample: unknown = row.other_backend_sample;
   const truncated = row.other_backend_sample_truncated;
@@ -251,11 +263,17 @@ function targetSupplement(value: unknown): TargetSupplement {
     const descriptor = Object.getOwnPropertyDescriptor(sample, String(index));
     if (!descriptor || !("value" in descriptor) || !descriptor.enumerable)
       return targetUnknown("invalid_metadata");
-    const entry = targetData(descriptor.value, ["pid", "category"]);
+    const entry = targetData(descriptor.value, [
+      "pid",
+      "category",
+      "backend_start_utc",
+    ]);
     if (
       !entry ||
       !targetInt(entry.pid, 1) ||
       entry.pid <= previous ||
+      (entry.backend_start_utc !== null &&
+        !maintenanceStamp(entry.backend_start_utc)) ||
       (entry.category !== "client" &&
         entry.category !== "autovacuum" &&
         entry.category !== "other_backend" &&
@@ -278,6 +296,291 @@ function targetSupplement(value: unknown): TargetSupplement {
   };
 }
 
+// Fixed test-only maintenance read. No runtime authority or connection owner.
+interface MaintenanceOwner {
+  admin: pg.Pool;
+  database: string;
+  latch: { used: boolean };
+}
+interface MaintenanceCapture {
+  database: string;
+  oid: string;
+  server: string;
+  ordinal: number;
+  origins: { pid: number; start: string | null }[];
+}
+interface MaintenanceEntry {
+  pid: number;
+  category: TargetCategory;
+  binding: "lifetime_match" | "provisional" | "unknown";
+  reason:
+    | "none"
+    | "hidden_origin"
+    | "wrong_database"
+    | "lifetime_changed"
+    | "vanished"
+    | "hidden_result"
+    | "unknown_type";
+}
+interface MaintenanceRecord {
+  schema: "fixture-target-maintenance/1";
+  scope: TargetScope;
+  ordinal: number;
+  status: "observed" | "unknown";
+  reason: "none" | "unbound" | "error" | "invalid" | "server_changed";
+  cleanup: "driver_handoff" | "unknown";
+  entries: MaintenanceEntry[];
+}
+function maintenanceStamp(value: unknown): value is string {
+  if (
+    typeof value !== "string" ||
+    value.length !== 27 ||
+    !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{6}Z$/u.test(value)
+  )
+    return false;
+  try {
+    return canonicalTimestamp(value) === value;
+  } catch {
+    return false;
+  }
+}
+function captureMaintenance(
+  vector: TargetVector,
+  value: unknown,
+  database: string,
+): MaintenanceCapture | undefined {
+  if (
+    vector.outcome !== "rows" ||
+    vector.noOtherSessions ||
+    !targetInt(vector.otherSessions, 1) ||
+    !vector.oneRow ||
+    !vector.databaseMatches ||
+    !vector.runtimeRole ||
+    !vector.notElevated ||
+    !vector.oidString ||
+    !vector.loginString ||
+    !vector.databaseString ||
+    !vector.addressValid ||
+    !vector.portValid
+  )
+    return;
+  const supplement = targetSupplement(value);
+  if (!supplement.sample || supplement.sample.length === 0) return;
+  const row = targetData(value, [
+    "database",
+    "database_oid",
+    "login",
+    "server_address",
+    "server_port",
+    "runtime_role",
+    "elevated",
+    "other_sessions",
+    "other_backend_sample",
+    "other_backend_sample_truncated",
+    "diagnostic_server_start_utc",
+  ]);
+  if (
+    row?.database !== database ||
+    row.other_sessions !== vector.otherSessions ||
+    typeof row.database_oid !== "string" ||
+    !/^[1-9][0-9]{0,9}$/u.test(row.database_oid) ||
+    BigInt(row.database_oid) > 4294967295n ||
+    !maintenanceStamp(row.diagnostic_server_start_utc)
+  )
+    return;
+  const origins: MaintenanceCapture["origins"] = [];
+  for (let index = 0; index < supplement.sample.length; index++) {
+    const descriptor = Object.getOwnPropertyDescriptor(
+      row.other_backend_sample,
+      String(index),
+    );
+    const entry = targetData(descriptor?.value as unknown, [
+      "pid",
+      "category",
+      "backend_start_utc",
+    ]);
+    if (
+      !entry ||
+      !targetInt(entry.pid, 1) ||
+      entry.pid !== supplement.sample[index]?.pid ||
+      (entry.backend_start_utc !== null &&
+        !maintenanceStamp(entry.backend_start_utc))
+    )
+      return;
+    origins.push({ pid: entry.pid, start: entry.backend_start_utc });
+  }
+  return {
+    database,
+    oid: row.database_oid,
+    server: row.diagnostic_server_start_utc,
+    ordinal: vector.ordinal,
+    origins,
+  };
+}
+const MAINTENANCE_SQL = `SELECT current_database() = $4::text AS maintenance_matches,
+ to_char(pg_postmaster_start_time() AT TIME ZONE 'UTC',
+ 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"') = $5::text AS server_matches,
+ (SELECT coalesce(jsonb_agg(jsonb_build_object(
+   'pid', s.pid, 'database_matches', s.database_matches,
+   'backend_start_utc', s.backend_start_utc, 'category', s.category
+ ) ORDER BY s.pid), '[]'::jsonb)
+ FROM (
+   SELECT pid,
+     coalesce(datid = $3::oid AND datname = $2::text, false)
+       AS database_matches,
+     to_char(backend_start AT TIME ZONE 'UTC',
+       'YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS backend_start_utc,
+     CASE
+       WHEN backend_type = 'client backend' THEN 'client'
+       WHEN backend_type = 'autovacuum worker' THEN 'autovacuum'
+       WHEN backend_type IN (
+         'autovacuum launcher','logical replication launcher',
+         'logical replication worker','parallel worker','background writer',
+         'checkpointer','archiver','standalone backend','startup',
+         'walreceiver','walsender','walwriter','walsummarizer'
+       ) THEN 'other_backend' ELSE 'unknown'
+     END AS category
+   FROM pg_stat_activity WHERE pid = ANY($1::integer[])
+   ORDER BY pid LIMIT 9
+ ) AS s) AS observations`;
+async function observeMaintenance(
+  owner: MaintenanceOwner,
+  capture: MaintenanceCapture,
+  scope: TargetScope,
+): Promise<MaintenanceRecord> {
+  const record: MaintenanceRecord = {
+    schema: "fixture-target-maintenance/1",
+    scope,
+    ordinal: capture.ordinal,
+    status: "unknown",
+    reason: "invalid",
+    cleanup: "unknown",
+    entries: [],
+  };
+  try {
+    // Pool owns checkout, existing timeouts, listener and release. Exactly one read.
+    const result = await owner.admin.query<Obj>(MAINTENANCE_SQL, [
+      capture.origins.map((entry) => entry.pid),
+      capture.database,
+      capture.oid,
+      owner.database,
+      capture.server,
+    ]);
+    record.cleanup = "driver_handoff";
+    const row =
+      result.rows.length === 1
+        ? targetData(result.rows[0], [
+            "maintenance_matches",
+            "server_matches",
+            "observations",
+          ])
+        : undefined;
+    if (
+      !row ||
+      typeof row.maintenance_matches !== "boolean" ||
+      typeof row.server_matches !== "boolean"
+    )
+      return record;
+    const samples: unknown = row.observations;
+    if (
+      !Array.isArray(samples) ||
+      Reflect.getPrototypeOf(samples) !== Array.prototype
+    )
+      return record;
+    const length = Object.getOwnPropertyDescriptor(samples, "length")
+      ?.value as unknown;
+    if (
+      !targetInt(length) ||
+      length > 8 ||
+      Reflect.ownKeys(samples).length !== length + 1
+    )
+      return record;
+    const observed = new Map<
+      number,
+      {
+        database: boolean;
+        start: string | null;
+        category: TargetCategory;
+      }
+    >();
+    let previous = 0;
+    for (let index = 0; index < length; index++) {
+      const descriptor = Object.getOwnPropertyDescriptor(
+        samples,
+        String(index),
+      );
+      if (!descriptor || !("value" in descriptor) || !descriptor.enumerable)
+        return record;
+      const entry = targetData(descriptor.value, [
+        "pid",
+        "database_matches",
+        "backend_start_utc",
+        "category",
+      ]);
+      if (
+        !entry ||
+        !targetInt(entry.pid, 1) ||
+        entry.pid <= previous ||
+        !capture.origins.some((origin) => origin.pid === entry.pid) ||
+        typeof entry.database_matches !== "boolean" ||
+        (entry.backend_start_utc !== null &&
+          !maintenanceStamp(entry.backend_start_utc)) ||
+        (entry.category !== "client" &&
+          entry.category !== "autovacuum" &&
+          entry.category !== "other_backend" &&
+          entry.category !== "unknown")
+      )
+        return record;
+      previous = entry.pid;
+      observed.set(entry.pid, {
+        database: entry.database_matches,
+        start: entry.backend_start_utc,
+        category: entry.category,
+      });
+    }
+    if (!row.maintenance_matches) {
+      record.reason = "unbound";
+      return record;
+    }
+    if (!row.server_matches) {
+      record.reason = "server_changed";
+      return record;
+    }
+    record.entries = capture.origins.map((origin): MaintenanceEntry => {
+      const entry = observed.get(origin.pid);
+      const unknown = (
+        reason: MaintenanceEntry["reason"],
+      ): MaintenanceEntry => ({
+        pid: origin.pid,
+        category: "unknown",
+        binding: "unknown",
+        reason,
+      });
+      if (!entry) return unknown("vanished");
+      if (!entry.database) return unknown("wrong_database");
+      if (entry.start === null) return unknown("hidden_result");
+      if (origin.start !== null && origin.start !== entry.start)
+        return unknown("lifetime_changed");
+      if (entry.category === "unknown") return unknown("unknown_type");
+      return {
+        pid: origin.pid,
+        category: entry.category,
+        binding: origin.start === null ? "provisional" : "lifetime_match",
+        reason: origin.start === null ? "hidden_origin" : "none",
+      };
+    });
+    record.status = "observed";
+    record.reason = "none";
+    return record;
+  } catch {
+    // Keep an acknowledged driver handoff even if later metadata inspection faults.
+    record.status = "unknown";
+    record.reason = record.cleanup === "driver_handoff" ? "invalid" : "error";
+    record.entries = [];
+    return record;
+  }
+}
+
 class TargetObserver {
   // Saturating count of target queries, passing ones included; capReached means a query beyond the cap was seen.
   private count = 0;
@@ -285,9 +588,12 @@ class TargetObserver {
   private observationFailed = false;
   private readonly vectors: TargetEnvelope[] = [];
   private restorationFailed = false;
+  private maintenanceCapture: MaintenanceCapture | undefined;
+  private maintenanceRecord: MaintenanceRecord | undefined;
   constructor(
     private readonly database: string,
     private readonly scope: TargetScope = "acquisition_cut",
+    private readonly maintenance?: MaintenanceOwner,
   ) {
     if (!TARGET_SCOPES.includes(scope))
       throw new Error("fixture target scope invalid");
@@ -300,6 +606,61 @@ class TargetObserver {
       throw error;
     }
   }
+  assertHeldClient(pid: number): void {
+    expect(this.scope).toBe("held_client_control");
+    expect(this.count).toBe(1);
+    expect(this.capReached).toBe(false);
+    expect(this.observationFailed).toBe(false);
+    expect(this.restorationFailed).toBe(false);
+    expect(this.maintenance?.latch.used).toBe(true);
+    expect(this.vectors).toHaveLength(1);
+    const entry = this.vectors[0];
+    if (entry?.vector.outcome !== "rows")
+      throw new Error("held client target vector missing");
+    expect(entry.vector).toEqual({
+      ordinal: 1,
+      outcome: "rows",
+      oneRow: true,
+      databaseMatches: true,
+      runtimeRole: true,
+      notElevated: true,
+      noOtherSessions: false,
+      oidString: true,
+      loginString: true,
+      databaseString: true,
+      addressValid: true,
+      portValid: true,
+      otherSessions: expect.any(Number) as unknown,
+    });
+    expect(targetInt(entry.vector.otherSessions, 1)).toBe(true);
+    expect(entry.supplement.status).toBe("inconclusive");
+    expect(entry.supplement.reason).toBe("unknown_type");
+    expect(entry.supplement.truncated).toBe(false);
+    expect(entry.supplement.sample).toContainEqual({
+      pid,
+      category: "unknown",
+    });
+    expect(
+      this.maintenanceCapture?.origins.some(
+        (origin) => origin.pid === pid && origin.start === null,
+      ),
+    ).toBe(true);
+    expect(this.maintenanceRecord).toEqual({
+      schema: "fixture-target-maintenance/1",
+      scope: "held_client_control",
+      ordinal: 1,
+      status: "observed",
+      reason: "none",
+      cleanup: "driver_handoff",
+      entries: expect.any(Array) as unknown,
+    });
+    expect(this.maintenanceRecord?.entries).toContainEqual({
+      pid,
+      category: "client",
+      binding: "provisional",
+      reason: "hidden_origin",
+    });
+  }
   private retain(vector: TargetVector, row?: unknown): void {
     let supplement: TargetSupplement;
     try {
@@ -310,6 +671,17 @@ class TargetObserver {
     } catch {
       this.observationFailed = true;
       supplement = targetUnknown("observation_fault");
+    }
+    if (this.maintenance && !this.maintenance.latch.used) {
+      try {
+        const capture = captureMaintenance(vector, row, this.database);
+        if (capture) {
+          this.maintenance.latch.used = true; // Suite-wide reservation before any await.
+          this.maintenanceCapture = capture;
+        }
+      } catch {
+        this.observationFailed = true;
+      }
     }
     this.vectors.push({
       schema: "fixture-target-diagnostic/2",
@@ -442,10 +814,18 @@ class TargetObserver {
         });
         await work();
       },
-      () => {
+      async () => {
         Object.defineProperty(pg.Client.prototype, "query", descriptor);
-        if (!this.restorationFailed) this.emit();
-        return Promise.resolve();
+        if (!this.restorationFailed) {
+          if (this.maintenance && this.maintenanceCapture) {
+            this.maintenanceRecord = await observeMaintenance(
+              this.maintenance,
+              this.maintenanceCapture,
+              this.scope,
+            );
+          }
+          this.emit();
+        }
       },
     );
   }
@@ -483,12 +863,24 @@ class TargetObserver {
       if (Buffer.byteLength(line) > 1024)
         throw new Error("fixture target summary bound");
       process.stderr.write(line);
+      if (this.maintenanceRecord) {
+        let extra = `FIXTURE_TARGET_MAINTENANCE ${JSON.stringify(this.maintenanceRecord)}\n`;
+        if (Buffer.byteLength(extra) > 2048) {
+          this.maintenanceRecord.status = "unknown";
+          this.maintenanceRecord.reason = "invalid";
+          this.maintenanceRecord.entries = [];
+          extra = `FIXTURE_TARGET_MAINTENANCE ${JSON.stringify(this.maintenanceRecord)}\n`;
+        }
+        process.stderr.write(extra);
+      }
     } catch {
       throw new Error("fixture target diagnostic output failed");
     }
   }
 
-  /** Test-local controls; fake-driver output never reaches retained native evidence. */
+  /** All 20 groups are unrun in this source-only candidate; native validation is deferred.
+   * Fake-driver output never reaches retained native evidence.
+   */
   static async selftest(): Promise<void> {
     let groups = 0;
     const done = (group: number): void => {
@@ -498,15 +890,18 @@ class TargetObserver {
     const row = (categories: TargetCategory[] = []): Obj => ({
       database: "fixed",
       database_oid: "1",
+      diagnostic_server_start_utc: "2026-10-28T00:00:00.000001Z",
       login: "fixed",
       server_address: null,
       server_port: null,
       runtime_role: true,
       elevated: false,
       other_sessions: categories.length,
-      other_backend_sample: categories
-        .slice(0, 8)
-        .map((category, index) => ({ pid: index + 1, category })),
+      other_backend_sample: categories.slice(0, 8).map((category, index) => ({
+        pid: index + 1,
+        category,
+        backend_start_utc: null,
+      })),
       other_backend_sample_truncated: categories.length > 8,
     });
     const result = (data: Obj): pg.QueryResult<Obj> => ({
@@ -564,7 +959,11 @@ class TargetObserver {
           targetSupplement({
             ...row(["other_backend"]),
             other_backend_sample: [
-              { pid: index + 1, category: "other_backend" },
+              {
+                pid: index + 1,
+                category: "other_backend",
+                backend_start_utc: null,
+              },
             ],
           }).reason,
         ).toBe("none");
@@ -604,7 +1003,9 @@ class TargetObserver {
       );
       malformed.push({
         ...row(["client"]),
-        other_backend_sample: [{ pid: 1, category: "client", extra: true }],
+        other_backend_sample: [
+          { pid: 1, category: "client", backend_start_utc: null, extra: true },
+        ],
       });
       const getter = row();
       Object.defineProperty(getter, "other_backend_sample", {
@@ -626,7 +1027,9 @@ class TargetObserver {
         expect(
           targetSupplement({
             ...row(["client"]),
-            other_backend_sample: [{ pid, category: "client" }],
+            other_backend_sample: [
+              { pid, category: "client", backend_start_utc: null },
+            ],
           }).reason,
         ).toBe("invalid_metadata");
       for (const second of [2, 1])
@@ -634,15 +1037,17 @@ class TargetObserver {
           targetSupplement({
             ...row(["client", "client"]),
             other_backend_sample: [
-              { pid: 2, category: "client" },
-              { pid: second, category: "client" },
+              { pid: 2, category: "client", backend_start_utc: null },
+              { pid: second, category: "client", backend_start_utc: null },
             ],
           }).reason,
         ).toBe("invalid_metadata");
       expect(
         targetSupplement({
           ...row(["client"]),
-          other_backend_sample: [{ pid: 1, category: "arbitrary" }],
+          other_backend_sample: [
+            { pid: 1, category: "arbitrary", backend_start_utc: null },
+          ],
         }).reason,
       ).toBe("invalid_metadata");
       done(8);
@@ -764,6 +1169,232 @@ class TargetObserver {
       ).rejects.toBe(primary);
       expect(cleanupFailures.get(primary)?.length).toBe(1);
       done(12);
+      // Groups 13–20 are deferred: this native beforeAll has no fake-only launcher.
+      const started = "2026-10-28T00:00:00.000002Z";
+      const origin = row(["client"]);
+      origin.other_backend_sample = [
+        { pid: 1, category: "client", backend_start_utc: started },
+      ];
+      const initial = new TargetObserver("fixed");
+      initial.observe(initial.enter(TARGET_PREFIX), result(origin));
+      const vector = initial.vectors[0]?.vector;
+      if (!vector) throw new Error("maintenance control vector missing");
+      const bound = captureMaintenance(vector, origin, "fixed");
+      if (!bound) throw new Error("maintenance control binding missing");
+      const observedRow = (changes: Obj = {}): Obj => ({
+        pid: 1,
+        database_matches: true,
+        backend_start_utc: started,
+        category: "client",
+        ...changes,
+      });
+      const metadata = (
+        observations: unknown,
+        changes: Obj = {},
+      ): pg.QueryResult<Obj> =>
+        result({
+          maintenance_matches: true,
+          server_matches: true,
+          observations,
+          ...changes,
+        });
+      let reply = (): Promise<pg.QueryResult<Obj>> =>
+        Promise.resolve(metadata([observedRow()]));
+      let reads = 0;
+      // An inert object at the existing pool-query seam, never a constructed pool.
+      const admin = Object.create(pg.Pool.prototype) as pg.Pool;
+      Object.defineProperty(admin, "query", {
+        value: (
+          text: string,
+          parameters: unknown[],
+        ): Promise<pg.QueryResult<Obj>> => {
+          expect(
+            Object.getOwnPropertyDescriptor(pg.Client.prototype, "query"),
+          ).toEqual(expectedOutputDriver);
+          expect(text).toBe(MAINTENANCE_SQL);
+          expect(parameters).toEqual([
+            [1],
+            "fixed",
+            "1",
+            "maintenance",
+            bound.server,
+          ]);
+          reads++;
+          return reply();
+        },
+      });
+      const owner: MaintenanceOwner = {
+        admin,
+        database: "maintenance",
+        latch: { used: false },
+      };
+      expect(
+        await observeMaintenance(owner, bound, "acquisition_cut"),
+      ).toMatchObject({
+        status: "observed",
+        cleanup: "driver_handoff",
+        entries: [
+          {
+            pid: 1,
+            category: "client",
+            binding: "lifetime_match",
+            reason: "none",
+          },
+        ],
+      });
+      expect(reads).toBe(1);
+      done(13);
+      reply = () =>
+        Promise.resolve(metadata([observedRow({ database_matches: false })]));
+      expect(
+        (await observeMaintenance(owner, bound, "acquisition_cut")).entries[0]
+          ?.reason,
+      ).toBe("wrong_database");
+      reply = () => Promise.resolve(metadata([observedRow({ pid: 2 })]));
+      expect(
+        (await observeMaintenance(owner, bound, "acquisition_cut")).reason,
+      ).toBe("invalid");
+      done(14);
+      reply = () =>
+        Promise.resolve(metadata([observedRow()], { server_matches: false }));
+      expect(
+        (await observeMaintenance(owner, bound, "acquisition_cut")).reason,
+      ).toBe("server_changed");
+      reply = () =>
+        Promise.resolve(
+          metadata([
+            observedRow({ backend_start_utc: "2026-10-28T00:00:01.000002Z" }),
+          ]),
+        );
+      expect(
+        (await observeMaintenance(owner, bound, "acquisition_cut")).entries[0]
+          ?.reason,
+      ).toBe("lifetime_changed");
+      done(15);
+      reply = () => Promise.resolve(metadata([]));
+      expect(
+        (await observeMaintenance(owner, bound, "acquisition_cut")).entries[0]
+          ?.reason,
+      ).toBe("vanished");
+      done(16);
+      reply = () =>
+        Promise.resolve(metadata([observedRow({ category: "autovacuum" })]));
+      expect(
+        (
+          await observeMaintenance(
+            owner,
+            { ...bound, origins: [{ pid: 1, start: null }] },
+            "acquisition_cut",
+          )
+        ).entries[0],
+      ).toMatchObject({
+        category: "autovacuum",
+        binding: "provisional",
+        reason: "hidden_origin",
+      });
+      reply = () =>
+        Promise.resolve(metadata([observedRow({ backend_start_utc: null })]));
+      expect(
+        (await observeMaintenance(owner, bound, "acquisition_cut")).entries[0]
+          ?.reason,
+      ).toBe("hidden_result");
+      reply = () =>
+        Promise.resolve(metadata([observedRow({ category: "unknown" })]));
+      expect(
+        (await observeMaintenance(owner, bound, "acquisition_cut")).entries[0]
+          ?.reason,
+      ).toBe("unknown_type");
+      done(17);
+      for (const label of ["fixed pool rejection", "fixed pool timeout"]) {
+        const before = reads;
+        reply = () => Promise.reject(new Error(label));
+        expect(
+          await observeMaintenance(owner, bound, "acquisition_cut"),
+        ).toMatchObject({
+          status: "unknown",
+          reason: "error",
+          cleanup: "unknown",
+          entries: [],
+        });
+        expect(reads).toBe(before + 1); // No retry or manual disposal inference.
+      }
+      done(18);
+      for (const invalid of [
+        metadata("not an array"),
+        metadata(new Array<unknown>(9)),
+        metadata([observedRow({ backend_start_utc: "invalid" })]),
+        metadata([observedRow({ extra: true })]),
+        metadata([observedRow({ category: "x".repeat(4096) })]),
+      ]) {
+        reply = () => Promise.resolve(invalid);
+        expect(
+          await observeMaintenance(owner, bound, "acquisition_cut"),
+        ).toMatchObject({
+          status: "unknown",
+          reason: "invalid",
+          cleanup: "driver_handoff",
+          entries: [],
+        });
+      }
+      done(19);
+      let delivered = result(row());
+      const diagnosticDriver = {
+        ...descriptor,
+        value: () => Promise.resolve(delivered),
+      };
+      Object.defineProperty(pg.Client.prototype, "query", diagnosticDriver);
+      expectedOutputDriver = diagnosticDriver;
+      const callObserved = async (): Promise<void> => {
+        const installed = Object.getOwnPropertyDescriptor(
+          pg.Client.prototype,
+          "query",
+        );
+        if (!installed) throw new Error("maintenance control driver missing");
+        expect(await driverQuery(installed).call(receiver, TARGET_PREFIX)).toBe(
+          delivered,
+        );
+      };
+      const beforeRead = reads;
+      await new TargetObserver("fixed", "acquisition_cut", owner).around(
+        callObserved,
+      );
+      expect(reads).toBe(beforeRead);
+      expect(owner.latch.used).toBe(false);
+      delivered = result(origin);
+      reply = () => Promise.resolve(metadata([observedRow()]));
+      const primaryFailure = new Error("fixed original failure");
+      await expect(
+        new TargetObserver("fixed", "acquisition_cut", owner).around(
+          async () => {
+            await callObserved();
+            throw primaryFailure;
+          },
+        ),
+      ).rejects.toBe(primaryFailure);
+      expect(reads).toBe(beforeRead + 1);
+      expect(owner.latch.used).toBe(true);
+      await new TargetObserver("fixed", "acquisition_cut", owner).around(
+        callObserved,
+      );
+      expect(reads).toBe(beforeRead + 1);
+      // A pool rejection also preserves the identical original work error.
+      const rejectedOwner = { ...owner, latch: { used: false } };
+      reply = () => Promise.reject(new Error("fixed supplemental rejection"));
+      await expect(
+        new TargetObserver("fixed", "acquisition_cut", rejectedOwner).around(
+          async () => {
+            await callObserved();
+            throw primaryFailure;
+          },
+        ),
+      ).rejects.toBe(primaryFailure);
+      expect(reads).toBe(beforeRead + 2);
+      expect(
+        lines
+          .filter((line) => line.startsWith("FIXTURE_TARGET_MAINTENANCE "))
+          .every((line) => Buffer.byteLength(line) <= 2048),
+      ).toBe(true);
+      done(20);
     } catch {
       throw new Error(
         `fixture target diagnostic selftest group ${String(groups + 1)}`,
@@ -775,9 +1406,9 @@ class TargetObserver {
         capture.mockRestore();
       }
     }
-    expect(groups).toBe(12);
+    expect(groups).toBe(20);
     process.stderr.write(
-      'FIXTURE_TARGET_DIAGNOSTIC_SELFTEST {"schema":"fixture-target-selftest/1","groups":12,"passed":12}\n',
+      'FIXTURE_TARGET_DIAGNOSTIC_SELFTEST {"schema":"fixture-target-selftest/2","groups":20,"passed":20}\n',
     );
   }
 }
@@ -965,6 +1596,11 @@ const CASE_EXPECTATIONS: readonly {
     case_id:
       "preserves an unrelated package failure object and releases its transaction",
     expected: [],
+  },
+  {
+    case_id:
+      "identifies a held client while preserving target isolation refusal",
+    expected: ["pre_target_failure"],
   },
 ];
 interface HarnessCase {
@@ -1306,6 +1942,16 @@ suite("connected fixture105 native ownership", () => {
   function requireCluster(): TrackedFixtureCluster {
     if (cluster === undefined) throw new Error("fixture cluster unavailable");
     return cluster;
+  }
+  const maintenanceLatch = { used: false };
+  function maintenanceOwner(): MaintenanceOwner {
+    if (bootstrapUrl === undefined)
+      throw new Error("maintenance binding missing");
+    return {
+      admin: requireCluster().admin,
+      database: decodeURIComponent(new URL(bootstrapUrl).pathname.slice(1)),
+      latch: maintenanceLatch,
+    };
   }
   let current: DbEnv | undefined;
   const isolatedClusters: TrackedFixtureCluster[] = [];
@@ -1872,13 +2518,15 @@ suite("connected fixture105 native ownership", () => {
               "changed-show": "preseed_changed_show",
               "extra-show": "preseed_extra_show",
             } as const;
-            await new TargetObserver(env.name, scopes[variant]).around(
-              async () => {
-                await expect(runConnectedFixture105()).rejects.toThrow(
-                  "fixture_initial_population",
-                );
-              },
-            );
+            await new TargetObserver(
+              env.name,
+              scopes[variant],
+              maintenanceOwner(),
+            ).around(async () => {
+              await expect(runConnectedFixture105()).rejects.toThrow(
+                "fixture_initial_population",
+              );
+            });
             expect(await counts(env)).toEqual({
               packages: 0,
               directions: 0,
@@ -2514,7 +3162,11 @@ suite("connected fixture105 native ownership", () => {
         const env = await fresh();
         let armed = false;
         let intercepted = 0;
-        const observer = new TargetObserver(env.name, "unknown_construction");
+        const observer = new TargetObserver(
+          env.name,
+          "unknown_construction",
+          maintenanceOwner(),
+        );
         await observer.around(async () => {
           const descriptor = Object.getOwnPropertyDescriptor(
             pg.Client.prototype,
@@ -2601,7 +3253,11 @@ suite("connected fixture105 native ownership", () => {
             program_attempt: "unknown_program_attempt",
             package_binding: "unknown_package_binding",
           } as const;
-          const observer = new TargetObserver(separate.name, scopes[owner]);
+          const observer = new TargetObserver(
+            separate.name,
+            scopes[owner],
+            maintenanceOwner(),
+          );
           await observer.around(async () => {
             const queryDescriptor = Object.getOwnPropertyDescriptor(
               pg.Client.prototype,
@@ -2938,7 +3594,11 @@ suite("connected fixture105 native ownership", () => {
           );
         };
         // CI117 provenance: observe only this first invocation; counts and re-entry remain outside the wrapper.
-        await new TargetObserver(env.name).around(firstInvocation);
+        await new TargetObserver(
+          env.name,
+          "acquisition_cut",
+          maintenanceOwner(),
+        ).around(firstInvocation);
         expect(await counts(env)).toEqual({
           packages: 1,
           directions: 0,
@@ -3392,6 +4052,173 @@ suite("connected fixture105 native ownership", () => {
           });
           await env.close();
         }
+      },
+    ),
+    LIMIT,
+  );
+
+  it(
+    "identifies a held client while preserving target isolation refusal",
+    caseBody(
+      "identifies a held client while preserving target isolation refusal",
+      async () => {
+        const env = await fresh();
+        const descriptor = Object.getOwnPropertyDescriptor(
+          pg.Client.prototype,
+          "query",
+        );
+        if (descriptor === undefined)
+          throw new Error("driver method unavailable");
+        const before = observedLists();
+        const receipts = join(
+          validateConnectedFixture105ExecutionRoot(),
+          "receipts",
+        );
+        const beforeReceipts = readdirSync(receipts).sort();
+        const holder = new pg.Client({
+          connectionString: env.runtimeUrl,
+          options: "-c role=desk_runtime",
+          connectionTimeoutMillis: 10000,
+          query_timeout: 20000,
+        });
+        let holderError = false;
+        const onHolderError = (): void => {
+          holderError = true;
+        };
+        holder.on("error", onHolderError);
+        let pid: number | undefined;
+        let rejectionIdentity = false;
+        let wrapperRestored = false;
+        let heldPidContinuity = false;
+        let hiddenOriginProvisional = false;
+        let cleanupComplete = false;
+        // Cleanup is registered before connect; the holder stays live through the supplemental read.
+        await withTestCleanup(
+          async () => {
+            expect(maintenanceLatch.used).toBe(false);
+            await holder.connect();
+            const identity = await holder.query<{ pid: number }>(
+              "SELECT pg_backend_pid() AS pid",
+            );
+            expect(identity.rows).toHaveLength(1);
+            pid = identity.rows[0]?.pid;
+            expect(targetInt(pid, 1)).toBe(true);
+            if (pid === undefined) throw new Error("held client PID missing");
+            expect(holderError).toBe(false);
+            const observer = new TargetObserver(
+              env.name,
+              "held_client_control",
+              maintenanceOwner(),
+            );
+            let original: unknown;
+            let refused = false;
+            let outer: unknown;
+            try {
+              await observer.around(async () => {
+                try {
+                  await runConnectedFixture105();
+                } catch (error) {
+                  refused = true;
+                  original = error;
+                  throw error;
+                }
+              });
+            } catch (error) {
+              outer = error;
+            }
+            expect(refused).toBe(true);
+            expect(outer === original).toBe(true);
+            expect(original instanceof ConnectedFixture105Refusal).toBe(true);
+            if (!(original instanceof ConnectedFixture105Refusal))
+              throw new Error("held client actual refusal missing");
+            expect(original.code === "fixture_target_isolation").toBe(true);
+            expect(cleanupFailures.has(original)).toBe(false);
+            rejectionIdentity = true;
+            expect(
+              Object.getOwnPropertyDescriptor(pg.Client.prototype, "query"),
+            ).toEqual(descriptor);
+            wrapperRestored = true;
+            observer.assertHeldClient(pid);
+            hiddenOriginProvisional = true;
+            const continued = await holder.query<{ pid: number }>(
+              "SELECT pg_backend_pid() AS pid",
+            );
+            expect(continued.rows).toEqual([{ pid }]);
+            expect(holderError).toBe(false);
+            heldPidContinuity = true;
+            const after = observedLists();
+            expect(after.targets.length).toBe(before.targets.length);
+            expect(after.pre_target_failures.length).toBe(
+              before.pre_target_failures.length + 1,
+            );
+          },
+          async () => {
+            await withTestCleanup(
+              async () => {
+                await withTestCleanup(
+                  async () => {
+                    try {
+                      await holder.end(); // Exactly once; settlement alone is not a remote-termination proof.
+                    } finally {
+                      holder.removeListener("error", onHolderError);
+                    }
+                    expect(holderError).toBe(false);
+                    expect(await counts(env)).toEqual({
+                      packages: 0,
+                      directions: 0,
+                      intents: 0,
+                      gates: 0,
+                      audits: 0,
+                    });
+                    await expectConstructionRollback(env);
+                    expect(
+                      canonicalJson(readdirSync(receipts).sort()) ===
+                        canonicalJson(beforeReceipts),
+                    ).toBe(true);
+                  },
+                  async () => {
+                    await withTestCleanup(
+                      async () => {
+                        await env.close();
+                      },
+                      async () => {
+                        if (pid !== undefined) {
+                          const absent = await requireCluster().admin.query<{
+                            absent: boolean;
+                          }>(
+                            "SELECT NOT EXISTS (SELECT 1 FROM pg_stat_activity WHERE pid = $1::integer) AS absent",
+                            [pid],
+                          );
+                          expect(absent.rows).toEqual([{ absent: true }]);
+                        } else {
+                          throw new Error(
+                            "held client cleanup PID unavailable",
+                          );
+                        }
+                      },
+                    );
+                  },
+                );
+                cleanupComplete = true;
+              },
+              () => {
+                const line = `FIXTURE_HELD_CLIENT_CONTROL ${JSON.stringify({
+                  schema: "fixture-held-client-control/1",
+                  case: "identifies a held client while preserving target isolation refusal",
+                  rejectionIdentity,
+                  wrapperRestored,
+                  heldPidContinuity,
+                  hiddenOriginProvisional,
+                  cleanupComplete,
+                })}\n`;
+                if (Buffer.byteLength(line) > 1024)
+                  throw new Error("held client witness bound");
+                process.stderr.write(line);
+                return Promise.resolve();
+              },
+            );
+          },
+        );
       },
     ),
     LIMIT,

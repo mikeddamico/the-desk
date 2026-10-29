@@ -688,7 +688,8 @@ def guard(args):
                'writer': ['test/unit/writer-fixture-input.test.ts'],
                'rest': ['--exclude', test, '--exclude', 'test/unit/writer-fixture-input.test.ts'],
                'focused': [test],
-               'target-diagnostic': ['test/unit/connected-fixture105.test.ts', 'test/integration/connected-fixture105.test.ts'],
+               'target-diagnostic': ['test/integration/connected-fixture105.test.ts',
+                   '--testNamePattern', '^connected fixture105 native ownership identifies a held client while preserving target isolation refusal$'],
                'parity': ['test/unit/fixture-pack-extraction-parity.test.ts'], 'p33': ['test/unit/fixture-pack-extraction-parity.test.ts',
                    '--testNamePattern', '^P28-P37 legacy formats, freshness and discarded faults P33 multidisk$']}
     command = [node, str(ROOT/'node_modules/vitest/vitest.mjs'), 'run', *filters[args.profile]]
