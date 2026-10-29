@@ -1,6 +1,59 @@
 # Connected evaluation fixture
 
-This fixed, fully disclosed fictional fixture connects actual deterministic Claims/Writing evaluation to persisted Performance Direction and a labelled audit-interface stub. It is conformance evidence only. H04/H13 semantic acceptance remains unestablished. Render, READY, production, models and audio remain outside the path. This source proposal has not been executed or validated.
+This fixed, fully disclosed fictional fixture connects actual deterministic Claims/Writing evaluation to persisted Performance Direction and a labelled audit-interface stub. It is conformance evidence only. H04/H13 semantic acceptance remains unestablished. Render, READY, production, models and audio remain outside the path. Source-only and UNRUN statements in the historical sections below describe their recorded preparation phase; current validation status follows.
+
+## Current normal-validation candidate (pending)
+
+[CI122, run 40801832684](https://github.com/mikeddamico/the-desk/actions/runs/40801832684)
+passed all 20 observer fake groups and the one held-client native control at
+[commit 4100d03e65b7a1a4e317850a5a29149e7c24b234](https://github.com/mikeddamico/the-desk/commit/4100d03e65b7a1a4e317850a5a29149e7c24b234),
+tree `5658e7d08afceed8ac50d7fd8edc9ccaa27c200e`. Its 31 independent evidence
+checks verified the controlled refusal, original hidden/inconclusive metadata,
+later provisional client classification and cleanup. That intentionally
+incomplete diagnostic run did not identify CI120's unexpected backend, prove
+a historical fix or satisfy normal full acceptance.
+
+This continuation restores the ordinary writer/rest acceptance workflow and
+removes the temporary diagnostic stage and profile. Both jobs run their
+aggregate stage and then `check all` under default success gating. Always-gated
+full evidence collection, uploads, security retention and final joint proof
+remain required. Guard limits, database feed restrictions and all strict
+isolation and cleanup predicates remain unchanged. Ordinary successful guard
+and wrapper exits must both be zero; the existing post-evidence HOLD remains
+binding when required records are missing.
+
+The 20 fake groups now run unconditionally at the start of native `beforeAll`,
+once when the suite actually executes. A suite skipped without a database does
+not claim their coverage. Fake output capture/restoration and the single
+`fixture-target-selftest/2` groups 20/passed 20 marker stay unchanged. The groups
+are assertions inside the hook, not 20 additional Vitest cases.
+
+All 34 permanent native cases remain in their established order, with the
+held-client control last. Its continuously owned client supplies control-only
+corroboration; the original unknown metadata and later
+`client/provisional/hidden_origin` classification remain truthful. Expected
+inconclusive diagnostic metadata is not itself a failed test. Earlier scopes
+may emit additional summaries during full execution. The held case requires
+the shared maintenance latch to be unused. If an earlier genuine failure has
+consumed it, preserve that failure and let the held precondition fail; never
+reset the latch, repeat the observation or skip the assertion.
+
+Normal required coverage remains 58 unit plus 34 native connected cases, 3,781
+rest cases and 4,908 writer cases: 8,689 total, with 80 aggregate files and all
+29 integration files. Require a complete 34-case native journal, every declared
+invocation and receipt, no skipped/todo tests, settled cleanup, source
+preservation, security checks and final joint proof on one exact candidate.
+CI122's partial journal cannot substitute for that evidence.
+
+This restored candidate has not run its static checks or normal full
+validation. Actual-source review, bounded static checks and final binding
+review precede publication and one separately authorized, naturally triggered
+normal acceptance workflow. Diagnose any retained failure before a specific
+reviewed correction; do not retry an unchanged candidate. A future full pass
+would establish current candidate acceptance while CI120's cause remains
+unknown. Merge requires independent exact-final-commit review and fresh checks.
+Assembly design may proceed independently; assembly implementation, live audio,
+genuine semantic admission and deployment remain outside this change.
 
 ## Subject, context and release
 
@@ -181,7 +234,7 @@ Temporary diagnostic selections and holds have been removed; the original full
 writer/rest partitions, count gates, security/artifact requirements and final
 joint proof remain required on the final independently reviewed commit.
 
-### CI120 bounded diagnostic candidate (temporary, HOLD only)
+### Historical CI120 bounded diagnostic candidate (temporary, HOLD only)
 
 CI120 retained one extra backend at unknown-construction target observation 2,
 with all other predicates true. Its backend identity is unknown; the preseed
@@ -249,7 +302,7 @@ privilege/logging change, assembly, READY or publication authority follows. The
 seven changed source owners and exact invocation need review before execution;
 source/release/root bindings must be generated freshly from that candidate.
 
-### Failure-triggered maintenance observation: source-only candidate
+### Historical failure-triggered maintenance observation: source-only candidate
 
 Based on published PR39 head `92455173d1301a91a2b2ef0d427a5c6447d85b94`.
 CI121's 91/91 diagnostic was nonreproduction, not a fix. CI120's unexpected
@@ -310,7 +363,7 @@ fake groups or seek reproduction.
 The stopping condition is reviewed evidence improvement, never a claimed fix
 or green full CI. Existing temporary HOLD workflow/launcher and ci.py are intact.
 
-## Held-client control, revision 2 (source preparation; UNRUN)
+## Historical held-client control, revision 2 (source preparation; UNRUN)
 
 This continuation adds the permanent native case `identifies a held client while
 preserving target isolation refusal`, registered last with exactly one

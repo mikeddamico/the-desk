@@ -878,7 +878,7 @@ class TargetObserver {
     }
   }
 
-  /** All 20 groups are unrun in this source-only candidate; native validation is deferred.
+  /** All 20 groups passed in CI122; normal-route coverage is pending for this candidate.
    * Fake-driver output never reaches retained native evidence.
    */
   static async selftest(): Promise<void> {
@@ -1169,7 +1169,7 @@ class TargetObserver {
       ).rejects.toBe(primary);
       expect(cleanupFailures.get(primary)?.length).toBe(1);
       done(12);
-      // Groups 13–20 are deferred: this native beforeAll has no fake-only launcher.
+      // Groups 13–20 cover maintenance correlation; CI122 passed all 20 groups.
       const started = "2026-10-28T00:00:00.000002Z";
       const origin = row(["client"]);
       origin.other_backend_sample = [
@@ -1957,8 +1957,7 @@ suite("connected fixture105 native ownership", () => {
   const isolatedClusters: TrackedFixtureCluster[] = [];
 
   beforeAll(async () => {
-    if (process.env.DESK_P33_PROFILE === "target-diagnostic")
-      await TargetObserver.selftest();
+    await TargetObserver.selftest();
     if (bootstrapUrl === undefined)
       throw new Error("TEST_DATABASE_URL required");
     const savedBinding = process.env.DESK_FIXTURE105_BINDING;

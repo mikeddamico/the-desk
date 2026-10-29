@@ -89,15 +89,10 @@ jobs:
           path: ${{ runner.temp }}/ci/upload-controls
           if-no-files-found: error
           retention-days: 30
-      - name: Bounded CI120 diagnostic (HOLD only)
-        id: diagnostic120
-        run: /bin/bash tools/ci-validation/run-stage.sh diagnostic120
-        timeout-minutes: 122
       - name: Guard P33 aggregate (all)
         run: /bin/bash tools/ci-validation/run-stage.sh all
         timeout-minutes: 122
       - name: Validate aggregate counts, coverage and source
-        if: ${{ always() && steps.diagnostic120.outcome != 'skipped' && steps.init.outcome == 'success' && env.DESK_CI_PARTITION == 'rest' }}
         run: /usr/bin/python3 -I -B tools/ci-validation/ci.py check all
         timeout-minutes: 2
       - name: Collect full evidence
@@ -233,15 +228,10 @@ jobs:
           path: ${{ runner.temp }}/ci/upload-controls
           if-no-files-found: error
           retention-days: 30
-      - name: Bounded CI120 diagnostic (HOLD only)
-        id: diagnostic120
-        run: /bin/bash tools/ci-validation/run-stage.sh diagnostic120
-        timeout-minutes: 122
       - name: Guard P33 aggregate (all)
         run: /bin/bash tools/ci-validation/run-stage.sh all
         timeout-minutes: 122
       - name: Validate aggregate counts, coverage and source
-        if: ${{ always() && steps.diagnostic120.outcome != 'skipped' && steps.init.outcome == 'success' && env.DESK_CI_PARTITION == 'rest' }}
         run: /usr/bin/python3 -I -B tools/ci-validation/ci.py check all
         timeout-minutes: 2
       - name: Collect full evidence

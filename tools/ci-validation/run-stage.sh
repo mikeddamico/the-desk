@@ -1,7 +1,7 @@
 #!/bin/bash
 # Fixed-stage envelope around the UNCHANGED P33 guard (test/support/p33-parity-supervisor.py).
 # Hosted ubuntu-24.04 VM only; never run it elsewhere.
-# One argument: prerequisite | focused | all | diagnostic120. The last is a temporary HOLD-only alias.
+# One argument: prerequisite | focused | all. No other input selects a command or profile.
 # The disposable VM is the outer containment boundary; this wrapper adds only: a wall ceiling,
 # core 0, a 64 MiB per-file ceiling, a sanitized environment, exclusive capture files, and the
 # real exit status (never swallowed, never --preserve-status).
@@ -21,12 +21,10 @@ set -C   # noclobber: every capture file below is created exclusively; an existi
 umask 077
 
 if [ "$#" -ne 1 ]; then
-  echo "usage: run-stage.sh <prerequisite|focused|all|diagnostic120>" >&2
+  echo "usage: run-stage.sh <prerequisite|focused|all>" >&2
   exit 64
 fi
 STAGE=$1
-DIAGNOSTIC120=false
-if [ "$STAGE" = diagnostic120 ]; then STAGE=all; DIAGNOSTIC120=true; fi
 case "$STAGE" in
   prerequisite) CEILING=30 ;;
   focused) CEILING=120 ;;
@@ -37,13 +35,8 @@ case "${DESK_CI_PARTITION:-}" in
   writer|rest) ;;
   *) echo "explicit writer/rest partition required" >&2; exit 64 ;;
 esac
-if [ "$DIAGNOSTIC120" = true ] && [ "$DESK_CI_PARTITION" = writer ]; then
-  echo "HOLD: diagnostic120 writer path launches no tests" >&2
-  exit 78
-fi
 PROFILE=$STAGE
 if [ "$STAGE" = all ]; then PROFILE=$DESK_CI_PARTITION; fi
-if [ "$DIAGNOSTIC120" = true ]; then PROFILE=target-diagnostic; fi
 KILL_AFTER=20          # seconds after TERM before KILL
 CAP_KIB=65536          # bash 'ulimit -f' unit is 1024-byte blocks (bash default mode): 65536 KiB
 CAP_BYTES=67108864     # 64 MiB; verified below against the kernel's own byte-denominated record
@@ -113,7 +106,7 @@ fi
 # The child shell: read one line from the pipe, export it only for stage all, then exec the timeout-wrapped guard
 # with stdin from /dev/null. Single-quoted on purpose: $1/$2 are the child's positional parameters.
 CHILD='IFS= read -r DB_LINE || DB_LINE=""
-if [ "$1" = rest ] || [ "$1" = target-diagnostic ]; then
+if [ "$1" = rest ]; then
   [ -n "$DB_LINE" ] || exit 75
   export TEST_DATABASE_URL="$DB_LINE"
 fi
@@ -122,7 +115,7 @@ exec /usr/bin/timeout --signal=TERM --kill-after=20 "$2" /usr/bin/python3 test/s
 
 cd "$ROOT" || fail_prelaunch "cd"
 # Sanitized environment: nothing is inherited except what is listed (RUNNER_TRACKING_ID is preserved).
-if [ "$PROFILE" = rest ] || [ "$PROFILE" = target-diagnostic ]; then DB_FEED=$TEST_DATABASE_URL; else DB_FEED=""; fi
+if [ "$PROFILE" = rest ]; then DB_FEED=$TEST_DATABASE_URL; else DB_FEED=""; fi
 printf '%s\n' "$DB_FEED" | /usr/bin/env -i \
   PATH="$NODE_BIN:/usr/bin:/bin" HOME="$CI_DIR/home" TMPDIR="$CI_DIR/tmp" \
   LANG=C.UTF-8 LC_ALL=C.UTF-8 TZ=UTC CI=true DESK_FIXTURE105_BINDING="$FIXTURE_BINDING" \
@@ -138,12 +131,7 @@ snapshot_processes "$STAGE_DIR/ps-post.txt"
 PS_POST=$?
 list_attempts > "$STAGE_DIR/post-attempts" || POST_FAIL=1
 printf 'ps-pre %s\nps-post %s\n' "$PS_PRE" "$PS_POST" > "$STAGE_DIR/snapshot-status.txt" || POST_FAIL=1
-EXIT_FAIL=0
-if [ "$DIAGNOSTIC120" = true ]; then
-  printf '%s\n' "$RC" > "$STAGE_DIR/exit" || EXIT_FAIL=1
-else
-  printf '%s\n' "$RC" > "$STAGE_DIR/exit" || exit 77
-fi
+printf '%s\n' "$RC" > "$STAGE_DIR/exit" || exit 77
 
 case "$RC" in
   124) echo "HOLD: command ceiling reached (timeout status 124)" >&2 ;;
@@ -152,10 +140,6 @@ case "$RC" in
 esac
 if [ "$PS_PRE" -ne 0 ] || [ "$PS_POST" -ne 0 ]; then
   echo "NOTE: a supplemental ps snapshot failed (pre=$PS_PRE post=$PS_POST); recorded in snapshot-status.txt as a warning, not as ownership evidence" >&2
-fi
-if [ "$DIAGNOSTIC120" = true ]; then
-  echo "HOLD: diagnostic120 only; actual guard exit $RC; post-capture failure $POST_FAIL; exit-record failure $EXIT_FAIL; full aggregate acceptance unavailable" >&2
-  exit 78
 fi
 if [ "$RC" -eq 0 ] && [ "$POST_FAIL" -ne 0 ]; then
   echo "HOLD: command exited 0 but a required post-run record could not be written" >&2

@@ -1071,31 +1071,53 @@ class WorkflowShape(unittest.TestCase):
         self.assertNotIn('db:reset', text)
         self.assertNotIn('db:load-fixture', text)
         self.assertNotIn('workflow_dispatch', text)
-        self.assertEqual(text.count('id: diagnostic120'), 2)
-        self.assertEqual(text.count('run-stage.sh diagnostic120'), 2)
-        condition = "if: ${{ always() && steps.diagnostic120.outcome != 'skipped' && steps.init.outcome == 'success' && env.DESK_CI_PARTITION == 'rest' }}"
-        self.assertEqual(text.count(condition), 2)
+        self.assertNotIn('diagnostic120', text)
+        self.assertNotIn('target-diagnostic', text)
+        normal = ('      - name: Guard P33 aggregate (all)\n'
+                  '        run: /bin/bash tools/ci-validation/run-stage.sh all\n'
+                  '        timeout-minutes: 122\n'
+                  '      - name: Validate aggregate counts, coverage and source\n'
+                  '        run: /usr/bin/python3 -I -B tools/ci-validation/ci.py check all\n'
+                  '        timeout-minutes: 2\n')
         for job in (text.split('  verify-writer:', 1)[1].split('  verify-rest:', 1)[0],
                     text.split('  verify-rest:', 1)[1].split('  container:', 1)[0]):
             with self.subTest(job=job.splitlines()[0]):
-                self.assertLess(job.index('id: upload-controls'), job.index('id: diagnostic120'))
-                self.assertLess(job.index('id: diagnostic120'), job.index('name: Guard P33 aggregate (all)'))
-                self.assertLess(job.index('run-stage.sh all'), job.index(condition))
-                diagnostic = job[job.index('id: diagnostic120'):job.index('name: Guard P33 aggregate (all)')]
-                self.assertIn('timeout-minutes: 122', diagnostic)
-                self.assertNotIn('if:', diagnostic)
+                self.assertEqual(job.count('run-stage.sh all'), 1)
+                self.assertEqual(job.count('ci.py check all'), 1)
+                self.assertEqual(job.count(normal), 1)
+                stages = ['run-stage.sh prerequisite', 'run-stage.sh focused', 'id: upload-controls',
+                          'run-stage.sh all', 'ci.py check all', 'id: collect-full', 'id: upload-full',
+                          'id: audit', 'id: gitleaks', 'id: retain-security', 'id: upload-security', 'id: final']
+                offsets = [job.index(stage) for stage in stages]
+                self.assertEqual(offsets, sorted(offsets))
+                aggregate = job[job.index('name: Guard P33 aggregate (all)'):job.index('name: Collect full evidence')]
+                self.assertNotIn('if:', aggregate)  # Both steps retain default success() gating.
+                self.assertNotIn('continue-on-error', job)
+                for exact in ("id: collect-full\n        if: ${{ always() && steps.init.outcome != 'skipped' }}",
+                              "id: upload-full\n        if: ${{ always() && steps.collect-full.outcome == 'success' }}",
+                              "id: retain-security\n        if: ${{ always() && steps.gitleaks.outcome != 'skipped' }}",
+                              "id: upload-security\n        if: ${{ always() && steps.retain-security.outcome == 'success' }}",
+                              "id: final\n        if: ${{ always() && steps.init.outcome != 'skipped' }}"):
+                    self.assertIn(exact, job)
         wrapper = (HERE / 'run-stage.sh').read_text()
         guard = (ci.ROOT / 'test/support/p33-parity-supervisor.py').read_text()
-        self.assertIn("'target-diagnostic': ['test/integration/connected-fixture105.test.ts',\n                   '--testNamePattern', '^connected fixture105 native ownership identifies a held client while preserving target isolation refusal$']", guard)
-        self.assertIn('if [ "$STAGE" = diagnostic120 ]; then STAGE=all; DIAGNOSTIC120=true; fi', wrapper)
-        self.assertIn('if [ "$DIAGNOSTIC120" = true ]; then PROFILE=target-diagnostic; fi', wrapper)
-        self.assertLess(wrapper.index('diagnostic120 writer path launches no tests'), wrapper.index('ci.py" precheck'))
+        for retired in ('diagnostic120', 'DIAGNOSTIC120', 'target-diagnostic', 'EXIT_FAIL'):
+            self.assertNotIn(retired, wrapper)
+        self.assertNotIn('target-diagnostic', guard)
+        self.assertIn('usage: run-stage.sh <prerequisite|focused|all>', wrapper)
+        self.assertIn('if [ "$STAGE" = all ]; then PROFILE=$DESK_CI_PARTITION; fi', wrapper)
+        self.assertIn('if [ "$1" = rest ]; then', wrapper)
+        self.assertIn('if [ "$PROFILE" = rest ]; then DB_FEED=$TEST_DATABASE_URL; else DB_FEED=""; fi', wrapper)
         self.assertIn('all) CEILING=7200', wrapper)
         self.assertIn('--signal=TERM --kill-after=20', wrapper)
         self.assertIn('CAP_BYTES=67108864', wrapper)
         self.assertIn('core %s', wrapper)
-        self.assertLess(wrapper.index('"$RC" > "$STAGE_DIR/exit"'), wrapper.index('diagnostic120 only; actual guard exit $RC'))
-        self.assertIn('exit 78', wrapper[wrapper.index('diagnostic120 only; actual guard exit $RC'):])
+        self.assertIn("printf '%s\\n' \"$RC\" > \"$STAGE_DIR/exit\" || exit 77", wrapper)
+        post = ('if [ "$RC" -eq 0 ] && [ "$POST_FAIL" -ne 0 ]; then\n'
+                '  echo "HOLD: command exited 0 but a required post-run record could not be written" >&2\n'
+                '  exit 78\nfi\nexit "$RC"\n')
+        self.assertTrue(wrapper.endswith(post))
+        self.assertLess(wrapper.index('"$RC" > "$STAGE_DIR/exit"'), wrapper.index(post))
 
 
     def test_partial_artifacts_are_still_uploaded_and_upload_failure_gates_the_aggregate(self):
@@ -2072,7 +2094,7 @@ class Partition155Tests(unittest.TestCase):
         self.assertNotIn('matrix:', workflow)
         wrapper = (ci.ROOT / 'tools/ci-validation/run-stage.sh').read_text()
         self.assertIn('all) CEILING=7200', wrapper)
-        self.assertIn('if [ "$PROFILE" = rest ] || [ "$PROFILE" = target-diagnostic ]; then DB_FEED=$TEST_DATABASE_URL; else DB_FEED=""; fi', wrapper)
+        self.assertIn('if [ "$PROFILE" = rest ]; then DB_FEED=$TEST_DATABASE_URL; else DB_FEED=""; fi', wrapper)
         self.assertIn('/bin/bash -c "$CHILD" _ "$PROFILE" "$CEILING"', wrapper)
         self.assertEqual(workflow.count('id: gitleaks'), 2)
         self.assertEqual(workflow.count('id: audit'), 2)
@@ -2084,17 +2106,21 @@ class FixtureTargetObserverShapeTests(unittest.TestCase):
     def test_held_client_control_route_registration_and_cleanup_are_closed(self):
         name = 'identifies a held client while preserving target isolation refusal'
         native = (ci.ROOT / 'test/integration/connected-fixture105.test.ts').read_text()
-        guard = ast.parse((ci.ROOT / 'test/support/p33-parity-supervisor.py').read_text())
+        guard_source = (ci.ROOT / 'test/support/p33-parity-supervisor.py').read_text()
+        guard = ast.parse(guard_source)
         filters = [node.value for node in ast.walk(guard) if isinstance(node, ast.Assign)
                    and any(isinstance(target, ast.Name) and target.id == 'filters' for target in node.targets)]
         self.assertEqual(len(filters), 1)
         self.assertIsInstance(filters[0], ast.Dict)
-        routes = [value for key, value in zip(filters[0].keys, filters[0].values)
-                  if isinstance(key, ast.Constant) and key.value == 'target-diagnostic']
-        self.assertEqual(len(routes), 1)
-        self.assertEqual(ast.literal_eval(routes[0]), [
-            'test/integration/connected-fixture105.test.ts', '--testNamePattern',
-            '^connected fixture105 native ownership ' + name + '$'])
+        routes = {key.value: value for key, value in zip(filters[0].keys, filters[0].values)
+                  if isinstance(key, ast.Constant)}
+        self.assertEqual(set(routes), {'focused', 'p33', 'parity', 'unit', 'integration', 'all', 'writer', 'rest'})
+        self.assertIn("    test = 'test/unit/p33-parity-harness.test.ts'", guard_source)
+        self.assertEqual(ast.literal_eval(routes['writer']), ['test/unit/writer-fixture-input.test.ts'])
+        for profile, expression in (('all', "['--exclude', test]"),
+                                    ('rest', "['--exclude', test, '--exclude', 'test/unit/writer-fixture-input.test.ts']")):
+            self.assertEqual(ast.dump(routes[profile]), ast.dump(ast.parse(expression, mode='eval').body))
+        self.assertNotIn('target-diagnostic', guard_source)
         self.assertEqual(ci.FIXTURE_CONNECTED_COUNTS, {
             'test/unit/connected-fixture105.test.ts': 58,
             'test/integration/connected-fixture105.test.ts': 34})
@@ -2167,7 +2193,11 @@ class FixtureTargetObserverShapeTests(unittest.TestCase):
         self.assertIn('const TARGET_OBSERVER_CAP = 64;', native)
         observer = native[native.index('class TargetObserver'):native.index('  /** All 20 groups')]
         selftest = native[native.index('  static async selftest()'):native.index('// pg-pool attaches release')]
-        self.assertIn('if (process.env.DESK_P33_PROFILE === "target-diagnostic")\n      await TargetObserver.selftest();', native)
+        before_all = native[native.index('  beforeAll(async () => {'):native.index('  type ConfigSeed =')]
+        self.assertEqual(native.count('await TargetObserver.selftest();'), 1)
+        self.assertTrue(before_all.startswith('  beforeAll(async () => {\n    await TargetObserver.selftest();\n'))
+        self.assertLess(before_all.index('await TargetObserver.selftest();'), before_all.index('await cluster.bootstrap();'))
+        self.assertNotRegex(native, r"""(["'])target-diagnostic\1""")
         self.assertIn('capture.mockRestore();', selftest)
         self.assertIn('expect(groups).toBe(20);', selftest)
         self.assertLess(selftest.rindex('capture.mockRestore();'), selftest.index("process.stderr.write(\n      'FIXTURE_TARGET_DIAGNOSTIC_SELFTEST"))
@@ -2239,7 +2269,7 @@ class FixtureTargetObserverShapeTests(unittest.TestCase):
         self.assertIn("'backend_start_utc', sample.backend_start_utc", sql)
         self.assertIn('fixture-target-selftest/2', selftest)
         self.assertIn('"groups":20,"passed":20', selftest)
-        self.assertIn('All 20 groups are unrun', native)
+        self.assertIn('All 20 groups passed in CI122; normal-route coverage is pending for this candidate.', native)
         self.assertIn('Buffer.byteLength(extra) > 2048', observer)
         for group in range(13, 21):
             with self.subTest(group=group):
