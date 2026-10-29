@@ -6,3 +6,10 @@ coverage/
 fixtures/frozen-render046-input/evidence_package.json
 fixtures/frozen-render046-input/INPUT-SUPPORT.json
 fixtures/frozen-render046-input/showrunner_brief.json
+# Exact canonical bytes are checked by technical-master acquisition and vectors.
+fixtures/technical-master-admission/context.json
+fixtures/technical-master-admission/map.json
+fixtures/technical-master-admission/policy.json
+fixtures/technical-master-admission/profile.json
+fixtures/technical-master-admission/recipe.json
+fixtures/technical-master-admission/SOURCE.json

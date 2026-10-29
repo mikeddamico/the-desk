@@ -793,6 +793,39 @@ describe("technical master admission", () => {
     expect(() => checkSilence(subject)).toThrow("silence_policy_invalid");
   });
   it("matches independent canonical vectors and makes stale mutated identities unusable", async () => {
+    const canonicalFilePins = {
+      "context.json":
+        "aff958362c5a40a2af7899821627521c5722cfaac902b46373eda18ed61fd9fc",
+      "map.json":
+        "0ac6f83cdedc43add2f0f51906901457bfa6d5c400933e3c0594b1da931cf4a9",
+      "policy.json":
+        "51cdf7c9377a05cd5360e81f1a8c511bc3c12505da40d0d329e8ae2755052e9c",
+      "profile.json":
+        "f5eaa2e3c7294030e78bfced2c5f7e983142fb95679a840930289aa5252fbfae",
+      "recipe.json":
+        "06a1cca7f09736cf1b58006f79a7c25381bb278d439bf62266c2b9e604ab84e2",
+      "SOURCE.json":
+        "af3dbc7ed4e8998f92dec9606e4922c85852d098453a4d859ef2a86b93a34706",
+    };
+    const formatterIgnore = (
+      await fs.readFile(
+        new URL("../../.prettierignore", import.meta.url),
+        "utf8",
+      )
+    ).split(/\r?\n/u);
+    expect(
+      sha(await fs.readFile(new URL("SOURCE-FILE-MANIFEST.json", root))),
+    ).toBe("3b2ee2b90bc7a1e1ccfc36c0cff857cce06b5134bb0f066913805af1c7241123");
+    for (const [name, pin] of Object.entries(canonicalFilePins)) {
+      const bytes = await fs.readFile(new URL(name, root));
+      expect(sha(bytes)).toBe(pin);
+      expect(bytes.toString("utf8")).toBe(
+        canonicalJson(JSON.parse(bytes.toString("utf8")) as unknown) + "\n",
+      );
+      expect(formatterIgnore).toContain(
+        "fixtures/technical-master-admission/" + name,
+      );
+    }
     const packet = object(
       JSON.parse(
         await fs.readFile(new URL("LITERALS-AND-VECTORS.json", root), "utf8"),

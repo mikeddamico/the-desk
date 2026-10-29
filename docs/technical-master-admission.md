@@ -19,6 +19,7 @@ Pack: 832024bytes, SHA256 7e1bb1108cdd84e47269b9ab2dab20ba934fcec64d44262f86d2b5
 synthetic60-positive: acquire exactly the separately reviewed SOURCE.json, input-1.wav, input-2.wav, master.wav, recipe/map/context/policy/profile canonical records in the appendix. SHA256 of raw SOURCE.json including its single final LF is af3dbc7ed4e8998f92dec9606e4922c85852d098453a4d859ef2a86b93a34706. This source contains required block order, authored synthetic selection records and runtime provenance. Its records say selected_for_synthetic_test under authored-synthetic-selection/1; they are not take_selections database approvals, provider responses or TTS requests. No reservation/event/take history is fabricated. Compatible Assembly lineage is recomputed from these frozen records under that explicitly different authority.
 
 Existing source-owner raw SHA256 at baseline:
+
 - src/runtime/frozen-fixture046-master.ts: 98e5ebf4175d8710f9ce12a71617ca58dca132c67fd2a4d94e8914c8b111e0d0
 - src/runtime/audio-measurements.ts: 28f98623855fb6283abb1ac052db2b7a0d1d169bea89ca88f5511a88854244bd
 - src/identity/fingerprints.ts: ffa2ae1efec88cfeead7446fa5b668653cdd9618c735a10c353a354ce4d930e5
@@ -41,6 +42,7 @@ No sparse arrays or duplicate object keys. Raw new JSON must equal UTF8(canonica
 Use existing canonicalJson/canonicalBytes/domainHash. The exact hashed preimage is ASCII domain + one LF byte + canonical UTF8 JSON, with NO final LF after JSON. Physical JSON files have one final LF; raw file SHA256 is a different identity. The independent appendix contains complete canonical preimages, byte lengths and hashes, not merely formulas.
 
 New separate dependent-contract helpers/domains (explicit proposal, not an edit to fingerprint StageName):
+
 - technical-master-selected-inputs-v1: exactly {schema,inputs}; input fields exactly the ordered records in the appendix. Every identity/hash/frame count must independently match its recipe position, map segment and source authority.
 - technical-master-context-v1: exactly the context keys/union variants shown, binding source, required block order, selection authority, runtime/configuration provenance and explained intervals.
 - technical-master-policy-v1 and technical-master-measurement-profile-v1: the complete closed policy/profile bodies, not a caller-selected subset.
@@ -84,6 +86,8 @@ Process limits reuse the existing owned mechanism: inner120s TERM/20s KILL; oute
 ## 6. Closed output parsing
 
 Decode stdout is ASCII framehash v1, LF-terminated. Exact ordered headers:
+
+```text
 #format: frame checksums
 #version: 1
 #hash: SHA256
@@ -93,6 +97,7 @@ Decode stdout is ASCII framehash v1, LF-terminated. Exact ordered headers:
 #sample_rate 0: 48000
 #channel_layout_name 0: mono
 #stream#, dts,        pts, duration,     size, hash
+```
 
 -bitexact/+bitexact suppresses the optional software header. No extradata, extra stream/header, duplicate, S= side-data, unknown field, CR/NUL/non-ASCII or unterminated record is accepted. Each data line has exactly 6 comma-space-separated fields, with decimal left-padding spaces as pinned printf specifies: stream0, nonnegative dts, pts, positive duration, positive even size,64lowerhex hash. Integer lexical width after removing LEFT ASCII padding is1–20 digits with no sign/leading zeros except0. Require dts=pts=cumulative frames, duration=size/2 and continuous increasing coverage. For every packet hash the corresponding captured master PCM slice and require equality, then advance bytes/frames. Final sums must equal captured payload byte count and master frame count. At least one record; no partial hash or unchecked remainder.
 
