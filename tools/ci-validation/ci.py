@@ -44,12 +44,12 @@ ROOT = HERE.parents[1]
 WORKFLOW_REL = '.github/workflows/ci.yml'
 HARNESS_TEST = 'test/unit/p33-parity-harness.test.ts'
 INTEGRATION_PREFIX = 'test/integration/'
-EXPECTED_TEST_FILES = 81          # tracked *.test.ts files under test/
-EXPECTED_ALL_FILES = 80           # 81 minus the focused harness the `all` profile excludes
-EXPECTED_ALL_TESTS = 8689
+EXPECTED_TEST_FILES = 82          # tracked *.test.ts files under test/
+EXPECTED_ALL_FILES = 81           # 82 minus the focused harness the `all` profile excludes
+EXPECTED_ALL_TESTS = 8705
 EXPECTED_INTEGRATION_FILES = 29
 WRITER_TEST = 'test/unit/writer-fixture-input.test.ts'
-PARTITION_COUNTS = {'writer': (1, 4908, 0), 'rest': (79, 3781, 29)}
+PARTITION_COUNTS = {'writer': (1, 4908, 0), 'rest': (80, 3797, 29)}
 DB_NAME = 'the_desk_test'
 DB_URL = re.compile(r'postgresql://([^:@/\s]+):([^@/\s]+)@(localhost|127\.0\.0\.1):5432/' + DB_NAME)
 HEX40 = re.compile(r'[0-9a-f]{40}')
@@ -866,7 +866,7 @@ FIXTURE_NAME = 'desk-connected-fixture105'
 FIXTURE_BINDINGS = ('ADOPTION.json', 'RELEASE.json', 'SOURCE-INVENTORY.json', 'SOURCE-LEDGER.json', 'TOOLS-INVENTORY.json')
 FIXTURE_EFFECTS = ['construct_fixture_subject', 'evaluate_record_claims_writing', 'evaluate_record_performance', 'record_fixture_audit', 'readback_converge']
 FIXTURE_CONNECTED_COUNTS = {'test/unit/connected-fixture105.test.ts': 58, 'test/integration/connected-fixture105.test.ts': 34}
-FROZEN_RENDER046_COUNTS = {'test/unit/frozen-render046.test.ts': 40, 'test/unit/frozen-render046-responses.test.ts': 89}
+FROZEN_RENDER046_COUNTS = {'test/unit/frozen-render046.test.ts': 40, 'test/unit/frozen-render046-responses.test.ts': 89, 'test/unit/frozen-fixture046-master.test.ts': 16}
 FIXTURE_TEMP_NAME = re.compile(r'vitest\.config\.ts\.timestamp-[0-9]{1,16}-[0-9a-f]{0,32}\.mjs')
 FIXTURE_CACHE_HASH = 'da39a3ee5e6b4b0d3255bfef95601890afd80709'
 
@@ -1755,6 +1755,30 @@ def cmd_precheck(stage):
     return 0 if not problems else 1
 
 
+def fixture046_runtime_receipt(value):
+    """Closed fixture-specific operational evidence; no package/image bytes retained."""
+    keys = {'schema', 'status', 'profile_sha256', 'artifact_lock_sha256', 'image_id',
+            'identity_sha256', 'docker_cli', 'image_owned', 'containers', 'cleanup'}
+    if (not isinstance(value, dict) or set(value) != keys
+            or value['schema'] != 'fixture046-runtime-registration/1'
+            or value['status'] != 'ready' or value['image_owned'] is not True
+            or value['profile_sha256'] != '46705afa025f02bebf7248c78fed648408cf156ab791102d77c47287893e91a7'
+            or value['artifact_lock_sha256'] != 'b15c3dd040f41e9a60c9dc127a38003a2fc9083808f1c4cb1ec20f07cfa16485'
+            or value['docker_cli'] != '/usr/bin/docker'
+            or value['cleanup'] != 'containers_removed_image_retained'
+            or value['containers'] != ['desk-fixture046-signature-0', 'desk-fixture046-signature-1', 'desk-fixture046-runtime-prepare']
+            or not isinstance(value['image_id'], str) or not re.fullmatch(r'sha256:[0-9a-f]{64}', value['image_id'])):
+        raise RuntimeError('fixture046 runtime registration invalid')
+    lock = load_json(ROOT / 'fixtures/frozen-master046-toolchain/artifact-lock.json', JSON_LIMIT * 4)
+    expected = {'inventory': sorted(lock['installed_inventory'], key=lambda row: row['package']),
+                'executables': lock['executables'], 'libraries': lock['libraries'], 'loader': lock['loader'],
+                'version_capture_sha256': lock['version_capture_sha256'],
+                'build_configuration_sha256': lock['build_configuration_sha256']}
+    if value['identity_sha256'] != hashlib.sha256(json.dumps(expected, sort_keys=True, separators=(',', ':'), ensure_ascii=False).encode()).hexdigest():
+        raise RuntimeError('fixture046 identity mismatch')
+    return value
+
+
 def cmd_check(stage):
     base = ci_dir()
     ev = base / 'evidence'
@@ -1781,6 +1805,11 @@ def cmd_check(stage):
         errors.extend(stage_errors)
     except Exception as error:
         errors.append('evaluation exception: %s: %s' % (type(error).__name__, error))
+    if stage == 'all' and partition_label() == 'rest':
+        try:
+            facts['fixture046_runtime'] = fixture046_runtime_receipt(load_json(ev / 'fixture046-runtime.json', JSON_LIMIT))
+        except Exception as error:
+            errors.append('fixture046 runtime evidence refused: ' + type(error).__name__)
     if not record['ok']:
         errors.append('post-stage source binding failed')
     try:
@@ -1857,6 +1886,65 @@ COMMON_FILES = (('env.json', JSON_LIMIT * 4), ('identity.json', JSON_LIMIT), ('d
                 ('snapshot-pre.json', SNAPSHOT_LIMIT), ('bind-pre.json', JSON_LIMIT), ('bind-build.json', JSON_LIMIT))
 
 
+# Fixed synthetic-supply evidence only. No package/image payloads are retained.
+FIXTURE046_RUNTIME = Path('/tmp/the-desk-fixture046-runtime')
+FIXTURE046_SUPPLY_FILES = (
+    'acquisition.json', 'base-inventory.tsv', 'inventory.tsv', 'executables.txt',
+    'loader.txt', 'libraries.txt', 'library-paths.txt', 'ldd.txt', 'version.txt',
+    'build.txt', 'audit.txt', 'install-identify.stdout', 'install-identify.stderr',
+    'signature-0.stdout', 'signature-0.stderr', 'signature-1.stdout', 'signature-1.stderr',
+    'base-inspect.stdout', 'base-inspect.stderr', 'prepare-state.stdout', 'prepare-state.stderr',
+    'prepare-final.stdout', 'prepare-final.stderr', 'prepare-remove.stdout', 'prepare-remove.stderr',
+    'commit.stdout', 'commit.stderr', 'commit-inspect.stdout', 'commit-inspect.stderr',
+    'ownership.json',
+)
+
+
+def fixture046_keep_runtime(keep, evidence, scope):
+    keep.copy(evidence / 'fixture046-runtime.json', Path('fixture046-runtime.json'), JSON_LIMIT, required=True)
+    ready = False
+    registration = None
+    owner = None
+    try:
+        registration = load_json(evidence / 'fixture046-runtime.json', JSON_LIMIT)
+        if registration.get('status') == 'ready':
+            fixture046_runtime_receipt(registration)
+            ready = True
+    except Exception:
+        pass
+    if not ready:
+        keep.problems['errors'].append('fixture046 preparation is not ready; retention is partial')
+    for name in FIXTURE046_SUPPLY_FILES:
+        keep.copy(FIXTURE046_RUNTIME / name, Path('fixture046-runtime') / name, JSON_LIMIT * 16, required=ready)
+    if ready:
+        try:
+            owner = load_json(FIXTURE046_RUNTIME / 'ownership.json', JSON_LIMIT)
+            if (owner['schema'] != 'fixture046-supply-owner/1' or owner['preparation'] != 'ready'
+                    or owner['local'] is not False or owner['image_id'] != registration['image_id']
+                    or not re.fullmatch(r'[0-9a-f]{32}', owner['token'])
+                    or owner['image_handle'] != 'desk-fixture046-runtime:owned-' + owner['token']
+                    or owner['image_reserved'] is not True or owner['client_uncertain'] is not False
+                    or owner['command_pending'] is not False or owner['uncertain_command'] is not None
+                    or [entry['name'] for entry in owner['containers']] != registration['containers']
+                    or any(entry['removed'] is not True for entry in owner['containers'])):
+                raise RuntimeError('supply ownership mismatch')
+        except Exception:
+            keep.problems['errors'].append('fixture046 ready ownership is not corroborated')
+    if scope == 'full':
+        keep.copy(FIXTURE046_RUNTIME / 'cleanup.json', Path('fixture046-runtime/cleanup.json'), JSON_LIMIT, required=ready)
+        if ready:
+            try:
+                cleanup = load_json(FIXTURE046_RUNTIME / 'cleanup.json', JSON_LIMIT)
+                if (cleanup.get('schema') != 'fixture046-supply-cleanup/1'
+                        or cleanup.get('status') != 'complete' or cleanup.get('preparation') != 'ready'
+                        or cleanup.get('image_id') != registration['image_id']
+                        or cleanup.get('image_removed') is not True or cleanup.get('client_uncertain') is not False
+                        or not isinstance(owner, dict) or owner['image_removed'] is not True or owner['cleanup'] != 'complete'):
+                    raise RuntimeError('supply cleanup incomplete')
+            except Exception:
+                keep.problems['errors'].append('fixture046 runtime cleanup evidence is incomplete')
+
+
 def cmd_collect(scope):
     stages = SCOPES[scope]
     base = ci_dir()
@@ -1872,6 +1960,8 @@ def cmd_collect(scope):
             problems['errors'].append('partition binding: ' + type(error).__name__)
     for name, limit in COMMON_FILES:
         keep.copy(ev / name, Path(name), limit, required=True)
+    if partition_label() == 'rest':
+        fixture046_keep_runtime(keep, ev, scope)
     if partition_label() != 'all':
         keep.copy(ev / 'partition.json', Path('partition.json'), JSON_LIMIT, required=True)
     verdicts, successful, not_attempted = {}, {}, []
@@ -2164,6 +2254,8 @@ def cmd_final():
         except Exception:
             finals[scope] = None
     reasons = final_verdict(finals, {name: os.environ.get(name) for name in FINAL_OUTCOMES})
+    if partition_label() == 'rest' and os.environ.get('FIXTURE046_CLEANUP_OUTCOME') != 'success':
+        reasons.append('fixture046 runtime cleanup did not succeed')
     if not reasons and partition_label() != 'all':
         try:
             binding = check_partition_binding()
