@@ -184,6 +184,10 @@ jobs:
         id: init
         run: /usr/bin/python3 -I -B tools/ci-validation/ci.py init
         timeout-minutes: 2
+      - name: Reconstruct the fixed synthetic fixture FFmpeg runtime
+        id: fixture046-runtime
+        run: /usr/bin/timeout --signal=TERM --kill-after=20s 900s /usr/bin/python3 -I -B test/support/fixture046-ffmpeg-supply.py prepare
+        timeout-minutes: 16
       - name: Probe the disposable database (read-only)
         run: /usr/bin/python3 -I -B tools/ci-validation/ci.py dbprobe
         timeout-minutes: 1
@@ -233,6 +237,11 @@ jobs:
         timeout-minutes: 122
       - name: Validate aggregate counts, coverage and source
         run: /usr/bin/python3 -I -B tools/ci-validation/ci.py check all
+        timeout-minutes: 2
+      - name: Settle the owned fixture runtime before full evidence capture
+        id: fixture046-cleanup
+        if: ${{ always() && steps.fixture046-runtime.outcome != 'skipped' }}
+        run: /usr/bin/python3 -I -B test/support/fixture046-ffmpeg-supply.py cleanup
         timeout-minutes: 2
       - name: Collect full evidence
         id: collect-full
@@ -286,6 +295,7 @@ jobs:
           AUDIT_OUTCOME: ${{ steps.audit.outcome }}
           GITLEAKS_OUTCOME: ${{ steps.gitleaks.outcome }}
           SECURITY_UPLOAD_OUTCOME: ${{ steps.upload-security.outcome }}
+          FIXTURE046_CLEANUP_OUTCOME: ${{ steps.fixture046-cleanup.outcome }}
 
   verify:
     needs: [verify-writer, verify-rest, container]

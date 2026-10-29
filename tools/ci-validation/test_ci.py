@@ -7,11 +7,12 @@ Intended bounded invocation (repository root; any trusted Linux host; never requ
 It imports ci.py (module level defines constants and functions only) and exercises its pure evidence checks
 against SYNTHETIC files created inside tempfile directories. It never starts the P33 guard, Vitest, Node, a
 database client, git, Docker or any other subprocess; it never calls cmd_init, and every cmd_dbprobe call that would
-reach the probe replaces subprocess.run (and shutil.which) with a mock, so Node is never launched. It never touches
+reach the probe replaces subprocess.run (and shutil.which) with a mock, so Node is never launched. The supply lifecycle controls import definitions only and mock every Popen/command seam;
+no installation, Docker or media is started. It never touches
 the repository tree. Tests that need a checkout build a
 synthetic one under a temporary directory and patch ci.ROOT / ci.tracked_files only inside mock contexts.
 
-Pinned fail-closed rules: aggregate 80 files / 8,689 tests and all 29 integration files, each selected file exactly once
+Pinned fail-closed rules: aggregate 81 files / 8,705 tests and all 29 integration files, each selected file exactly once
 with no failed/skipped/todo test, a changed tracked-test inventory, a missing or foreign TEST_DATABASE_URL, a database
 that is not PostgreSQL 17 / the_desk_test / superuser, skipped integration files, root dist output accepted only when it
 is the unchanged build output (added, modified, empty, absent, symlinked or pre-existing dist and any tracked drift,
@@ -61,7 +62,7 @@ def file_lines(counts=None, extra=''):
 
 SUMMARY = {
     'focused': ' Test Files  1 passed (1)\n      Tests  2 passed (2)\n',
-    'all': ' Test Files  80 passed (80)\n      Tests  8689 passed (8689)\n',
+    'all': ' Test Files  81 passed (81)\n      Tests  8705 passed (8705)\n',
 }
 
 
@@ -220,7 +221,7 @@ class SummaryAndFileLines(unittest.TestCase):
 
 class AggregateSelection(unittest.TestCase):
     def test_synthetic_inventory_matches_the_fixed_expectations(self):
-        self.assertEqual((len(TESTS), len(SELECTED), len(INTEGRATION)), (81, 80, 29))
+        self.assertEqual((len(TESTS), len(SELECTED), len(INTEGRATION)), (82, 81, 29))
         self.assertEqual(sum(PER_FILE.values()), ci.EXPECTED_ALL_TESTS)
         self.assertNotIn(ci.HARNESS_TEST, SELECTED)
 
@@ -264,10 +265,10 @@ class AggregateSelection(unittest.TestCase):
     def test_count_drift_and_duplicates(self):
         counts = dict(PER_FILE)
         counts[SELECTED[0]] -= 1
-        self.assertTrue(any('sum to 8688' in e for e in self.check(file_lines(counts))[0]))
+        self.assertTrue(any('sum to 8704' in e for e in self.check(file_lines(counts))[0]))
         counts = dict(PER_FILE)
         counts[SELECTED[0]] += 1
-        self.assertTrue(any('sum to 8690' in e for e in self.check(file_lines(counts))[0]))
+        self.assertTrue(any('sum to 8706' in e for e in self.check(file_lines(counts))[0]))
         dup = file_lines() + ' ✓ %s (1 tests) 1ms\n' % SELECTED[0]
         self.assertTrue(any('2 result lines' in e for e in self.check(dup)[0]))
 
@@ -279,22 +280,22 @@ class AggregateSelection(unittest.TestCase):
 
     def test_changed_tracked_inventory_is_hold_not_a_relaxed_count(self):
         grown = sorted(TRACKED + ['test/unit/extra.test.ts'])
-        self.assertTrue(any('inventory is 82' in e for e in self.check(file_lines(), grown)[0]))
+        self.assertTrue(any('inventory is 83' in e for e in self.check(file_lines(), grown)[0]))
         moved = [n for n in TRACKED if n != INTEGRATION[0]] + ['test/unit/moved.test.ts']
         self.assertTrue(any('integration file count 28' in e for e in self.check(file_lines(), sorted(moved))[0]))
         shrunk = [n for n in TRACKED if n != ci.HARNESS_TEST]
         self.assertTrue(self.check(file_lines(), shrunk)[0])
 
     def test_summary_count_mismatch_with_correct_files(self):
-        for wrong in (8688, 8690):
+        for wrong in (8704, 8706):
             with self.subTest(tests=wrong):
                 def change(stage_dir, attempt):
-                    write(stage_dir / 'stdout', file_lines() + ' Test Files  80 passed (80)\n      Tests  %d passed (%d)\n' % (wrong, wrong))
+                    write(stage_dir / 'stdout', file_lines() + ' Test Files  81 passed (81)\n      Tests  %d passed (%d)\n' % (wrong, wrong))
                 self.assertTrue(any('Tests counts' in e for e in evaluate('all', change)))
 
     def test_skipped_summary_with_exit_zero_is_not_accepted(self):
         def change(stage_dir, attempt):
-            write(stage_dir / 'stdout', file_lines() + ' Test Files  80 passed (80)\n      Tests  8603 passed | 86 skipped (8689)\n')
+            write(stage_dir / 'stdout', file_lines() + ' Test Files  81 passed (81)\n      Tests  8619 passed | 86 skipped (8705)\n')
         self.assertTrue(any('Tests counts' in e for e in evaluate('all', change)))
 
 
@@ -1090,7 +1091,8 @@ class WorkflowShape(unittest.TestCase):
                           'id: audit', 'id: gitleaks', 'id: retain-security', 'id: upload-security', 'id: final']
                 offsets = [job.index(stage) for stage in stages]
                 self.assertEqual(offsets, sorted(offsets))
-                aggregate = job[job.index('name: Guard P33 aggregate (all)'):job.index('name: Collect full evidence')]
+                end = job.index('name: Settle the owned fixture runtime') if 'name: Settle the owned fixture runtime' in job else job.index('name: Collect full evidence')
+                aggregate = job[job.index('name: Guard P33 aggregate (all)'):end]
                 self.assertNotIn('if:', aggregate)  # Both steps retain default success() gating.
                 self.assertNotIn('continue-on-error', job)
                 for exact in ("id: collect-full\n        if: ${{ always() && steps.init.outcome != 'skipped' }}",
@@ -1168,13 +1170,14 @@ class Fixture105Tooling(unittest.TestCase):
             counts.update({'test/unit/connected-fixture105.test.ts': unit, 'test/integration/connected-fixture105.test.ts': native})
             errors = []
             ci.check_all_files(file_lines(counts), TRACKED, errors, {})
-            self.assertEqual(sum(counts.values()), 8689)
+            self.assertEqual(sum(counts.values()), 8705)
             self.assertEqual(sum('connected per-file count drift' in e for e in errors), 2)
 
     def test_frozen_render046_file_and_exact_count_are_required(self):
         # Independent literal pairs: the planner file and the response-lineage file are each pinned.
         for name, pinned in (('test/unit/frozen-render046.test.ts', 40),
-                             ('test/unit/frozen-render046-responses.test.ts', 89)):
+                             ('test/unit/frozen-render046-responses.test.ts', 89),
+                             ('test/unit/frozen-fixture046-master.test.ts', 16)):
             with self.subTest(name=name):
                 errors = []
                 ci.check_all_files(file_lines(), [p for p in TRACKED if p != name], errors, {})
@@ -1186,7 +1189,7 @@ class Fixture105Tooling(unittest.TestCase):
                     counts[OLD_SELECTED[0]] += pinned - count
                     errors = []
                     ci.check_all_files(file_lines(counts), TRACKED, errors, {})
-                    self.assertEqual(sum(counts.values()), 8689)
+                    self.assertEqual(sum(counts.values()), 8705)
                     self.assertIn('frozen-render046 per-file count drift: ' + name, errors)
 
     def test_fixture_namespace_does_not_match_supervisor_prefix(self):
@@ -1843,8 +1846,8 @@ class Partition155Tests(unittest.TestCase):
     def test_exact_pair_and_disjoint_union(self):
         self.assertEqual(self.joint(), [])
         self.assertEqual(set(self.proofs['writer']['files']) & set(self.proofs['rest']['files']), set())
-        self.assertEqual(sum(sum(p['files'].values()) for p in self.proofs.values()), 8689)
-        self.assertEqual(len(ci.partition_files(self.tracked, 'all')), 80)
+        self.assertEqual(sum(sum(p['files'].values()) for p in self.proofs.values()), 8705)
+        self.assertEqual(len(ci.partition_files(self.tracked, 'all')), 81)
 
     def test_missing_unknown_and_legacy_labels(self):
         self.assertEqual(ci.partition_label(), 'all')
@@ -2009,7 +2012,7 @@ class Partition155Tests(unittest.TestCase):
             output = base / 'github-output'
             env = {'DESK_CI_PARTITION': label, 'GITHUB_SHA': 'a' * 40, 'GITHUB_RUN_ID': '123',
                    'GITHUB_RUN_ATTEMPT': '1', 'GITHUB_REPOSITORY': 'mikeddamico/the-desk',
-                   'GITHUB_OUTPUT': str(output), **OK_OUTCOMES}
+                   'GITHUB_OUTPUT': str(output), 'FIXTURE046_CLEANUP_OUTCOME': 'success', **OK_OUTCOMES}
             write_json(ev / 'identity.json', identity); write_json(ev / 'snapshot-pre.json', {'members': members})
             write_json(ev / 'bind-pre.json', {'ok': True}); write_json(ev / 'partition.json', binding)
             security = base / 'security-report'; security.mkdir(mode=0o700)
@@ -2040,6 +2043,10 @@ class Partition155Tests(unittest.TestCase):
                 self.assertEqual(proof['partition'], label)
                 self.assertEqual(proof['identity'], ci.partition_identity(identity, members))
                 self.assertEqual(proof['files'], {p: self.counts[p] for p in ci.partition_files(self.tracked, label)})
+            if label == 'rest':
+                with self.final_world(label) as (base, output, identity, members), mock.patch.dict(os.environ, {'FIXTURE046_CLEANUP_OUTCOME': 'failure'}):
+                    self.assertEqual(ci.cmd_final(), 1)
+                    self.assertFalse(output.exists())
 
     def test_final_failures_emit_no_output(self):
         for label in ('writer', 'rest'):
@@ -2078,7 +2085,7 @@ class Partition155Tests(unittest.TestCase):
             proof = self.copy(original); proof['identity'][key] = value
             with self.assertRaises(RuntimeError): ci.parse_partition_proof(ci.fixture_bytes(proof).decode().rstrip('\n'))
         for counts in ({'test/' + 'a' * 513 + '.test.ts': 4908}, {'test/../x.test.ts': 4908},
-                       {'test/x%d.test.ts' % n: 1 for n in range(81)}):
+                       {'test/x%d.test.ts' % n: 1 for n in range(82)}):
             proof = self.copy(original); proof['files'] = counts
             with self.assertRaises(RuntimeError): ci.parse_partition_proof(ci.fixture_bytes(proof).decode().rstrip('\n'))
         with self.assertRaises(RuntimeError): ci.parse_partition_proof(json.dumps(original))
@@ -2166,9 +2173,19 @@ class FixtureTargetObserverShapeTests(unittest.TestCase):
         self.assertIsInstance(filters[0], ast.Dict)
         routes = {key.value: value for key, value in zip(filters[0].keys, filters[0].values)
                   if isinstance(key, ast.Constant)}
-        self.assertEqual(set(routes), {'focused', 'p33', 'parity', 'unit', 'integration', 'all', 'writer', 'rest'})
+        self.assertEqual(set(routes), {'focused', 'p33', 'parity', 'unit', 'integration', 'all', 'writer', 'rest', 'master046'})
         self.assertIn("    test = 'test/unit/p33-parity-harness.test.ts'", guard_source)
         self.assertEqual(ast.literal_eval(routes['writer']), ['test/unit/writer-fixture-input.test.ts'])
+        self.assertEqual(ast.literal_eval(routes['master046']), ['test/unit/frozen-fixture046-master.test.ts'])
+        profile_choices = [keyword.value for node in ast.walk(guard)
+                           if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+                           and isinstance(node.func.value, ast.Name) and node.func.value.id == 'g'
+                           and node.func.attr == 'add_argument' and node.args
+                           and isinstance(node.args[0], ast.Constant) and node.args[0].value == 'profile'
+                           for keyword in node.keywords if keyword.arg == 'choices']
+        self.assertEqual(len(profile_choices), 1)
+        self.assertEqual(ast.literal_eval(profile_choices[0]),
+                         ['prerequisite', 'focused', 'p33', 'parity', 'unit', 'integration', 'all', 'writer', 'rest', 'master046'])
         for profile, expression in (('all', "['--exclude', test]"),
                                     ('rest', "['--exclude', test, '--exclude', 'test/unit/writer-fixture-input.test.ts']")):
             self.assertEqual(ast.dump(routes[profile]), ast.dump(ast.parse(expression, mode='eval').body))
@@ -2419,6 +2436,268 @@ class SecurityReport156Tests(unittest.TestCase):
         finals = {scope: {'all_stages_ok': True, 'evidence_status': 'complete'} for scope in ci.SCOPES}
         for outcome in ('failure', 'skipped', 'cancelled', None):
             self.assertTrue(ci.final_verdict(finals, {**OK_OUTCOMES, 'SECURITY_UPLOAD_OUTCOME': outcome}))
+
+
+class Fixture046ConstructionShape(unittest.TestCase):
+    def _supply_module(self):
+        import importlib.util
+        path = ci.ROOT / 'test/support/fixture046-ffmpeg-supply.py'
+        spec = importlib.util.spec_from_file_location('fixture046_supply_controls', path)
+        self.assertIsNotNone(spec)
+        self.assertIsNotNone(spec.loader)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        return module
+
+    def _supply_owner(self):
+        token = 'd' * 32
+        return {'schema': 'fixture046-supply-owner/1', 'token': token,
+                'docker_cli': '/usr/bin/docker', 'local': False, 'preparation': 'pending',
+                'containers': [], 'image_handle': 'desk-fixture046-runtime:owned-' + token,
+                'image_reserved': False, 'image_id': None, 'image_removed': False,
+                'active_command': None, 'command_pending': False, 'client_uncertain': False,
+                'uncertain_command': None, 'cleanup': 'pending'}
+
+    def test_fixed_artifact_supply_has_no_live_apt_or_arbitrary_selector(self):
+        helper = ci.ROOT / 'test/support/fixture046-ffmpeg-supply.py'
+        source = helper.read_text()
+        tree = ast.parse(source)
+        self.assertNotIn('apt-get', source)
+        self.assertNotIn('apt update', source)
+        self.assertNotIn('check-valid-until', source.lower())
+        self.assertNotIn('allow-unauthenticated', source.lower())
+        self.assertIn("sys.argv[1] in ('prepare', 'prepare-local', 'cleanup')", source)
+        self.assertIn('max_workers=4', source)
+        self.assertIn("require(actual == expected_identity(lock))", source)
+        self.assertIn("paths == {row['path']: row['sha256'] for row in lock['libraries']}", source)
+        self.assertIn("['run', '--name', name, '--platform', 'linux/amd64', '--pull', 'never'", source)
+        self.assertEqual(sum(isinstance(node, ast.FunctionDef) and node.name == 'prepare' for node in tree.body), 1)
+        lock = json.loads((ci.ROOT / 'fixtures/frozen-master046-toolchain/artifact-lock.json').read_bytes())
+        self.assertEqual((len(lock['packages']), len(lock['base_inventory']), len(lock['installed_inventory']), len(lock['libraries'])), (200, 88, 288, 214))
+        self.assertEqual(sum(package['size'] for package in lock['packages']), 133898884)
+        self.assertEqual(lock['executables']['/usr/bin/ffmpeg'], '0dafc1360bb07743f76abeb1e4ae16b0aaa1331e9041a0e8d6a8524111dc0cbb')
+        self.assertEqual(lock['executables']['/usr/bin/ffprobe'], '0e598fe6d247bfe63757f5c839dc145a166b3f876f2875ca88a306a5b8ec5a58')
+
+        supply = self._supply_module()
+        # A command timeout preserves its original object and durably records
+        # direct-client settlement; no Docker process is started by this control.
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            owner = self._supply_owner()
+            timeout = supply.subprocess.TimeoutExpired('fixed fake command', 1)
+            process = mock.Mock(returncode=0)
+            process.wait.side_effect = [timeout, 0]
+
+            def launch(*args, **kwargs):
+                pending = json.loads((root / 'ownership.json').read_bytes())
+                self.assertTrue(pending['command_pending'])
+                self.assertEqual(pending['active_command'], 'timeout-control')
+                return process
+
+            with mock.patch.object(supply, 'ROOT', root), mock.patch.object(supply, 'OWNER', owner), \
+                    mock.patch.object(supply.subprocess, 'Popen', side_effect=launch):
+                with self.assertRaises(supply.subprocess.TimeoutExpired) as caught:
+                    supply.command('/usr/bin/docker', ['inspect', 'fixed-owned-name'], 'timeout-control', timeout=1)
+                self.assertIs(caught.exception, timeout)
+                process.kill.assert_called_once()
+                self.assertFalse(json.loads((root / 'ownership.json').read_bytes())['command_pending'])
+                self.assertFalse(owner['client_uncertain'])
+        with self.assertRaises(supply.PreparationInterrupted):
+            supply.interrupted(15, None)  # No real signal is sent or configured.
+
+        # Model an enclosing KILL after durable launch intent. Cleanup settles
+        # only the exact named container, but retains the unknown client state.
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            owner = self._supply_owner()
+            owner['containers'] = [{'name': 'desk-fixture046-runtime-prepare', 'id': None,
+                                    'launch_acknowledged': False, 'removed': False}]
+            owner['command_pending'] = True
+            owner['active_command'] = 'install-identify'
+            killed = []
+
+            def pending_command(docker, args, name, timeout=180):
+                if args[:2] == ['container', 'ls']:
+                    self.assertIn('name=^/desk-fixture046-runtime-prepare$', args)
+                    return ('a' * 64 + '\n').encode()
+                if args[0] == 'inspect' and args[2] == '{{.Id}}':
+                    return ('a' * 64).encode()
+                if args[0] == 'inspect':
+                    running = not killed
+                    return json.dumps({'Status': 'running' if running else 'exited',
+                        'Running': running, 'Pid': 7312 if running else 0, 'Error': '',
+                        'ExitCode': 137 if killed else 0, 'OOMKilled': False}).encode()
+                if args[0] == 'kill':
+                    self.assertEqual(args[-1], 'a' * 64)
+                    killed.append(args[-1])
+                elif args[0] == 'rm':
+                    self.assertEqual(args[-1], 'a' * 64)
+                else:
+                    self.assertEqual(args[0], 'wait')
+                return b'0\n'
+
+            with mock.patch.object(supply, 'ROOT', root), mock.patch.object(supply, 'OWNER', owner), \
+                    mock.patch.object(supply, 'command', side_effect=pending_command):
+                supply.atomic_record('ownership.json', owner)
+                with self.assertRaises(RuntimeError):
+                    supply.cleanup()
+                cleanup = json.loads((root / 'cleanup.json').read_bytes())
+                self.assertEqual(cleanup['status'], 'pending')
+                self.assertEqual(cleanup['preparation'], 'pending')
+                self.assertTrue(cleanup['client_uncertain'])
+                self.assertEqual(killed, ['a' * 64])
+                self.assertTrue(supply.OWNER['containers'][0]['removed'])
+                self.assertEqual(supply.OWNER['uncertain_command'], 'install-identify')
+
+        # Lost commit acknowledgement is recoverable through the exact reserved
+        # handle plus owner label, without listing/removing unrelated images.
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            owner = self._supply_owner()
+            owner['preparation'] = 'failed'
+            owner['image_reserved'] = True
+            original = b'{"status":"failed"}\n'
+            (root / 'receipt.json').write_bytes(original)
+            removed = []
+
+            def commit_command(docker, args, name, timeout=180):
+                if args[:2] == ['image', 'ls']:
+                    self.assertIn('reference=' + owner['image_handle'], args)
+                    return ('sha256:' + 'b' * 64 + '\n').encode()
+                if args[:2] == ['image', 'inspect']:
+                    self.assertEqual(args[-1], owner['image_handle'])
+                    return json.dumps({'Id': 'sha256:' + 'b' * 64,
+                        'Config': {'Labels': {'fixture046.owner': owner['token']}}}).encode()
+                self.assertEqual(args, ['image', 'rm', owner['image_handle']])
+                removed.append(args[-1])
+                return ('Untagged: ' + args[-1] + '\nDeleted: sha256:' + 'b' * 64 + '\n').encode()
+
+            with mock.patch.object(supply, 'ROOT', root), mock.patch.object(supply, 'OWNER', owner), \
+                    mock.patch.object(supply, 'command', side_effect=commit_command):
+                supply.atomic_record('ownership.json', owner)
+                supply.cleanup()
+                cleanup = json.loads((root / 'cleanup.json').read_bytes())
+                self.assertEqual(cleanup['status'], 'complete')
+                self.assertEqual(cleanup['preparation'], 'failed')
+                self.assertEqual(cleanup['image_id'], 'sha256:' + 'b' * 64)
+                self.assertTrue(cleanup['image_removed'])
+                self.assertEqual(removed, [owner['image_handle']])
+                self.assertEqual((root / 'receipt.json').read_bytes(), original)
+
+        # A preparation exception remains primary if journal and cleanup writes
+        # also fail. Every subprocess seam is unreachable or mocked here.
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary) / 'owned'
+            primary = RuntimeError('fixed primary preparation failure')
+            original_atomic = supply.atomic_record
+
+            def receipt_failure(name, value):
+                if name == 'receipt.json':
+                    raise OSError('fixed receipt failure')
+                original_atomic(name, value)
+
+            with mock.patch.object(supply, 'ROOT', root), \
+                    mock.patch.object(supply, 'fixed_data', side_effect=primary), \
+                    mock.patch.object(supply, 'reconcile_owned', side_effect=OSError('fixed cleanup failure')), \
+                    mock.patch.object(supply, 'atomic_record', side_effect=receipt_failure), \
+                    mock.patch.object(supply.signal, 'signal', return_value=None), \
+                    mock.patch.object(supply.subprocess, 'Popen') as process:
+                with self.assertRaises(RuntimeError) as caught:
+                    supply.prepare(True)
+                self.assertIs(caught.exception, primary)
+                process.assert_not_called()
+                self.assertEqual(supply.OWNER['preparation'], 'failed')
+
+    def test_runtime_registration_rejects_changed_identity_and_unbound_resources(self):
+        good = {'schema': 'fixture046-runtime-registration/1', 'status': 'ready',
+                'profile_sha256': '46705afa025f02bebf7248c78fed648408cf156ab791102d77c47287893e91a7',
+                'artifact_lock_sha256': 'b15c3dd040f41e9a60c9dc127a38003a2fc9083808f1c4cb1ec20f07cfa16485',
+                'image_id': 'sha256:' + 'a' * 64, 'identity_sha256': 'b6529842efd434065331f0be25efd3a96f485b095460b8f8979462691fbdc129',
+                'docker_cli': '/usr/bin/docker', 'image_owned': True,
+                'containers': ['desk-fixture046-signature-0', 'desk-fixture046-signature-1', 'desk-fixture046-runtime-prepare'],
+                'cleanup': 'containers_removed_image_retained'}
+        self.assertEqual(ci.fixture046_runtime_receipt(good), good)
+        for field, value in [('status', 'failed'), ('profile_sha256', '0' * 64),
+                             ('artifact_lock_sha256', '0' * 64), ('image_id', 'latest'),
+                             ('identity_sha256', '0' * 64), ('docker_cli', '/tmp/unverified'),
+                             ('image_owned', False), ('containers', []), ('cleanup', 'pending')]:
+            with self.subTest(field=field), self.assertRaises(RuntimeError):
+                ci.fixture046_runtime_receipt({**good, field: value})
+        with self.assertRaises(RuntimeError):
+            ci.fixture046_runtime_receipt({**good, 'extra': True})
+
+        # Successful supply requires every fixed evidence member. Failed supply
+        # remains best-effort/partial; cleanup proof is mandatory for full scope.
+        with tempfile.TemporaryDirectory() as temporary:
+            base = Path(temporary)
+            runtime = base / 'runtime'
+            evidence = base / 'evidence'
+            runtime.mkdir(); evidence.mkdir()
+            owner = self._supply_owner()
+            owner.update({'preparation': 'ready', 'image_id': good['image_id'],
+                          'image_reserved': True, 'image_removed': True, 'cleanup': 'complete'})
+            owner['containers'] = [{'name': name, 'id': 'a' * 64,
+                                    'launch_acknowledged': True, 'removed': True} for name in good['containers']]
+            for name in ci.FIXTURE046_SUPPLY_FILES:
+                (runtime / name).write_bytes(b'public fixed evidence\n')
+            write_json(evidence / 'fixture046-runtime.json', good)
+            write_json(runtime / 'ownership.json', owner)
+            write_json(runtime / 'cleanup.json', {'schema': 'fixture046-supply-cleanup/1',
+                'status': 'complete', 'preparation': 'ready', 'image_id': good['image_id'],
+                'image_removed': True, 'client_uncertain': False})
+            with mock.patch.object(ci, 'FIXTURE046_RUNTIME', runtime):
+                upload = base / 'complete'; upload.mkdir()
+                keep = ci.Retention(upload)
+                ci.fixture046_keep_runtime(keep, evidence, 'full')
+                self.assertEqual(keep.problems['errors'], [])
+                self.assertEqual(keep.problems['missing'], [])
+                complete_cleanup = json.loads((runtime / 'cleanup.json').read_bytes())
+                write_json(runtime / 'cleanup.json', {**complete_cleanup, 'status': 'pending'})
+                upload = base / 'pending'; upload.mkdir()
+                keep = ci.Retention(upload)
+                ci.fixture046_keep_runtime(keep, evidence, 'full')
+                self.assertIn('fixture046 runtime cleanup evidence is incomplete', keep.problems['errors'])
+                write_json(runtime / 'cleanup.json', complete_cleanup)
+                (runtime / 'libraries.txt').unlink()
+                upload = base / 'missing'; upload.mkdir()
+                keep = ci.Retention(upload)
+                ci.fixture046_keep_runtime(keep, evidence, 'full')
+                self.assertTrue(keep.problems['missing'])
+                write_json(evidence / 'fixture046-runtime.json', {**good, 'status': 'failed'})
+                upload = base / 'failed'; upload.mkdir()
+                keep = ci.Retention(upload)
+                with mock.patch.object(keep, 'copy', wraps=keep.copy) as copied:
+                    ci.fixture046_keep_runtime(keep, evidence, 'full')
+                runtime_calls = [call for call in copied.call_args_list if str(call.args[0]).startswith(str(runtime))]
+                self.assertTrue(runtime_calls)
+                self.assertTrue(all(call.kwargs['required'] is False for call in runtime_calls))
+                self.assertIn('fixture046 preparation is not ready; retention is partial', keep.problems['errors'])
+
+    def test_rest_route_requires_real_constructor_and_cleanup_without_new_selectors(self):
+        workflow = (ci.ROOT / ci.WORKFLOW_REL).read_text()
+        writer, rest = workflow.split('  verify-rest:', 1)
+        self.assertNotIn('fixture046-ffmpeg-supply.py', writer)
+        self.assertEqual(rest.count('fixture046-ffmpeg-supply.py prepare'), 1)
+        self.assertEqual(rest.count('fixture046-ffmpeg-supply.py cleanup'), 1)
+        self.assertLess(rest.index('id: init'), rest.index('id: fixture046-runtime'))
+        self.assertLess(rest.index('id: fixture046-runtime'), rest.index('ci.py dbprobe'))
+        self.assertLess(rest.index('ci.py check all'), rest.index('id: fixture046-cleanup'))
+        self.assertLess(rest.index('id: fixture046-cleanup'), rest.index('id: collect-full'))
+        self.assertIn("id: fixture046-cleanup\n        if: ${{ always() && steps.fixture046-runtime.outcome != 'skipped' }}", rest)
+        self.assertIn("FIXTURE046_CLEANUP_OUTCOME: ${{ steps.fixture046-cleanup.outcome }}", rest)
+        source = (ci.ROOT / 'test/unit/frozen-fixture046-master.test.ts').read_text()
+        self.assertEqual(len(re.findall(r'^  it\(', source, re.M)), 16)
+        self.assertNotIn('it.skip', source)
+        self.assertNotIn('describe.skip', source)
+        self.assertIn('vi.mocked(spawn).mockImplementation(realSpawn)', source)
+        self.assertIn('run < 2', source)
+        self.assertIn('expect(master).toEqual(expected)', source)
+        self.assertEqual(ci.FROZEN_RENDER046_COUNTS['test/unit/frozen-fixture046-master.test.ts'], 16)
+        constructor = (ci.ROOT / 'src/runtime/frozen-fixture046-master.ts').read_text()
+        self.assertNotIn('fixture_audio/master.wav', constructor)
+        self.assertNotIn('loadFixtureJson("master_assembly_map.json")', constructor)
+        self.assertIn('publicationUncertain = true', constructor)
+        self.assertIn('owner?.clientPending !== true', constructor)
 
 
 if __name__ == '__main__':
