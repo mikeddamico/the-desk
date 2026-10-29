@@ -689,6 +689,8 @@ def guard(args):
                'rest': ['--exclude', test, '--exclude', 'test/unit/writer-fixture-input.test.ts'],
                'focused': [test],
                'master046': ['test/unit/frozen-fixture046-master.test.ts'],
+               'technical-master': ['test/unit/technical-master-admission.test.ts'],
+               'technical-master-pure': ['test/unit/technical-master-admission.test.ts'],
                'parity': ['test/unit/fixture-pack-extraction-parity.test.ts'], 'p33': ['test/unit/fixture-pack-extraction-parity.test.ts',
                    '--testNamePattern', '^P28-P37 legacy formats, freshness and discarded faults P33 multidisk$']}
     command = [node, str(ROOT/'node_modules/vitest/vitest.mjs'), 'run', *filters[args.profile]]
@@ -818,7 +820,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest='role', required=True)
     g = sub.add_parser('guard')
-    g.add_argument('profile', choices=['prerequisite', 'focused', 'p33', 'parity', 'unit', 'integration', 'all', 'writer', 'rest', 'master046'])
+    g.add_argument('profile', choices=['prerequisite', 'focused', 'p33', 'parity', 'unit', 'integration', 'all', 'writer', 'rest', 'master046', 'technical-master', 'technical-master-pure'])
     o = sub.add_parser('owner')
     for key in ('lease', 'device', 'inode', 'link', 'guard'):
         o.add_argument('--'+key, type=int, required=True)
