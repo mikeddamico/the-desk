@@ -1,6 +1,59 @@
 # Connected evaluation fixture
 
-This fixed, fully disclosed fictional fixture connects actual deterministic Claims/Writing evaluation to persisted Performance Direction and a labelled audit-interface stub. It is conformance evidence only. H04/H13 semantic acceptance remains unestablished. Render, READY, production, models and audio remain outside the path. This source proposal has not been executed or validated.
+This fixed, fully disclosed fictional fixture connects actual deterministic Claims/Writing evaluation to persisted Performance Direction and a labelled audit-interface stub. It is conformance evidence only. H04/H13 semantic acceptance remains unestablished. Render, READY, production, models and audio remain outside the path. Source-only and UNRUN statements in the historical sections below describe their recorded preparation phase; current validation status follows.
+
+## Current normal-validation candidate (pending)
+
+[CI122, run 40801832684](https://github.com/mikeddamico/the-desk/actions/runs/40801832684)
+passed all 20 observer fake groups and the one held-client native control at
+[commit 4100d03e65b7a1a4e317850a5a29149e7c24b234](https://github.com/mikeddamico/the-desk/commit/4100d03e65b7a1a4e317850a5a29149e7c24b234),
+tree `5658e7d08afceed8ac50d7fd8edc9ccaa27c200e`. Its 31 independent evidence
+checks verified the controlled refusal, original hidden/inconclusive metadata,
+later provisional client classification and cleanup. That intentionally
+incomplete diagnostic run did not identify CI120's unexpected backend, prove
+a historical fix or satisfy normal full acceptance.
+
+This continuation restores the ordinary writer/rest acceptance workflow and
+removes the temporary diagnostic stage and profile. Both jobs run their
+aggregate stage and then `check all` under default success gating. Always-gated
+full evidence collection, uploads, security retention and final joint proof
+remain required. Guard limits, database feed restrictions and all strict
+isolation and cleanup predicates remain unchanged. Ordinary successful guard
+and wrapper exits must both be zero; the existing post-evidence HOLD remains
+binding when required records are missing.
+
+The 20 fake groups now run unconditionally at the start of native `beforeAll`,
+once when the suite actually executes. A suite skipped without a database does
+not claim their coverage. Fake output capture/restoration and the single
+`fixture-target-selftest/2` groups 20/passed 20 marker stay unchanged. The groups
+are assertions inside the hook, not 20 additional Vitest cases.
+
+All 34 permanent native cases remain in their established order, with the
+held-client control last. Its continuously owned client supplies control-only
+corroboration; the original unknown metadata and later
+`client/provisional/hidden_origin` classification remain truthful. Expected
+inconclusive diagnostic metadata is not itself a failed test. Earlier scopes
+may emit additional summaries during full execution. The held case requires
+the shared maintenance latch to be unused. If an earlier genuine failure has
+consumed it, preserve that failure and let the held precondition fail; never
+reset the latch, repeat the observation or skip the assertion.
+
+Normal required coverage remains 58 unit plus 34 native connected cases, 3,781
+rest cases and 4,908 writer cases: 8,689 total, with 80 aggregate files and all
+29 integration files. Require a complete 34-case native journal, every declared
+invocation and receipt, no skipped/todo tests, settled cleanup, source
+preservation, security checks and final joint proof on one exact candidate.
+CI122's partial journal cannot substitute for that evidence.
+
+This restored candidate has not run its static checks or normal full
+validation. Actual-source review, bounded static checks and final binding
+review precede publication and one separately authorized, naturally triggered
+normal acceptance workflow. Diagnose any retained failure before a specific
+reviewed correction; do not retry an unchanged candidate. A future full pass
+would establish current candidate acceptance while CI120's cause remains
+unknown. Merge requires independent exact-final-commit review and fresh checks.
+Assembly design may proceed independently; assembly implementation, live audio,
+genuine semantic admission and deployment remain outside this change.
 
 ## Subject, context and release
 
@@ -180,3 +233,206 @@ cleanup errors. Diagnostic selection did not establish full-suite acceptance.
 Temporary diagnostic selections and holds have been removed; the original full
 writer/rest partitions, count gates, security/artifact requirements and final
 joint proof remain required on the final independently reviewed commit.
+
+### Historical CI120 bounded diagnostic candidate (temporary, HOLD only)
+
+CI120 retained one extra backend at unknown-construction target observation 2,
+with all other predicates true. Its backend identity is unknown; the preseed
+missing-config failure's rejected predicate was not observed. Unbound server
+log autovacuum messages establish no cause. Neither CI119 nor nonrecurrence
+proves a fix.
+
+TARGET_SQL now proposes one materialized population with the unchanged
+current-database/other-PID predicate, full integer count and a PID-ordered sample
+limited to 8 before JSONB aggregation. Categories are client, autovacuum,
+other_backend (13 fixed PG17 types), or unknown. The default pg JSONB parser
+returns parsed data. The original isolation predicates, target identity and
+refusal behavior are unchanged. Count and sample share captured rows; this is
+not a globally instantaneous or freshly reset transaction statistics guarantee.
+PG17 may hide backend_type for other users/background sessions. Hidden and
+unrecognized types remain unknown; no monitoring grant is added.
+
+The native TargetObserver validates closed own-data row/sample shapes, positive
+ordered unique int32 PIDs, full count/sample/truncation consistency, then buffers
+owned primitive failure vectors. Nine fixed first-invocation scopes cover four
+preseed variants, unknown construction and its three direct-owner variants, and
+the original acquisition-cut invocation. Each observer caps observations at 64
+(passing observations included). An original captured failure vector survives
+malformed, hidden, truncated or overlength supplemental detail. Each line is
+bounded to 1024 bytes, with at most 576 vectors and 9 summaries across native
+scopes. Markers FIXTURE_TARGET_DIAGNOSTIC and
+FIXTURE_TARGET_DIAGNOSTIC_SUMMARY carry version 2 schemas. No SQL, names, URLs,
+credentials, raw types or error objects are emitted. Unknown/capped/incomplete
+records are inconclusive, never admission authority.
+
+The observer captures D and installs O(D), then each COMMIT witness installs
+W(O). W's intentional acknowledgement-loss rejection remains intact. The inner
+cleanup restores O; the outer cleanup restores D before emitting. Cleanup/output
+failure preserves the primary work error. Added async/observation overhead can
+perturb timing. The original 120000ms case limits/assertions remain unchanged.
+
+Only guard profile target-diagnostic runs 12 test-local selftest groups before
+native allocation. Fake-driver output is intercepted; only one separately
+counted FIXTURE_TARGET_DIAGNOSTIC_SELFTEST completion record reaches evidence.
+These JS controls operate on already-mapped categories, not executed SQL CASE
+or real autovacuum evidence. Existing 58 unit and 33 native cases remain unchanged
+in count, and no case selector is accepted from callers.
+
+Temporary workflow steps invoke run-stage.sh diagnostic120 in both jobs. Writer
+returns HOLD 78 without launching tests. Rest aliases STAGE=all but selects only
+the two connected files through target-diagnostic. Existing all precheck, fresh
+bindings, controls, DB pipe, 7200s ceiling, 20s TERM/KILL grace and capture limits
+remain. The actual guard exit is retained at all/exit, while the diagnostic
+wrapper returns 78. Default success gating skips the original aggregate step;
+one always-gated rest check all captures post-source/native state, followed by
+existing full collection/upload and final HOLD. ci.py is unchanged: its 3780/full
+file/one-P33 requirements intentionally reject 91 tests and zero P33 cases.
+Those expected coverage errors must not be "fixed" by weakening validators.
+
+Independent retained-evidence inspection must account for exact 58+33 file/test
+populations, zero skips/todos/unhandled errors, 12/12 selftests once, one guard
+attempt/zero P33 case directories, settled/reaped/no-children cleanup, the full
+33-case invocation journal, source/cache preservation and bounded diagnostic
+records. Preserve reproduced assertion failures and censoring as findings; do
+not rerun until green. A passing 91-case nonrecurrence proves no cause or fix.
+Normal full CI requires separate review restoring this temporary route.
+
+This candidate is source preparation only. No execution, installation, provider,
+privilege/logging change, assembly, READY or publication authority follows. The
+seven changed source owners and exact invocation need review before execution;
+source/release/root bindings must be generated freshly from that candidate.
+
+### Historical failure-triggered maintenance observation: source-only candidate
+
+Based on published PR39 head `92455173d1301a91a2b2ef0d427a5c6447d85b94`.
+CI121's 91/91 diagnostic was nonreproduction, not a fix. CI120's unexpected
+backend remains unidentified, and the preseed failure's rejected predicate was
+not observed. Assembly remains held. This source candidate is unexecuted.
+
+The original target statement adds only private server-start and sampled
+backend-start UTC microsecond strings. The same materialized population,
+full count, database/own-PID filter, LIMIT 8, strict other_sessions-zero check,
+identity projection and runtime errors remain. Existing version2 output still
+selects PID/category only; private names, OIDs and timestamps never escape.
+
+A suite-local latch reserves at most one maintenance observation for the first
+valid positive-count failure with all other target predicates true. Passing,
+rejected or unbound observations and subsequent failures issue no read. After
+work settles and both driver wrappers are restored, exactly one awaited query
+uses the suite's ALREADY existing cluster.admin pool on its maintenance database.
+No target connection, new pool/grant, timer, listener, manual release, cancellation
+or termination machinery is added. Original result/failure remains primary.
+
+Existing admin `connectionTimeoutMillis=10000` and `query_timeout=20000` govern
+checkout/query. Scheduling may exceed nominal timers; there is no strict wall
+claim. Pool owns its listener/release path and cluster teardown stays unchanged.
+Success is cleanup=driver_handoff; a rejected query is cleanup=unknown with
+fixed reason=error, without inspecting raw error text. Neither label, query
+settlement nor pool.end proves the remote backend/socket has terminated.
+
+The fixed statement requests at most 8 captured PIDs, limits to 9 rows before
+JSONB aggregation and compares exact target name/OID and server-start binding.
+Visible equal backend-start strings support a later same-lifetime observation,
+never causation. Hidden original start permits only provisional classification.
+Wrong database/PID, vanished row, hidden result or changed lifetime stays
+unknown. No timestamp plausibility or unrelated server log supplies certainty.
+
+One separate FIXTURE_TARGET_MAINTENANCE line is capped at 2048 UTF-8 bytes. Its
+fixture-target-maintenance/1 record has exact scope/ordinal/status/reason/cleanup
+and bounded PID/category/binding/reason entries; no raw SQL, errors, usernames,
+addresses, credentials, database names, OIDs or timestamps. Original same-query
+vectors/summaries survive supplemental faults. The existing pool's behavior
+remains qualified; no remote-termination claim is introduced.
+
+Eight fake control groups are appended to the existing 12. All 20 groups are
+UNRUN in this candidate. They remain in the native beforeAll and are skipped
+without TEST_DATABASE_URL; no fake-only launcher is created. A future completed
+invocation would emit the single fixture-target-selftest/2 groups 20/passed 20
+record only after all controls, with all fake output intercepted. The 58 unit +
+33 native case counts stay unchanged. Fakes establish no actual SQL CASE, PostgreSQL
+visibility, timeout or remote-termination behavior.
+
+The approved local Python harness passed all 153 controls after a comment-spacing
+witness correction. The restoration-order assertion is scoped to the actual
+around cleanup. Formatter, compiler and lint checks remain unrun because this
+executor lacks the pinned Node/npm versions and project dependency tree; no
+installation or fallback toolchain was used. No build, native/database tests,
+CI, commit or publication ran. All 20 groups remain unrun, deferred to separately
+justified and reviewed native validation. Do not start 91 tests to exercise
+fake groups or seek reproduction.
+The stopping condition is reviewed evidence improvement, never a claimed fix
+or green full CI. Existing temporary HOLD workflow/launcher and ci.py are intact.
+
+## Historical held-client control, revision 2 (source preparation; UNRUN)
+
+This continuation adds the permanent native case `identifies a held client while
+preserving target isolation refusal`, registered last with exactly one
+`pre_target_failure` invocation. Original observer scopes retain the first opportunity
+to consume the suite-wide maintenance latch. The control never resets that latch
+or adds another read allowance; if a prior failure consumed it, the control
+retains its fixed precondition failure rather than claiming success.
+All 33 prior native cases and 58 unit cases stay
+required. Current full counts become 34 native, 92 connected, 3,781 rest and 8,689
+aggregate tests; file counts remain unchanged. The earlier counts and two-file
+diagnostic route above describe the preceding proposal, not this invocation.
+
+The temporary `target-diagnostic` profile now selects only the native file and
+the anchored exact suite/case name. Existing workflow, prerequisites, focused
+controls, database feed, evidence collection, time limits and unconditional
+diagnostic HOLD 78 remain unchanged. Expected native output is one passing case
+and 33 skipped cases, plus the separate selftest marker
+`fixture-target-selftest/2` with groups 20/passed 20. All 20 fake groups and this
+real control are UNRUN in this source preparation. No check or runtime release
+is implied. The full checker must reject incomplete native coverage, skipped
+cases, missing unit coverage and zero P33 cases. `suite_complete` is unchanged
+and must remain false for the one-case invocation.
+
+The case deliberately holds one owned client under `desk_runtime` through the
+real runtime refusal and the existing failure-only admin read. Two fixed PID
+reads on that same continuously held handle corroborate ownership and liveness;
+they never alter diagnostic input or binding. Activity ownership belongs to the
+session login, whereas observation runs as `desk_runtime`; membership is granted
+to the login, not in reverse. Thus the original held-PID sample must retain
+category `unknown` and private null start, supplement `inconclusive/unknown_type`
+and summary `inconclusive=true`, with `observationFailed=false` and
+`capReached=false`. The later admin entry must be
+`client/provisional/hidden_origin`, status `observed`, reason `none`, cleanup
+`driver_handoff`. It must never be promoted to `lifetime_match` by the control.
+
+Only `noOtherSessions` may fail in the one observed target vector. The true
+positive count can exceed one; additional ambient entries remain retained.
+The held PID must be present in an untruncated sample and the admin entry must
+be visible. Capping, missing/vanished PID, hidden admin data, an observation
+fault or a different refusal fails this control. The genuine refusal object
+must survive unchanged, with exact driver descriptor restoration before the
+supplemental read. No grants, runtime SQL, privileges or isolation predicates
+change. The suite-wide latch is consumed once and never reset.
+
+Cleanup closes the holder once, retaining its error listener through end
+settlement. Existing inspection helpers then require zero constructed rows and
+unchanged receipts. The tracked owner performs ordinary DROP DATABASE, and one
+existing-admin read checks the held PID is absent. There is no polling, forced
+drop, termination, retry or new timer. Nested existing cleanup preservation
+keeps primary and cleanup failures; afterEach and independent afterAll residual
+verification remain binding. Driver handoff or client-end settlement alone is
+not a remote-termination proof.
+
+One bounded `FIXTURE_HELD_CLIENT_CONTROL` line uses schema
+`fixture-held-client-control/1`, the fixed case name and only five boolean facts:
+`rejectionIdentity`, `wrapperRestored`, `heldPidContinuity`,
+`hiddenOriginProvisional`, `cleanupComplete`. It is capped at 1,024 UTF-8 bytes.
+The existing PID-only vector/summary/maintenance lines remain authoritative and
+unchanged. Across all ten fixed observer scopes the maximum is 640 vectors and
+ten summaries, 64 observations/eight sample entries per observer; the suite
+still allows at most one supplemental read. This one-case route expects one
+vector, one summary and one maintenance record for `held_client_control`.
+
+Independent source/invocation review and separately released static checks
+precede any hosted execution. A subsequent release may authorize exactly one
+bounded control run; no reproduction-seeking fallback or unchanged retry is
+permitted. A successful result validates censored/provisional evidence, strict
+refusal and owned cleanup. It cannot retrospectively identify CI120, establish
+a root cause or fix, exercise live autovacuum/races/hidden-admin metadata, or
+give full-suite acceptance. Restoring the temporary route and running normal
+candidate acceptance are separate reviewed gates. Assembly implementation,
+real audio, genuine semantic admission and publication remain unauthorized.

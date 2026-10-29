@@ -1006,7 +1006,38 @@ const TARGET_SQL = `SELECT current_database() AS database, (SELECT oid::text FRO
  session_user AS login, inet_server_addr()::text AS server_address, inet_server_port() AS server_port,
  current_user = 'desk_runtime' AS runtime_role,
  (SELECT rolsuper OR rolcreatedb OR rolcreaterole OR rolbypassrls FROM pg_roles WHERE rolname = session_user) AS elevated,
- (SELECT count(*)::integer FROM pg_stat_activity WHERE datname = current_database() AND pid <> pg_backend_pid()) AS other_sessions`;
+ to_char(pg_postmaster_start_time() AT TIME ZONE 'UTC',
+ 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS diagnostic_server_start_utc,
+ activity.other_sessions, activity.other_backend_sample, activity.other_backend_sample_truncated
+ FROM (
+   WITH others AS MATERIALIZED (
+     SELECT pid,
+       to_char(backend_start AT TIME ZONE 'UTC',
+         'YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS backend_start_utc,
+       CASE
+         WHEN backend_type = 'client backend' THEN 'client'
+         WHEN backend_type = 'autovacuum worker' THEN 'autovacuum'
+         WHEN backend_type IN (
+           'autovacuum launcher', 'logical replication launcher',
+           'logical replication worker', 'parallel worker', 'background writer',
+           'checkpointer', 'archiver', 'standalone backend', 'startup',
+           'walreceiver', 'walsender', 'walwriter', 'walsummarizer'
+         ) THEN 'other_backend'
+         ELSE 'unknown'
+       END AS category
+     FROM pg_stat_activity
+     WHERE datname = current_database() AND pid <> pg_backend_pid()
+   )
+   SELECT count(*)::integer AS other_sessions,
+     (SELECT coalesce(jsonb_agg(jsonb_build_object(
+         'pid', sample.pid, 'category', sample.category,
+         'backend_start_utc', sample.backend_start_utc
+       ) ORDER BY sample.pid), '[]'::jsonb)
+      FROM (SELECT pid, category, backend_start_utc FROM others ORDER BY pid LIMIT 8) AS sample
+     ) AS other_backend_sample,
+     count(*) > 8 AS other_backend_sample_truncated
+   FROM others
+ ) AS activity`;
 function queryProjection(table: string): string {
   const spec = connectedFixture105Data().sql.find((s) => s.table === table);
   if (spec === undefined || typeof spec.primary_key !== "string")

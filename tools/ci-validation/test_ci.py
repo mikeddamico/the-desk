@@ -11,7 +11,7 @@ reach the probe replaces subprocess.run (and shutil.which) with a mock, so Node 
 the repository tree. Tests that need a checkout build a
 synthetic one under a temporary directory and patch ci.ROOT / ci.tracked_files only inside mock contexts.
 
-Pinned fail-closed rules: aggregate 80 files / 8,688 tests and all 29 integration files, each selected file exactly once
+Pinned fail-closed rules: aggregate 80 files / 8,689 tests and all 29 integration files, each selected file exactly once
 with no failed/skipped/todo test, a changed tracked-test inventory, a missing or foreign TEST_DATABASE_URL, a database
 that is not PostgreSQL 17 / the_desk_test / superuser, skipped integration files, root dist output accepted only when it
 is the unchanged build output (added, modified, empty, absent, symlinked or pre-existing dist and any tracked drift,
@@ -20,6 +20,7 @@ fork accepted, malformed or foreign base repository rejected, push rules), a dat
 zero process status, the aggregate blocked unless the controls collection record is complete, credential redaction of retained bytes, complete raw retention, and a final gate that needs both uploads and
 both audit and Gitleaks to have succeeded.
 """
+import ast
 import contextlib
 import io
 import json
@@ -60,7 +61,7 @@ def file_lines(counts=None, extra=''):
 
 SUMMARY = {
     'focused': ' Test Files  1 passed (1)\n      Tests  2 passed (2)\n',
-    'all': ' Test Files  80 passed (80)\n      Tests  8688 passed (8688)\n',
+    'all': ' Test Files  80 passed (80)\n      Tests  8689 passed (8689)\n',
 }
 
 
@@ -263,10 +264,10 @@ class AggregateSelection(unittest.TestCase):
     def test_count_drift_and_duplicates(self):
         counts = dict(PER_FILE)
         counts[SELECTED[0]] -= 1
-        self.assertTrue(any('sum to 8687' in e for e in self.check(file_lines(counts))[0]))
+        self.assertTrue(any('sum to 8688' in e for e in self.check(file_lines(counts))[0]))
         counts = dict(PER_FILE)
         counts[SELECTED[0]] += 1
-        self.assertTrue(any('sum to 8689' in e for e in self.check(file_lines(counts))[0]))
+        self.assertTrue(any('sum to 8690' in e for e in self.check(file_lines(counts))[0]))
         dup = file_lines() + ' ✓ %s (1 tests) 1ms\n' % SELECTED[0]
         self.assertTrue(any('2 result lines' in e for e in self.check(dup)[0]))
 
@@ -285,7 +286,7 @@ class AggregateSelection(unittest.TestCase):
         self.assertTrue(self.check(file_lines(), shrunk)[0])
 
     def test_summary_count_mismatch_with_correct_files(self):
-        for wrong in (8687, 8689):
+        for wrong in (8688, 8690):
             with self.subTest(tests=wrong):
                 def change(stage_dir, attempt):
                     write(stage_dir / 'stdout', file_lines() + ' Test Files  80 passed (80)\n      Tests  %d passed (%d)\n' % (wrong, wrong))
@@ -293,7 +294,7 @@ class AggregateSelection(unittest.TestCase):
 
     def test_skipped_summary_with_exit_zero_is_not_accepted(self):
         def change(stage_dir, attempt):
-            write(stage_dir / 'stdout', file_lines() + ' Test Files  80 passed (80)\n      Tests  8602 passed | 86 skipped (8688)\n')
+            write(stage_dir / 'stdout', file_lines() + ' Test Files  80 passed (80)\n      Tests  8603 passed | 86 skipped (8689)\n')
         self.assertTrue(any('Tests counts' in e for e in evaluate('all', change)))
 
 
@@ -1070,6 +1071,54 @@ class WorkflowShape(unittest.TestCase):
         self.assertNotIn('db:reset', text)
         self.assertNotIn('db:load-fixture', text)
         self.assertNotIn('workflow_dispatch', text)
+        self.assertNotIn('diagnostic120', text)
+        self.assertNotIn('target-diagnostic', text)
+        normal = ('      - name: Guard P33 aggregate (all)\n'
+                  '        run: /bin/bash tools/ci-validation/run-stage.sh all\n'
+                  '        timeout-minutes: 122\n'
+                  '      - name: Validate aggregate counts, coverage and source\n'
+                  '        run: /usr/bin/python3 -I -B tools/ci-validation/ci.py check all\n'
+                  '        timeout-minutes: 2\n')
+        for job in (text.split('  verify-writer:', 1)[1].split('  verify-rest:', 1)[0],
+                    text.split('  verify-rest:', 1)[1].split('  container:', 1)[0]):
+            with self.subTest(job=job.splitlines()[0]):
+                self.assertEqual(job.count('run-stage.sh all'), 1)
+                self.assertEqual(job.count('ci.py check all'), 1)
+                self.assertEqual(job.count(normal), 1)
+                stages = ['run-stage.sh prerequisite', 'run-stage.sh focused', 'id: upload-controls',
+                          'run-stage.sh all', 'ci.py check all', 'id: collect-full', 'id: upload-full',
+                          'id: audit', 'id: gitleaks', 'id: retain-security', 'id: upload-security', 'id: final']
+                offsets = [job.index(stage) for stage in stages]
+                self.assertEqual(offsets, sorted(offsets))
+                aggregate = job[job.index('name: Guard P33 aggregate (all)'):job.index('name: Collect full evidence')]
+                self.assertNotIn('if:', aggregate)  # Both steps retain default success() gating.
+                self.assertNotIn('continue-on-error', job)
+                for exact in ("id: collect-full\n        if: ${{ always() && steps.init.outcome != 'skipped' }}",
+                              "id: upload-full\n        if: ${{ always() && steps.collect-full.outcome == 'success' }}",
+                              "id: retain-security\n        if: ${{ always() && steps.gitleaks.outcome != 'skipped' }}",
+                              "id: upload-security\n        if: ${{ always() && steps.retain-security.outcome == 'success' }}",
+                              "id: final\n        if: ${{ always() && steps.init.outcome != 'skipped' }}"):
+                    self.assertIn(exact, job)
+        wrapper = (HERE / 'run-stage.sh').read_text()
+        guard = (ci.ROOT / 'test/support/p33-parity-supervisor.py').read_text()
+        for retired in ('diagnostic120', 'DIAGNOSTIC120', 'target-diagnostic', 'EXIT_FAIL'):
+            self.assertNotIn(retired, wrapper)
+        self.assertNotIn('target-diagnostic', guard)
+        self.assertIn('usage: run-stage.sh <prerequisite|focused|all>', wrapper)
+        self.assertIn('if [ "$STAGE" = all ]; then PROFILE=$DESK_CI_PARTITION; fi', wrapper)
+        self.assertIn('if [ "$1" = rest ]; then', wrapper)
+        self.assertIn('if [ "$PROFILE" = rest ]; then DB_FEED=$TEST_DATABASE_URL; else DB_FEED=""; fi', wrapper)
+        self.assertIn('all) CEILING=7200', wrapper)
+        self.assertIn('--signal=TERM --kill-after=20', wrapper)
+        self.assertIn('CAP_BYTES=67108864', wrapper)
+        self.assertIn('core %s', wrapper)
+        self.assertIn("printf '%s\\n' \"$RC\" > \"$STAGE_DIR/exit\" || exit 77", wrapper)
+        post = ('if [ "$RC" -eq 0 ] && [ "$POST_FAIL" -ne 0 ]; then\n'
+                '  echo "HOLD: command exited 0 but a required post-run record could not be written" >&2\n'
+                '  exit 78\nfi\nexit "$RC"\n')
+        self.assertTrue(wrapper.endswith(post))
+        self.assertLess(wrapper.index('"$RC" > "$STAGE_DIR/exit"'), wrapper.index(post))
+
 
     def test_partial_artifacts_are_still_uploaded_and_upload_failure_gates_the_aggregate(self):
         text = self.text()
@@ -1114,12 +1163,12 @@ class Fixture105Tooling(unittest.TestCase):
             self.assertIn('required connected file absent: ' + name, errors)
 
     def test_compensating_connected_count_drift_refuses(self):
-        for unit, native in ((57, 34), (59, 32)):
+        for unit, native in ((57, 35), (59, 33)):
             counts = dict(PER_FILE)
             counts.update({'test/unit/connected-fixture105.test.ts': unit, 'test/integration/connected-fixture105.test.ts': native})
             errors = []
             ci.check_all_files(file_lines(counts), TRACKED, errors, {})
-            self.assertEqual(sum(counts.values()), 8688)
+            self.assertEqual(sum(counts.values()), 8689)
             self.assertEqual(sum('connected per-file count drift' in e for e in errors), 2)
 
     def test_frozen_render046_file_and_exact_count_are_required(self):
@@ -1137,7 +1186,7 @@ class Fixture105Tooling(unittest.TestCase):
                     counts[OLD_SELECTED[0]] += pinned - count
                     errors = []
                     ci.check_all_files(file_lines(counts), TRACKED, errors, {})
-                    self.assertEqual(sum(counts.values()), 8688)
+                    self.assertEqual(sum(counts.values()), 8689)
                     self.assertIn('frozen-render046 per-file count drift: ' + name, errors)
 
     def test_fixture_namespace_does_not_match_supervisor_prefix(self):
@@ -1742,7 +1791,7 @@ class Partition155Tests(unittest.TestCase):
     def test_exact_pair_and_disjoint_union(self):
         self.assertEqual(self.joint(), [])
         self.assertEqual(set(self.proofs['writer']['files']) & set(self.proofs['rest']['files']), set())
-        self.assertEqual(sum(sum(p['files'].values()) for p in self.proofs.values()), 8688)
+        self.assertEqual(sum(sum(p['files'].values()) for p in self.proofs.values()), 8689)
         self.assertEqual(len(ci.partition_files(self.tracked, 'all')), 80)
 
     def test_missing_unknown_and_legacy_labels(self):
@@ -2031,7 +2080,7 @@ class Partition155Tests(unittest.TestCase):
         with fixture_world() as (base, checkout, root, binding), mock.patch.dict(os.environ, {'DESK_CI_PARTITION': 'rest'}), \
              mock.patch.object(ci, 'ROOT', checkout), mock.patch.object(ci, 'tracked_files', return_value=self.tracked):
             record = ci.fixture_capture_stage(base, 'all', {}, False)
-            self.assertFalse(record['complete'])  # Existing intentionally incomplete 33-case journal.
+            self.assertFalse(record['complete'])  # Intentionally incomplete 34-case journal.
 
 
     def test_workflow_closed_jobs_and_credentials(self):
@@ -2054,29 +2103,178 @@ class Partition155Tests(unittest.TestCase):
 class FixtureTargetObserverShapeTests(unittest.TestCase):
     """Retained first-invocation observer shape, not a runtime or isolation proof."""
 
+    def test_held_client_control_route_registration_and_cleanup_are_closed(self):
+        name = 'identifies a held client while preserving target isolation refusal'
+        native = (ci.ROOT / 'test/integration/connected-fixture105.test.ts').read_text()
+        guard_source = (ci.ROOT / 'test/support/p33-parity-supervisor.py').read_text()
+        guard = ast.parse(guard_source)
+        filters = [node.value for node in ast.walk(guard) if isinstance(node, ast.Assign)
+                   and any(isinstance(target, ast.Name) and target.id == 'filters' for target in node.targets)]
+        self.assertEqual(len(filters), 1)
+        self.assertIsInstance(filters[0], ast.Dict)
+        routes = {key.value: value for key, value in zip(filters[0].keys, filters[0].values)
+                  if isinstance(key, ast.Constant)}
+        self.assertEqual(set(routes), {'focused', 'p33', 'parity', 'unit', 'integration', 'all', 'writer', 'rest'})
+        self.assertIn("    test = 'test/unit/p33-parity-harness.test.ts'", guard_source)
+        self.assertEqual(ast.literal_eval(routes['writer']), ['test/unit/writer-fixture-input.test.ts'])
+        for profile, expression in (('all', "['--exclude', test]"),
+                                    ('rest', "['--exclude', test, '--exclude', 'test/unit/writer-fixture-input.test.ts']")):
+            self.assertEqual(ast.dump(routes[profile]), ast.dump(ast.parse(expression, mode='eval').body))
+        self.assertNotIn('target-diagnostic', guard_source)
+        self.assertEqual(ci.FIXTURE_CONNECTED_COUNTS, {
+            'test/unit/connected-fixture105.test.ts': 58,
+            'test/integration/connected-fixture105.test.ts': 34})
+        self.assertEqual(len(ci.FIXTURE_CASE_EXPECTATIONS), 34)
+        self.assertEqual(ci.FIXTURE_CASE_EXPECTATIONS[-1], {'case_id': name, 'expected': ['pre_target_failure']})
+        self.assertEqual(sum(row['case_id'] == name for row in ci.FIXTURE_CASE_EXPECTATIONS), 1)
+        registration = native[native.index('const CASE_EXPECTATIONS:'):native.index('function caseBody(')]
+        declared = [{'case_id': case_id, 'expected': re.findall(r'"([^"]+)"', expected)}
+                    for case_id, expected in re.findall(r'case_id:\s*"([^"]+)",\s*expected:\s*\[([^\]]*)\]', registration)]
+        self.assertEqual(declared, ci.FIXTURE_CASE_EXPECTATIONS)
+        self.assertEqual(registration.count('case_id:\n      "' + name + '"'), 1)
+        self.assertIn('case_id:\n      "' + name + '",\n    expected: ["pre_target_failure"],', registration)
+        start = native.index('  it(\n    "' + name + '"')
+        end = native.index('\n    LIMIT,\n  );', start) + len('\n    LIMIT,\n  );')
+        case = native[start:end]
+        self.assertEqual(native[end:].strip(), '});')
+        self.assertNotIn('  it(', native[start + 6:end])
+        self.assertEqual(case.count('"' + name + '"'), 3)  # Test, registered body and closed witness.
+        self.assertEqual(case.count('new pg.Client('), 1)
+        self.assertEqual(case.count('await holder.connect();'), 1)
+        self.assertEqual(case.count('"SELECT pg_backend_pid() AS pid"'), 2)
+        self.assertEqual(case.count('await runConnectedFixture105();'), 1)
+        self.assertEqual(case.count('await holder.end();'), 1)
+        self.assertEqual(case.count('await env.close();'), 1)
+        self.assertEqual(case.count('requireCluster().admin.query'), 1)
+        self.assertEqual(case.count('FIXTURE_HELD_CLIENT_CONTROL'), 1)
+        for exact in ('connectionString: env.runtimeUrl,', 'options: "-c role=desk_runtime",',
+                      'connectionTimeoutMillis: 10000,', 'query_timeout: 20000,',
+                      'schema: "fixture-held-client-control/1",', 'Buffer.byteLength(line) > 1024',
+                      '"SELECT NOT EXISTS (SELECT 1 FROM pg_stat_activity WHERE pid = $1::integer) AS absent"'):
+            self.assertIn(exact, case)
+        ordered = [
+            'holder.on("error", onHolderError);', 'await withTestCleanup(',
+            'expect(maintenanceLatch.used).toBe(false);', 'await holder.connect();',
+            'const identity = await holder.query', 'await observer.around(',
+            'await runConnectedFixture105();', 'expect(outer === original).toBe(true);',
+            'expect(original.code === "fixture_target_isolation").toBe(true);',
+            'expect(cleanupFailures.has(original)).toBe(false);',
+            'Object.getOwnPropertyDescriptor(pg.Client.prototype, "query"),\n            ).toEqual(descriptor);',
+            'observer.assertHeldClient(pid);', 'const continued = await holder.query',
+            'expect(continued.rows).toEqual([{ pid }]);', 'await holder.end();',
+            'holder.removeListener("error", onHolderError);', 'expect(await counts(env))',
+            'await expectConstructionRollback(env);', 'await env.close();',
+            'requireCluster().admin.query', 'expect(absent.rows).toEqual([{ absent: true }]);',
+            'cleanupComplete = true;', 'FIXTURE_HELD_CLIENT_CONTROL']
+        offsets = [case.index(value) for value in ordered]
+        self.assertEqual(offsets, sorted(offsets))
+        for forbidden in ('maintenanceLatch.used =', 'new pg.Pool(', 'setTimeout(', 'Promise.race(',
+                          '.release(', 'terminate_backend', 'FORCE', 'mock', 'SET ROLE', 'RESET ROLE'):
+            self.assertNotIn(forbidden, case)
+        assertion = native[native.index('  assertHeldClient('):native.index('  private retain(')]
+        for exact in ('expect(this.count).toBe(1);', 'expect(this.capReached).toBe(false);',
+                      'expect(this.observationFailed).toBe(false);', 'expect(this.vectors).toHaveLength(1);',
+                      'expect(targetInt(entry.vector.otherSessions, 1)).toBe(true);',
+                      'expect(entry.supplement.status).toBe("inconclusive");',
+                      'expect(entry.supplement.reason).toBe("unknown_type");',
+                      'expect(entry.supplement.truncated).toBe(false);',
+                      '(origin) => origin.pid === pid && origin.start === null,',
+                      'binding: "provisional",', 'reason: "hidden_origin",', 'cleanup: "driver_handoff",'):
+            self.assertIn(exact, assertion)
+        self.assertNotIn('"lifetime_match"', assertion)
+        self.assertNotIn('expect(this.maintenanceCapture?.origins)', assertion)
+        self.assertIn('harnessCases.length === CASE_EXPECTATIONS.length', native)
+
     def test_observer_is_first_invocation_only_bounded_and_restores_before_output(self):
         native = (ci.ROOT / 'test/integration/connected-fixture105.test.ts').read_text()
         self.assertIn('const LIMIT = 120000;', native)
         self.assertNotIn('native117', native)
-        self.assertEqual(native.count('await new TargetObserver(env.name).around(firstInvocation);'), 1)
+        self.assertEqual(native.count('await new TargetObserver(\n          env.name,\n          "acquisition_cut",\n          maintenanceOwner(),\n        ).around(firstInvocation);'), 1)
         self.assertIn('const TARGET_OBSERVER_CAP = 64;', native)
-        observer = native[native.index('class TargetObserver'):native.index('// pg-pool attaches release')]
-        self.assertIn('Object.defineProperty(pg.Client.prototype, "query", descriptor);\n        this.emit();\n        return Promise.resolve();', observer)
+        observer = native[native.index('class TargetObserver'):native.index('  /** All 20 groups')]
+        selftest = native[native.index('  static async selftest()'):native.index('// pg-pool attaches release')]
+        before_all = native[native.index('  beforeAll(async () => {'):native.index('  type ConfigSeed =')]
+        self.assertEqual(native.count('await TargetObserver.selftest();'), 1)
+        self.assertTrue(before_all.startswith('  beforeAll(async () => {\n    await TargetObserver.selftest();\n'))
+        self.assertLess(before_all.index('await TargetObserver.selftest();'), before_all.index('await cluster.bootstrap();'))
+        self.assertNotRegex(native, r"""(["'])target-diagnostic\1""")
+        self.assertIn('capture.mockRestore();', selftest)
+        self.assertIn('expect(groups).toBe(20);', selftest)
+        self.assertLess(selftest.rindex('capture.mockRestore();'), selftest.index("process.stderr.write(\n      'FIXTURE_TARGET_DIAGNOSTIC_SELFTEST"))
+        self.assertNotIn('runConnectedFixture105(', selftest)
+        self.assertNotIn('.query(', selftest)
+        around = observer[observer.index('  async around('):observer.index('  /** Failure vectors')]
+        cleanup = around[around.rindex('      async () => {'):]
+        restore = 'Object.defineProperty(pg.Client.prototype, "query", descriptor);'
+        self.assertEqual(cleanup.count(restore), 1)
+        self.assertLess(cleanup.index(restore),
+                        cleanup.index('this.maintenanceRecord = await observeMaintenance('))
+        self.assertLess(cleanup.index('this.maintenanceRecord = await observeMaintenance('),
+                        cleanup.index('          this.emit();'))
         self.assertEqual(observer.count('await Reflect.apply('), 1)
         self.assertIn('rejected(ordinal);\n        throw error;', observer)
         self.assertIn('observe(ordinal, result);\n      return result;', observer)
         self.assertIn('this.count === 0 ||', observer)
-        self.assertIn('this.vectors.some((vector) => vector.outcome === "rejected") ||', observer)
-        self.assertEqual(observer.count('process.stderr.write'), 2)
+        self.assertIn('this.vectors.some(\n            (entry) =>\n              entry.vector.outcome === "rejected" ||\n              entry.supplement.status === "inconclusive",\n          ) ||', observer)
+        self.assertEqual(observer.count('process.stderr.write'), 3)
         self.assertNotIn('console.', observer)
         self.assertNotIn('.query(', observer)
         case = native[native.index('const primary = new Error("controlled acquisition cut");'):]
-        self.assertLess(case.index('await new TargetObserver(env.name).around(firstInvocation);'), case.index('expect(await counts(env))'))
+        self.assertLess(case.index('await new TargetObserver(\n          env.name,\n          "acquisition_cut",\n          maintenanceOwner(),\n        ).around(firstInvocation);'), case.index('expect(await counts(env))'))
         self.assertLess(case.index('expect(await counts(env))'), case.index('"fixture_execution_already_present"'))
         self.assertIn('await expect(runConnectedFixture105()).rejects.toBe(primary);', case)
         self.assertIn('expect(seen).toBe(1); // A witness that never reaches its intended cut fails.', native)
         self.assertEqual(native.count('"closes continuation when the acquisition-cut await throws before consumption",'), 3)
+        for scope in ('preseed_foreign_claim', 'preseed_missing_config', 'preseed_changed_show', 'preseed_extra_show',
+                      'unknown_construction', 'unknown_program_run', 'unknown_program_attempt', 'unknown_package_binding'):
+            with self.subTest(scope=scope):
+                self.assertGreaterEqual(native.count('"' + scope + '"'), 2)
+        self.assertEqual(native.count('observer.restoreWitness('), 2)
+        self.assertNotIn('const observeTarget =', native)
+        self.assertIn('await withTestCleanup(\n            async () => {', native)
+        self.assertIn('if (!this.restorationFailed) {', observer)
+        self.assertIn('Buffer.byteLength(line) > 1024', observer)
+        self.assertIn('targetUnknown("record_limit")', observer)
+        sql = (ci.ROOT / 'src/runtime/connected-fixture105.ts').read_text()
+        sql = sql[sql.index('const TARGET_SQL ='):sql.index('function queryProjection')]
+        self.assertEqual(sql.count('FROM pg_stat_activity'), 1)
+        self.assertIn('WITH others AS MATERIALIZED', sql)
+        self.assertIn('count(*)::integer AS other_sessions', sql)
+        self.assertIn('FROM (SELECT pid, category, backend_start_utc FROM others ORDER BY pid LIMIT 8) AS sample', sql)
+        self.assertIn('WHERE datname = current_database() AND pid <> pg_backend_pid()', sql)
+        self.assertIn("ELSE 'unknown'", sql)
+        # Independent CASE allowlist literals; mapping is source review, not executed SQL.
+        other_types = ('autovacuum launcher', 'logical replication launcher', 'logical replication worker',
+                       'parallel worker', 'background writer', 'checkpointer', 'archiver', 'standalone backend',
+                       'startup', 'walreceiver', 'walsender', 'walwriter', 'walsummarizer')
+        allowlist = sql[sql.index('WHEN backend_type IN ('):sql.index(") THEN 'other_backend'")]
+        self.assertEqual(tuple(re.findall(r"'([^']+)'", allowlist)), other_types)
+
         self.assertIn('harnessCases.length === CASE_EXPECTATIONS.length', native)
+        maintenance = native[native.index('const MAINTENANCE_SQL ='):native.index('class TargetObserver')]
+        self.assertEqual(maintenance.count('await owner.admin.query<Obj>('), 1)
+        self.assertIn('ORDER BY pid LIMIT 9', maintenance)
+        self.assertIn('WHERE pid = ANY($1::integer[])', maintenance)
+        self.assertIn('datid = $3::oid AND datname = $2::text', maintenance)
+        for forbidden in ('.connect(', '.release(', '.end(', 'setTimeout(', 'Promise.race(', 'new pg.Pool('):
+            with self.subTest(forbidden=forbidden):
+                self.assertNotIn(forbidden, maintenance)
+        self.assertIn('cleanup: "unknown"', maintenance)
+        self.assertIn('record.cleanup = "driver_handoff";', maintenance)
+        self.assertNotIn('"settled"', maintenance)
+        self.assertNotIn('"pending"', maintenance)
+        self.assertIn('this.maintenance.latch.used = true;', observer)
+        self.assertIn('"diagnostic_server_start_utc"', native)
+        self.assertIn('AS diagnostic_server_start_utc', sql)
+        self.assertIn("'backend_start_utc', sample.backend_start_utc", sql)
+        self.assertIn('fixture-target-selftest/2', selftest)
+        self.assertIn('"groups":20,"passed":20', selftest)
+        self.assertIn('All 20 groups passed in CI122; normal-route coverage is pending for this candidate.', native)
+        self.assertIn('Buffer.byteLength(extra) > 2048', observer)
+        for group in range(13, 21):
+            with self.subTest(group=group):
+                self.assertEqual(selftest.count('done(%d);' % group), 1)
+
 
 
 class P33NativeLoaderTests(unittest.TestCase):
