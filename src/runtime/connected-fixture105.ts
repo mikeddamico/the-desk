@@ -79,6 +79,366 @@ import {
 
 // Fixed fixture tooling boundary; builtin reads only. Runner provenance is not hostile-user authentication.
 type FixtureRootObject = Record<string, unknown>;
+
+// Diagnostics only: this private synchronous scope stores numbers, never files, bindings or authority.
+const INTEGRITY_ADDED_PREFIXES = [
+  "@aws-sdk/checksums",
+  "@aws-sdk/client-s3",
+  "@aws-sdk/core",
+  "@aws-sdk/credential-provider-env",
+  "@aws-sdk/credential-provider-http",
+  "@aws-sdk/credential-provider-ini",
+  "@aws-sdk/credential-provider-login",
+  "@aws-sdk/credential-provider-node",
+  "@aws-sdk/credential-provider-process",
+  "@aws-sdk/credential-provider-sso",
+  "@aws-sdk/credential-provider-web-identity",
+  "@aws-sdk/middleware-sdk-s3",
+  "@aws-sdk/nested-clients",
+  "@aws-sdk/signature-v4-multi-region",
+  "@aws-sdk/token-providers",
+  "@aws-sdk/types",
+  "@aws-sdk/xml-builder",
+  "@aws/lambda-invoke-store",
+  "@smithy/core",
+  "@smithy/credential-provider-imds",
+  "@smithy/fetch-http-handler",
+  "@smithy/node-http-handler",
+  "@smithy/signature-v4",
+  "@smithy/types",
+  "bowser",
+  "tslib",
+] as const;
+type IntegrityBucket = "auxiliary" | "source" | "other_tools" | "added_prefix";
+type IntegrityOperation = "open" | "stat" | "directory" | "read" | "hash";
+interface IntegrityBucketCounter {
+  operations: Record<IntegrityOperation, { calls: number; ns: bigint }>;
+  ancestor_open_attempts: number;
+  read_bytes: number;
+  hash_bytes: number;
+}
+interface IntegrityGraphCounter {
+  kind: "source" | "tools";
+  ns: bigint;
+  nodes: number;
+  files: number;
+  directories: number;
+  symlinks: number;
+  read_bytes: number;
+  hash_bytes: number;
+}
+interface IntegrityProbeCounter {
+  failed: boolean;
+  bucket: IntegrityBucket;
+  currentGraph: IntegrityGraphCounter | undefined;
+  releaseCalls: number;
+  releaseNs: bigint;
+  rootNs: bigint[];
+  graphs: IntegrityGraphCounter[];
+  compare: Record<"source" | "tools", { calls: number; ns: bigint }>;
+  buckets: Record<IntegrityBucket, IntegrityBucketCounter>;
+  ownerReads: number;
+  ownerReadBytes: number;
+  ownerHashes: number;
+}
+let integrityProbe: IntegrityProbeCounter | undefined;
+let integrityProbeUsed = false;
+function integrityClock(probe: IntegrityProbeCounter): bigint {
+  try {
+    return process.hrtime.bigint();
+  } catch {
+    probe.failed = true;
+    return 0n;
+  }
+}
+function integrityElapsed(probe: IntegrityProbeCounter, start: bigint): bigint {
+  const elapsed = integrityClock(probe) - start;
+  if (elapsed < 0n) {
+    probe.failed = true;
+    return 0n;
+  }
+  return elapsed;
+}
+/** Observe the original synchronous operation once; telemetry cannot replace its value or primary error. */
+function fixtureIntegrityMeasure<T>(
+  operation: IntegrityOperation,
+  work: () => T,
+): T {
+  const probe = integrityProbe;
+  if (!probe) return work();
+  const bucket = probe.buckets[probe.bucket];
+  const start = integrityClock(probe);
+  try {
+    return work();
+  } finally {
+    try {
+      bucket.operations[operation].calls++;
+      bucket.operations[operation].ns += integrityElapsed(probe, start);
+    } catch {
+      probe.failed = true;
+    }
+  }
+}
+function fixtureIntegrityBytes(kind: "read" | "hash", bytes: number): void {
+  const probe = integrityProbe;
+  if (!probe) return;
+  try {
+    if (kind === "read") {
+      probe.buckets[probe.bucket].read_bytes += bytes;
+      if (probe.currentGraph) probe.currentGraph.read_bytes += bytes;
+    } else {
+      probe.buckets[probe.bucket].hash_bytes += bytes;
+      if (probe.currentGraph) probe.currentGraph.hash_bytes += bytes;
+    }
+  } catch {
+    probe.failed = true;
+  }
+}
+function fixtureIntegrityOpenAttempt(): void {
+  const probe = integrityProbe;
+  if (!probe) return;
+  try {
+    probe.buckets[probe.bucket].ancestor_open_attempts++;
+  } catch {
+    probe.failed = true;
+  }
+}
+function fixtureIntegrityOwnerRead(bytes: number): void {
+  const probe = integrityProbe;
+  if (!probe) return;
+  try {
+    probe.ownerReads++;
+    probe.ownerReadBytes += bytes;
+  } catch {
+    probe.failed = true;
+  }
+}
+function fixtureIntegrityOwnerHash(bytes: Uint8Array): string {
+  const result = fixtureIntegrityMeasure("hash", () => sha256(bytes));
+  fixtureIntegrityBytes("hash", bytes.length);
+  if (integrityProbe) integrityProbe.ownerHashes++;
+  return result;
+}
+function fixtureIntegrityRelease<T>(work: () => T): T {
+  const probe = integrityProbe;
+  if (!probe) return work();
+  probe.releaseCalls++;
+  const start = integrityClock(probe);
+  try {
+    return work();
+  } finally {
+    probe.releaseNs += integrityElapsed(probe, start);
+  }
+}
+function fixtureIntegrityRoot<T>(work: () => T): T {
+  const probe = integrityProbe;
+  if (!probe) return work();
+  const index = probe.rootNs.length;
+  if (index >= 2) {
+    probe.failed = true;
+    return work();
+  }
+  probe.rootNs.push(0n);
+  const start = integrityClock(probe);
+  try {
+    return work();
+  } finally {
+    probe.rootNs[index] = integrityElapsed(probe, start);
+  }
+}
+function fixtureIntegrityGraph<T>(kind: "source" | "tools", work: () => T): T {
+  const probe = integrityProbe;
+  if (!probe) return work();
+  if (probe.graphs.length >= 4) {
+    probe.failed = true;
+    return work();
+  }
+  const graph: IntegrityGraphCounter = {
+    kind,
+    ns: 0n,
+    nodes: 0,
+    files: 0,
+    directories: 0,
+    symlinks: 0,
+    read_bytes: 0,
+    hash_bytes: 0,
+  };
+  const previous = probe.currentGraph;
+  probe.currentGraph = graph;
+  probe.graphs.push(graph);
+  const start = integrityClock(probe);
+  try {
+    return work();
+  } finally {
+    graph.ns = integrityElapsed(probe, start);
+    probe.currentGraph = previous;
+  }
+}
+function fixtureIntegrityNode<T>(
+  kind: "source" | "tools",
+  relative: string,
+  work: () => T,
+): T {
+  const probe = integrityProbe;
+  if (!probe) return work();
+  const previous = probe.bucket;
+  probe.bucket =
+    kind === "source"
+      ? "source"
+      : INTEGRITY_ADDED_PREFIXES.some(
+            (prefix) =>
+              relative === prefix || relative.startsWith(prefix + "/"),
+          )
+        ? "added_prefix"
+        : "other_tools";
+  try {
+    return work();
+  } finally {
+    probe.bucket = previous;
+  }
+}
+function fixtureIntegrityNodeType(
+  type: "file" | "directory" | "symlink",
+): void {
+  const probe = integrityProbe;
+  if (!probe?.currentGraph) return;
+  probe.currentGraph.nodes++;
+  if (type === "file") probe.currentGraph.files++;
+  else if (type === "directory") probe.currentGraph.directories++;
+  else probe.currentGraph.symlinks++;
+}
+function fixtureIntegrityInventoryCompare(
+  kind: "source" | "tools",
+  expected: unknown,
+  actual: unknown,
+): void {
+  const probe = integrityProbe;
+  if (!probe) {
+    fixtureSame(expected, actual);
+    return;
+  }
+  const start = integrityClock(probe);
+  try {
+    fixtureSame(expected, actual);
+  } finally {
+    probe.compare[kind].calls++;
+    probe.compare[kind].ns += integrityElapsed(probe, start);
+  }
+}
+function integrityBucket(): IntegrityBucketCounter {
+  return {
+    operations: {
+      open: { calls: 0, ns: 0n },
+      stat: { calls: 0, ns: 0n },
+      directory: { calls: 0, ns: 0n },
+      read: { calls: 0, ns: 0n },
+      hash: { calls: 0, ns: 0n },
+    },
+    ancestor_open_attempts: 0,
+    read_bytes: 0,
+    hash_bytes: 0,
+  };
+}
+/** One zero-argument, zero-SQL diagnostic. Original release errors propagate; no binding or capability escapes. */
+export function inspectConnectedFixture105ReleaseIntegrityCost(): Readonly<FixtureRootObject> {
+  if (integrityProbeUsed)
+    throw new Error("fixture_integrity_probe_already_used");
+  integrityProbeUsed = true;
+  if (
+    arguments.length !== 0 ||
+    integrityProbe !== undefined ||
+    process.env.DESK_ENV !== "test" ||
+    process.env.PROVIDERS_ENABLED !== "false" ||
+    process.env.GENERATION_KILL_SWITCH !== "true" ||
+    Object.keys(process.env).some(
+      (key) =>
+        key === "DATABASE_URL" ||
+        key === "TEST_DATABASE_URL" ||
+        key.startsWith("PG") ||
+        key.startsWith("R2_") ||
+        key.startsWith("CLOUDFLARE_") ||
+        key.startsWith("CF_") ||
+        key.startsWith("AWS_") ||
+        key.startsWith("DESK_DURABLE_PAIR_"),
+    )
+  )
+    throw new Error("fixture_integrity_probe_context");
+  const probe: IntegrityProbeCounter = {
+    failed: false,
+    bucket: "auxiliary",
+    currentGraph: undefined,
+    releaseCalls: 0,
+    releaseNs: 0n,
+    rootNs: [],
+    graphs: [],
+    compare: { source: { calls: 0, ns: 0n }, tools: { calls: 0, ns: 0n } },
+    buckets: {
+      auxiliary: integrityBucket(),
+      source: integrityBucket(),
+      other_tools: integrityBucket(),
+      added_prefix: integrityBucket(),
+    },
+    ownerReads: 0,
+    ownerReadBytes: 0,
+    ownerHashes: 0,
+  };
+  integrityProbe = probe;
+  try {
+    readRelease();
+  } finally {
+    integrityProbe = undefined;
+  }
+  const rootSum = probe.rootNs.reduce((sum, ns) => sum + ns, 0n);
+  if (rootSum > probe.releaseNs) probe.failed = true;
+  const buckets = Object.fromEntries(
+    Object.entries(probe.buckets).map(([key, value]) => [
+      key,
+      {
+        operations: Object.fromEntries(
+          Object.entries(value.operations).map(([operation, count]) => [
+            operation,
+            { calls: count.calls, ns: String(count.ns) },
+          ]),
+        ),
+        ancestor_open_attempts: value.ancestor_open_attempts,
+        read_bytes: value.read_bytes,
+        hash_bytes: value.hash_bytes,
+      },
+    ]),
+  );
+  return frozen({
+    schema: "fixture105-integrity-cost/1",
+    status: probe.failed ? "incomplete" : "measured",
+    authority: "none",
+    overhead: "included_not_calibrated",
+    coverage: "instrumented_operations_only_unattributed_remainder_is_not_SQL",
+    prefix_sha256: sha256(Buffer.from(canonicalJson(INTEGRITY_ADDED_PREFIXES))),
+    read_release_calls: probe.releaseCalls,
+    inclusive: {
+      release_ns: String(probe.releaseNs),
+      root_ns: probe.rootNs.map(String),
+      outside_root_ns: String(
+        rootSum <= probe.releaseNs ? probe.releaseNs - rootSum : 0n,
+      ),
+      graphs: probe.graphs.map((graph) => ({ ...graph, ns: String(graph.ns) })),
+    },
+    disjoint: {
+      buckets,
+      inventory_compare: Object.fromEntries(
+        Object.entries(probe.compare).map(([kind, count]) => [
+          kind,
+          { calls: count.calls, ns: String(count.ns) },
+        ]),
+      ),
+    },
+    owner: {
+      reads: probe.ownerReads,
+      read_bytes: probe.ownerReadBytes,
+      hashes: probe.ownerHashes,
+    },
+  });
+}
+
 function fixtureObject(value: unknown): FixtureRootObject {
   if (typeof value !== "object" || value === null || Array.isArray(value))
     throw new Error("fixture_root_shape");
@@ -92,7 +452,11 @@ function fixtureKeys(value: FixtureRootObject, keys: readonly string[]): void {
     throw new Error("fixture_root_shape");
 }
 function fixtureRawHash(bytes: Uint8Array): string {
-  return fixtureCrypto.createHash("sha256").update(bytes).digest("hex");
+  const result = fixtureIntegrityMeasure("hash", () =>
+    fixtureCrypto.createHash("sha256").update(bytes).digest("hex"),
+  );
+  fixtureIntegrityBytes("hash", bytes.length);
+  return result;
 }
 function fixtureJson(bytes: Buffer): FixtureRootObject {
   return fixtureObject(
@@ -111,33 +475,37 @@ function fixtureAbsolute(path: string): void {
 }
 /** Open every ancestor by descriptor; never follow an ancestor or leaf symlink. */
 function fixtureOpen(path: string, directory: boolean): number {
-  fixtureAbsolute(path);
-  let fd = fixtureFs.openSync(
-    "/",
-    fixtureFs.constants.O_RDONLY |
-      fixtureFs.constants.O_DIRECTORY |
-      fixtureFs.constants.O_NOFOLLOW,
-  );
-  try {
-    const parts = path.split("/").filter(Boolean);
-    for (let index = 0; index < parts.length; index++) {
-      const next = fixtureFs.openSync(
-        `/proc/self/fd/${String(fd)}/${String(parts[index])}`,
-        fixtureFs.constants.O_RDONLY |
-          fixtureFs.constants.O_NOFOLLOW |
-          fixtureFs.constants.O_NONBLOCK |
-          (index < parts.length - 1 || directory
-            ? fixtureFs.constants.O_DIRECTORY
-            : 0),
-      );
+  return fixtureIntegrityMeasure("open", () => {
+    fixtureAbsolute(path);
+    fixtureIntegrityOpenAttempt();
+    let fd = fixtureFs.openSync(
+      "/",
+      fixtureFs.constants.O_RDONLY |
+        fixtureFs.constants.O_DIRECTORY |
+        fixtureFs.constants.O_NOFOLLOW,
+    );
+    try {
+      const parts = path.split("/").filter(Boolean);
+      for (let index = 0; index < parts.length; index++) {
+        fixtureIntegrityOpenAttempt();
+        const next = fixtureFs.openSync(
+          `/proc/self/fd/${String(fd)}/${String(parts[index])}`,
+          fixtureFs.constants.O_RDONLY |
+            fixtureFs.constants.O_NOFOLLOW |
+            fixtureFs.constants.O_NONBLOCK |
+            (index < parts.length - 1 || directory
+              ? fixtureFs.constants.O_DIRECTORY
+              : 0),
+        );
+        fixtureFs.closeSync(fd);
+        fd = next;
+      }
+      return fd;
+    } catch (error) {
       fixtureFs.closeSync(fd);
-      fd = next;
+      throw error;
     }
-    return fd;
-  } catch (error) {
-    fixtureFs.closeSync(fd);
-    throw error;
-  }
+  });
 }
 function fixtureIdentity(
   path: string,
@@ -176,7 +544,10 @@ function fixtureRead(path: string, limit: number, privateMode = true): Buffer {
       before.size > limit
     )
       throw new Error("fixture_root_leaf");
-    const bytes = fixtureFs.readFileSync(fd);
+    const bytes = fixtureIntegrityMeasure("read", () =>
+      fixtureFs.readFileSync(fd),
+    );
+    fixtureIntegrityBytes("read", bytes.length);
     const after = fixtureFs.fstatSync(fd);
     if (
       bytes.length !== before.size ||
@@ -210,58 +581,77 @@ function fixtureGraph(
   base: string,
   kind: "source" | "tools",
 ): FixtureRootObject {
-  const result: FixtureRootObject = {};
-  let visited = 0;
-  function visit(path: string, relative: string): void {
-    // Each prior visit can add at most one own key; preserve the exact bound.
-    if (visited++ > 20000 && Object.keys(result).length > 20000)
-      throw new Error("fixture_inventory_bound");
-    const info = fixtureFs.lstatSync(path);
-    if (info.isSymbolicLink()) {
-      if (kind !== "tools") throw new Error("fixture_source_link");
-      const target = fixtureFs.readlinkSync(path);
-      const resolved = fixturePath.resolve(fixturePath.dirname(path), target);
-      if (fixturePath.isAbsolute(target) || !resolved.startsWith(base + "/"))
-        throw new Error("fixture_tool_link");
-      result[relative] = { type: "symlink", mode: info.mode & 0o777, target };
-      return;
-    }
-    if (info.isDirectory()) {
-      const fd = fixtureOpen(path, true);
-      try {
-        const actual = fixtureFs.fstatSync(fd);
-        if (actual.ino !== info.ino || actual.dev !== info.dev)
-          throw new Error("fixture_inventory_changed");
-        result[relative] = { type: "directory", mode: info.mode & 0o777 };
-        for (const name of fixtureFs
-          .readdirSync(`/proc/self/fd/${String(fd)}`)
-          .sort()) {
+  return fixtureIntegrityGraph(kind, () => {
+    const result: FixtureRootObject = {};
+    let visited = 0;
+    function visit(path: string, relative: string): void {
+      fixtureIntegrityNode(kind, relative, () => {
+        // Each prior visit can add at most one own key; preserve the exact bound.
+        if (visited++ > 20000 && Object.keys(result).length > 20000)
+          throw new Error("fixture_inventory_bound");
+        const info = fixtureIntegrityMeasure("stat", () =>
+          fixtureFs.lstatSync(path),
+        );
+        if (info.isSymbolicLink()) {
+          fixtureIntegrityNodeType("symlink");
+          if (kind !== "tools") throw new Error("fixture_source_link");
+          const target = fixtureFs.readlinkSync(path);
+          const resolved = fixturePath.resolve(
+            fixturePath.dirname(path),
+            target,
+          );
           if (
-            relative === "" &&
-            (kind === "source"
-              ? [".git", "node_modules", "dist"]
-              : [".vite-temp"]
-            ).includes(name)
+            fixturePath.isAbsolute(target) ||
+            !resolved.startsWith(base + "/")
           )
-            continue;
-          visit(`${path}/${name}`, relative ? `${relative}/${name}` : name);
+            throw new Error("fixture_tool_link");
+          result[relative] = {
+            type: "symlink",
+            mode: info.mode & 0o777,
+            target,
+          };
+          return;
         }
-      } finally {
-        fixtureFs.closeSync(fd);
-      }
-      return;
+        if (info.isDirectory()) {
+          fixtureIntegrityNodeType("directory");
+          const fd = fixtureOpen(path, true);
+          try {
+            const actual = fixtureFs.fstatSync(fd);
+            if (actual.ino !== info.ino || actual.dev !== info.dev)
+              throw new Error("fixture_inventory_changed");
+            result[relative] = { type: "directory", mode: info.mode & 0o777 };
+            for (const name of fixtureIntegrityMeasure("directory", () =>
+              fixtureFs.readdirSync(`/proc/self/fd/${String(fd)}`),
+            ).sort()) {
+              if (
+                relative === "" &&
+                (kind === "source"
+                  ? [".git", "node_modules", "dist"]
+                  : [".vite-temp"]
+                ).includes(name)
+              )
+                continue;
+              visit(`${path}/${name}`, relative ? `${relative}/${name}` : name);
+            }
+          } finally {
+            fixtureFs.closeSync(fd);
+          }
+          return;
+        }
+        if (!info.isFile()) throw new Error("fixture_inventory_special");
+        fixtureIntegrityNodeType("file");
+        const bytes = fixtureRead(path, 64 * 1024 * 1024, false);
+        result[relative] = {
+          type: "file",
+          mode: info.mode & 0o777,
+          bytes: bytes.length,
+          sha256: fixtureRawHash(bytes),
+        };
+      });
     }
-    if (!info.isFile()) throw new Error("fixture_inventory_special");
-    const bytes = fixtureRead(path, 64 * 1024 * 1024, false);
-    result[relative] = {
-      type: "file",
-      mode: info.mode & 0o777,
-      bytes: bytes.length,
-      sha256: fixtureRawHash(bytes),
-    };
-  }
-  visit(base, "");
-  return result;
+    visit(base, "");
+    return result;
+  });
 }
 function fixtureTempObservation(
   checkout: string,
@@ -316,128 +706,134 @@ function fixtureExecutionRoot(checkout: string): {
   marker: FixtureRootObject;
   temp: FixtureRootObject;
 } {
-  const raw = process.env.DESK_FIXTURE105_BINDING;
-  if (raw === undefined || Buffer.byteLength(raw) > 8192)
-    throw new Error("fixture_runner_binding_missing");
-  const binding = fixtureObject(JSON.parse(raw) as unknown);
-  fixtureKeys(binding, ["root", "root_sha256"]);
-  if (
-    typeof binding.root !== "string" ||
-    typeof binding.root_sha256 !== "string" ||
-    !/^[0-9a-f]{64}$/u.test(binding.root_sha256)
-  )
-    throw new Error("fixture_runner_binding_shape");
-  const root = binding.root;
-  fixtureAbsolute(root);
-  fixtureAbsolute(checkout);
-  if (
-    fixturePath.basename(root) !== "desk-connected-fixture105" ||
-    root === checkout ||
-    root.startsWith(checkout + "/") ||
-    checkout.startsWith(root + "/")
-  )
-    throw new Error("fixture_root_location");
-  const bytes = fixtureRead(`${root}/ROOT.json`, 262144);
-  if (fixtureRawHash(bytes) !== binding.root_sha256)
-    throw new Error("fixture_root_pin");
-  const marker = fixtureJson(bytes);
-  fixtureKeys(marker, [
-    "schema",
-    "purpose",
-    "checkout",
-    "tmp",
-    "root",
-    "source_ledger_sha256",
-    "release_sha256",
-    "source_inventory_sha256",
-    "tools_inventory_sha256",
-  ]);
-  if (
-    marker.schema !== "fixture105-execution-root/1" ||
-    marker.purpose !== "test_fixture105"
-  )
-    throw new Error("fixture_root_profile");
-  fixtureSame(marker.checkout, fixtureIdentity(checkout, false));
-  fixtureSame(marker.tmp, fixtureIdentity(fixturePath.dirname(root), true));
-  fixtureSame(marker.root, fixtureIdentity(root, true));
-  for (const directory of ["bindings", "expectations", "receipts"])
-    fixtureIdentity(`${root}/${directory}`, true);
-  const expectedFiles = [
-    "ADOPTION.json",
-    "RELEASE.json",
-    "SOURCE-INVENTORY.json",
-    "SOURCE-LEDGER.json",
-    "TOOLS-INVENTORY.json",
-  ];
-  fixtureSame(fixtureFs.readdirSync(`${root}/bindings`).sort(), expectedFiles);
-  for (const [name, key] of [
-    ["SOURCE-LEDGER.json", "source_ledger_sha256"],
-    ["RELEASE.json", "release_sha256"],
-    ["SOURCE-INVENTORY.json", "source_inventory_sha256"],
-    ["TOOLS-INVENTORY.json", "tools_inventory_sha256"],
-  ] as const) {
-    const data = fixtureRead(
-      `${root}/bindings/${name}`,
-      name.includes("INVENTORY") ? 4194304 : 262144,
+  return fixtureIntegrityRoot(() => {
+    const raw = process.env.DESK_FIXTURE105_BINDING;
+    if (raw === undefined || Buffer.byteLength(raw) > 8192)
+      throw new Error("fixture_runner_binding_missing");
+    const binding = fixtureObject(JSON.parse(raw) as unknown);
+    fixtureKeys(binding, ["root", "root_sha256"]);
+    if (
+      typeof binding.root !== "string" ||
+      typeof binding.root_sha256 !== "string" ||
+      !/^[0-9a-f]{64}$/u.test(binding.root_sha256)
+    )
+      throw new Error("fixture_runner_binding_shape");
+    const root = binding.root;
+    fixtureAbsolute(root);
+    fixtureAbsolute(checkout);
+    if (
+      fixturePath.basename(root) !== "desk-connected-fixture105" ||
+      root === checkout ||
+      root.startsWith(checkout + "/") ||
+      checkout.startsWith(root + "/")
+    )
+      throw new Error("fixture_root_location");
+    const bytes = fixtureRead(`${root}/ROOT.json`, 262144);
+    if (fixtureRawHash(bytes) !== binding.root_sha256)
+      throw new Error("fixture_root_pin");
+    const marker = fixtureJson(bytes);
+    fixtureKeys(marker, [
+      "schema",
+      "purpose",
+      "checkout",
+      "tmp",
+      "root",
+      "source_ledger_sha256",
+      "release_sha256",
+      "source_inventory_sha256",
+      "tools_inventory_sha256",
+    ]);
+    if (
+      marker.schema !== "fixture105-execution-root/1" ||
+      marker.purpose !== "test_fixture105"
+    )
+      throw new Error("fixture_root_profile");
+    fixtureSame(marker.checkout, fixtureIdentity(checkout, false));
+    fixtureSame(marker.tmp, fixtureIdentity(fixturePath.dirname(root), true));
+    fixtureSame(marker.root, fixtureIdentity(root, true));
+    for (const directory of ["bindings", "expectations", "receipts"])
+      fixtureIdentity(`${root}/${directory}`, true);
+    const expectedFiles = [
+      "ADOPTION.json",
+      "RELEASE.json",
+      "SOURCE-INVENTORY.json",
+      "SOURCE-LEDGER.json",
+      "TOOLS-INVENTORY.json",
+    ];
+    fixtureSame(
+      fixtureFs.readdirSync(`${root}/bindings`).sort(),
+      expectedFiles,
     );
-    if (fixtureRawHash(data) !== marker[key])
-      throw new Error("fixture_root_binding_pin");
-    if (name.includes("INVENTORY"))
-      fixtureSame(
-        fixtureJson(data),
-        fixtureGraph(
-          name.startsWith("SOURCE") ? checkout : `${checkout}/node_modules`,
+    for (const [name, key] of [
+      ["SOURCE-LEDGER.json", "source_ledger_sha256"],
+      ["RELEASE.json", "release_sha256"],
+      ["SOURCE-INVENTORY.json", "source_inventory_sha256"],
+      ["TOOLS-INVENTORY.json", "tools_inventory_sha256"],
+    ] as const) {
+      const data = fixtureRead(
+        `${root}/bindings/${name}`,
+        name.includes("INVENTORY") ? 4194304 : 262144,
+      );
+      if (fixtureRawHash(data) !== marker[key])
+        throw new Error("fixture_root_binding_pin");
+      if (name.includes("INVENTORY"))
+        fixtureIntegrityInventoryCompare(
           name.startsWith("SOURCE") ? "source" : "tools",
+          fixtureJson(data),
+          fixtureGraph(
+            name.startsWith("SOURCE") ? checkout : `${checkout}/node_modules`,
+            name.startsWith("SOURCE") ? "source" : "tools",
+          ),
+        );
+    }
+    const releaseBytes = fixtureRead(`${root}/bindings/RELEASE.json`, 262144);
+    const ledgerBytes = fixtureRead(
+      `${root}/bindings/SOURCE-LEDGER.json`,
+      262144,
+    );
+    const adoption = fixtureJson(
+      fixtureRead(`${root}/bindings/ADOPTION.json`, 262144),
+    );
+    fixtureSame(adoption, {
+      release_id: "connected-fixture105-test-release/1",
+      release_bytes: releaseBytes.length,
+      release_sha256: fixtureRawHash(releaseBytes),
+      ledger_bytes: ledgerBytes.length,
+      ledger_sha256: fixtureRawHash(ledgerBytes),
+    });
+    const release = fixtureJson(releaseBytes);
+    if (
+      release.release_id !== adoption.release_id ||
+      release.owner_source_ledger_sha256 !== adoption.ledger_sha256
+    )
+      throw new Error("fixture_adoption_relation");
+    const temp = fixtureTempObservation(checkout, false);
+    if (temp.absent !== true) {
+      const created = fixtureJson(
+        fixtureRead(
+          `${fixturePath.dirname(fixturePath.dirname(root))}/evidence/fixture105-loader-created.json`,
+          262144,
         ),
       );
-  }
-  const releaseBytes = fixtureRead(`${root}/bindings/RELEASE.json`, 262144);
-  const ledgerBytes = fixtureRead(
-    `${root}/bindings/SOURCE-LEDGER.json`,
-    262144,
-  );
-  const adoption = fixtureJson(
-    fixtureRead(`${root}/bindings/ADOPTION.json`, 262144),
-  );
-  fixtureSame(adoption, {
-    release_id: "connected-fixture105-test-release/1",
-    release_bytes: releaseBytes.length,
-    release_sha256: fixtureRawHash(releaseBytes),
-    ledger_bytes: ledgerBytes.length,
-    ledger_sha256: fixtureRawHash(ledgerBytes),
-  });
-  const release = fixtureJson(releaseBytes);
-  if (
-    release.release_id !== adoption.release_id ||
-    release.owner_source_ledger_sha256 !== adoption.ledger_sha256
-  )
-    throw new Error("fixture_adoption_relation");
-  const temp = fixtureTempObservation(checkout, false);
-  if (temp.absent !== true) {
-    const created = fixtureJson(
-      fixtureRead(
-        `${fixturePath.dirname(fixturePath.dirname(root))}/evidence/fixture105-loader-created.json`,
-        262144,
-      ),
-    );
-    fixtureSame(temp.identity, created.identity);
-  }
-  const rootNames = fixtureFs.readdirSync(root);
-  if (
-    rootNames.some(
-      (name) =>
-        ![
-          "ROOT.json",
-          "bindings",
-          "expectations",
-          "receipts",
-          "tool-cache",
-          "RETENTION.json",
-        ].includes(name),
+      fixtureSame(temp.identity, created.identity);
+    }
+    const rootNames = fixtureFs.readdirSync(root);
+    if (
+      rootNames.some(
+        (name) =>
+          ![
+            "ROOT.json",
+            "bindings",
+            "expectations",
+            "receipts",
+            "tool-cache",
+            "RETENTION.json",
+          ].includes(name),
+      )
     )
-  )
-    throw new Error("fixture_root_population");
-  return { root, rootHash: binding.root_sha256, marker, temp };
+      throw new Error("fixture_root_population");
+    return { root, rootHash: binding.root_sha256, marker, temp };
+  });
 }
 
 type Obj = Record<string, unknown>;
@@ -787,211 +1183,218 @@ function readRelease(): {
   binding: ReleaseBinding;
   observation: Readonly<{ root_sha256: string; temp: FixtureRootObject }>;
 } {
-  // Fresh full checks bracket this synchronous read only. Nothing is reused across
-  // a guard call or await; this is not authentication against hostile same-user code.
-  const before = fixtureExecutionRoot(fixtureCheckout);
-  const releaseBytes = fixtureRead(
-    `${before.root}/bindings/RELEASE.json`,
-    262144,
-  );
-  const ledgerBytes = fixtureRead(
-    `${before.root}/bindings/SOURCE-LEDGER.json`,
-    262144,
-  );
-  const adoption = jsonBytes(
-    fixtureRead(`${before.root}/bindings/ADOPTION.json`, 262144),
-  );
-  const release = jsonBytes(releaseBytes);
-  const ledger = jsonBytes(ledgerBytes);
-  if (
-    !exactKeys(adoption, [
-      "release_id",
-      "release_bytes",
-      "release_sha256",
-      "ledger_bytes",
-      "ledger_sha256",
-    ]) ||
-    adoption.release_id !== RELEASE_ID ||
-    adoption.release_bytes !== releaseBytes.length ||
-    adoption.release_sha256 !== sha256(releaseBytes) ||
-    adoption.ledger_bytes !== ledgerBytes.length ||
-    adoption.ledger_sha256 !== sha256(ledgerBytes)
-  )
-    throw new ConnectedFixture105Refusal("fixture_release_adoption");
-  if (
-    !exactKeys(release, [
-      "release_id",
-      "profile",
-      "purpose",
-      "environment",
-      "contract_sha256",
-      "fixture_manifest_sha256",
-      "owner_source_ledger_sha256",
-      "subject_binding",
-      "allowed_effects",
-    ]) ||
-    release.release_id !== RELEASE_ID ||
-    release.profile !== "connected-evaluation-fixture105/1" ||
-    release.purpose !== "evaluation" ||
-    release.environment !== "test" ||
-    release.owner_source_ledger_sha256 !== sha256(ledgerBytes) ||
-    canonicalJson(release.subject_binding) !== canonicalJson(fixedSubject()) ||
-    canonicalJson(release.allowed_effects) !== canonicalJson(EFFECTS)
-  )
-    throw new ConnectedFixture105Refusal("fixture_release_binding");
-  // Final ordered path list and row hashes are authored only after source review.
-  if (
-    !exactKeys(ledger, ["schema", "rows"]) ||
-    ledger.schema !== "connected-fixture105-source-ledger/1"
-  )
-    throw new ConnectedFixture105Refusal("fixture_ledger_shape");
-  const rows = objects(ledger.rows);
-  if (rows.length === 0 || rows.length > 128)
-    throw new ConnectedFixture105Refusal("fixture_ledger_bound");
-  const expectedPaths = [
-    "docs/connected-fixture105.md",
-    "eslint.config.js",
-    "fixtures/connected-fixture151/AUTHORED-NORMALIZED-ROWS.json",
-    "fixtures/connected-fixture151/BRIEF.json",
-    "fixtures/connected-fixture151/CANONICAL-PREIMAGES.json",
-    "fixtures/connected-fixture151/CEILING-EXPECTATIONS.json",
-    "fixtures/connected-fixture151/CLAIM-ROWS.json",
-    "fixtures/connected-fixture151/CONFIG.json",
-    "fixtures/connected-fixture151/CONNECTED-REFUSAL-WITNESSES.json",
-    "fixtures/connected-fixture151/CONTEXT-EXPECTED.json",
-    "fixtures/connected-fixture151/CONTEXT-RESOLUTION.json",
-    "fixtures/connected-fixture151/DERIVATION-EXPECTED.json",
-    "fixtures/connected-fixture151/DIRECTION-EXPECTED.json",
-    "fixtures/connected-fixture151/EVENT-ROWS.json",
-    "fixtures/connected-fixture151/EVIDENCE-ROWS.json",
-    "fixtures/connected-fixture151/FIVE-MATCH-INPUTS.json",
-    "fixtures/connected-fixture151/IDENTITIES.json",
-    "fixtures/connected-fixture151/INNER-DIGEST-REFUSAL-WITNESSES.json",
-    "fixtures/connected-fixture151/INNER-DIGEST-RULES.md",
-    "fixtures/connected-fixture151/PACKAGE.json",
-    "fixtures/connected-fixture151/PURE-REFUSAL-WITNESSES.json",
-    "fixtures/connected-fixture151/RESULT-DIGEST-MAP.json",
-    "fixtures/connected-fixture151/RIGHTS.json",
-    "fixtures/connected-fixture151/ROSTER.json",
-    "fixtures/connected-fixture151/ROW-AND-BYTE-BOUNDS.json",
-    "fixtures/connected-fixture151/SCHEMA-HASH-MAPPING.json",
-    "fixtures/connected-fixture151/SCHEMA-audit.json",
-    "fixtures/connected-fixture151/SCHEMA-construction-observation.json",
-    "fixtures/connected-fixture151/SCHEMA-operation.json",
-    "fixtures/connected-fixture151/SPOKEN-TEXT.txt",
-    "fixtures/connected-fixture151/SQL-COLUMN-MAP.json",
-    "fixtures/connected-fixture151/SUBSTANTIVE-SCRIPT.json",
-    "fixtures/connected-fixture151/SUCCESSOR-PROVENANCE.json",
-    "fixtures/connected-fixture151/SUPPORT-ROWS.json",
-    "fixtures/connected-fixture151/TEMPLATE.json",
-    "fixtures/connected-fixture151/TEXTURE-CARRIER.json",
-    "fixtures/connected-fixture151/TEXTURE-OWNER-ADDENDUM.md",
-    "fixtures/connected-fixture151/TEXTURE-REWRITE.json",
-    "fixtures/connected-fixture151/TEXTURE-SCRIPT.json",
-    "fixtures/connected-fixture151/WRITER-VIEW-EXPECTED.json",
-    "package-lock.json",
-    "package.json",
-    "src/identity/artifacts.ts",
-    "src/identity/domains.ts",
-    "src/runtime/claims-writing-gate.ts",
-    "src/runtime/connected-fixture105-data.ts",
-    "src/runtime/connected-fixture151-data.ts",
-    "src/runtime/connected-fixture105.ts",
-    "src/runtime/package.ts",
-    "src/runtime/performance-direction-fixture105.ts",
-    "src/runtime/performance-direction.ts",
-    "src/runtime/speech-texture.ts",
-    "test/integration/connected-fixture105.test.ts",
-    "test/support/p33-parity-runner.ts",
-    "test/unit/connected-fixture105.test.ts",
-    "tools/ci-validation/ci.py",
-    "tools/ci-validation/run-stage.sh",
-    "tools/ci-validation/test_ci.py",
-    "tsconfig.build.json",
-    "tsconfig.json",
-    "vitest.config.ts",
-  ];
-  if (
-    canonicalJson(rows.map((row) => row.path)) !== canonicalJson(expectedPaths)
-  )
-    throw new ConnectedFixture105Refusal("fixture_ledger_paths");
-  const seen = new Set<string>();
-  for (const row of rows) {
+  return fixtureIntegrityRelease(() => {
+    // Fresh full checks bracket this synchronous read only. Nothing is reused across
+    // a guard call or await; this is not authentication against hostile same-user code.
+    const before = fixtureExecutionRoot(fixtureCheckout);
+    const releaseBytes = fixtureRead(
+      `${before.root}/bindings/RELEASE.json`,
+      262144,
+    );
+    const ledgerBytes = fixtureRead(
+      `${before.root}/bindings/SOURCE-LEDGER.json`,
+      262144,
+    );
+    const adoption = jsonBytes(
+      fixtureRead(`${before.root}/bindings/ADOPTION.json`, 262144),
+    );
+    const release = jsonBytes(releaseBytes);
+    const ledger = jsonBytes(ledgerBytes);
     if (
-      !exactKeys(row, ["path", "bytes", "sha256"]) ||
-      typeof row.path !== "string" ||
-      (!/^(?:src|test|fixtures|docs|migrations)\/[A-Za-z0-9_./-]+$/u.test(
-        row.path,
-      ) &&
-        ![
-          "package.json",
-          "package-lock.json",
-          "tsconfig.json",
-          "tsconfig.build.json",
-          "eslint.config.js",
-          "vitest.config.ts",
-          "tools/ci-validation/ci.py",
-          "tools/ci-validation/test_ci.py",
-          "tools/ci-validation/run-stage.sh",
-        ].includes(row.path)) ||
-      row.path
-        .split("/")
-        .some((part) => part === ".." || part === "." || part === "") ||
-      /(?:RELEASE|ADOPTION|SOURCE-LEDGER)\.json$/u.test(row.path) ||
-      seen.has(row.path) ||
-      !Number.isSafeInteger(row.bytes) ||
-      typeof row.sha256 !== "string" ||
-      !HASH.test(row.sha256)
+      !exactKeys(adoption, [
+        "release_id",
+        "release_bytes",
+        "release_sha256",
+        "ledger_bytes",
+        "ledger_sha256",
+      ]) ||
+      adoption.release_id !== RELEASE_ID ||
+      adoption.release_bytes !== releaseBytes.length ||
+      adoption.release_sha256 !== sha256(releaseBytes) ||
+      adoption.ledger_bytes !== ledgerBytes.length ||
+      adoption.ledger_sha256 !== sha256(ledgerBytes)
     )
-      throw new ConnectedFixture105Refusal("fixture_ledger_row");
-    seen.add(row.path);
-    const path = fileURLToPath(new URL(`../../${row.path}`, import.meta.url));
-    const fd = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW);
-    try {
-      const before = fstatSync(fd);
+      throw new ConnectedFixture105Refusal("fixture_release_adoption");
+    if (
+      !exactKeys(release, [
+        "release_id",
+        "profile",
+        "purpose",
+        "environment",
+        "contract_sha256",
+        "fixture_manifest_sha256",
+        "owner_source_ledger_sha256",
+        "subject_binding",
+        "allowed_effects",
+      ]) ||
+      release.release_id !== RELEASE_ID ||
+      release.profile !== "connected-evaluation-fixture105/1" ||
+      release.purpose !== "evaluation" ||
+      release.environment !== "test" ||
+      release.owner_source_ledger_sha256 !== sha256(ledgerBytes) ||
+      canonicalJson(release.subject_binding) !==
+        canonicalJson(fixedSubject()) ||
+      canonicalJson(release.allowed_effects) !== canonicalJson(EFFECTS)
+    )
+      throw new ConnectedFixture105Refusal("fixture_release_binding");
+    // Final ordered path list and row hashes are authored only after source review.
+    if (
+      !exactKeys(ledger, ["schema", "rows"]) ||
+      ledger.schema !== "connected-fixture105-source-ledger/1"
+    )
+      throw new ConnectedFixture105Refusal("fixture_ledger_shape");
+    const rows = objects(ledger.rows);
+    if (rows.length === 0 || rows.length > 128)
+      throw new ConnectedFixture105Refusal("fixture_ledger_bound");
+    const expectedPaths = [
+      "docs/connected-fixture105.md",
+      "eslint.config.js",
+      "fixtures/connected-fixture151/AUTHORED-NORMALIZED-ROWS.json",
+      "fixtures/connected-fixture151/BRIEF.json",
+      "fixtures/connected-fixture151/CANONICAL-PREIMAGES.json",
+      "fixtures/connected-fixture151/CEILING-EXPECTATIONS.json",
+      "fixtures/connected-fixture151/CLAIM-ROWS.json",
+      "fixtures/connected-fixture151/CONFIG.json",
+      "fixtures/connected-fixture151/CONNECTED-REFUSAL-WITNESSES.json",
+      "fixtures/connected-fixture151/CONTEXT-EXPECTED.json",
+      "fixtures/connected-fixture151/CONTEXT-RESOLUTION.json",
+      "fixtures/connected-fixture151/DERIVATION-EXPECTED.json",
+      "fixtures/connected-fixture151/DIRECTION-EXPECTED.json",
+      "fixtures/connected-fixture151/EVENT-ROWS.json",
+      "fixtures/connected-fixture151/EVIDENCE-ROWS.json",
+      "fixtures/connected-fixture151/FIVE-MATCH-INPUTS.json",
+      "fixtures/connected-fixture151/IDENTITIES.json",
+      "fixtures/connected-fixture151/INNER-DIGEST-REFUSAL-WITNESSES.json",
+      "fixtures/connected-fixture151/INNER-DIGEST-RULES.md",
+      "fixtures/connected-fixture151/PACKAGE.json",
+      "fixtures/connected-fixture151/PURE-REFUSAL-WITNESSES.json",
+      "fixtures/connected-fixture151/RESULT-DIGEST-MAP.json",
+      "fixtures/connected-fixture151/RIGHTS.json",
+      "fixtures/connected-fixture151/ROSTER.json",
+      "fixtures/connected-fixture151/ROW-AND-BYTE-BOUNDS.json",
+      "fixtures/connected-fixture151/SCHEMA-HASH-MAPPING.json",
+      "fixtures/connected-fixture151/SCHEMA-audit.json",
+      "fixtures/connected-fixture151/SCHEMA-construction-observation.json",
+      "fixtures/connected-fixture151/SCHEMA-operation.json",
+      "fixtures/connected-fixture151/SPOKEN-TEXT.txt",
+      "fixtures/connected-fixture151/SQL-COLUMN-MAP.json",
+      "fixtures/connected-fixture151/SUBSTANTIVE-SCRIPT.json",
+      "fixtures/connected-fixture151/SUCCESSOR-PROVENANCE.json",
+      "fixtures/connected-fixture151/SUPPORT-ROWS.json",
+      "fixtures/connected-fixture151/TEMPLATE.json",
+      "fixtures/connected-fixture151/TEXTURE-CARRIER.json",
+      "fixtures/connected-fixture151/TEXTURE-OWNER-ADDENDUM.md",
+      "fixtures/connected-fixture151/TEXTURE-REWRITE.json",
+      "fixtures/connected-fixture151/TEXTURE-SCRIPT.json",
+      "fixtures/connected-fixture151/WRITER-VIEW-EXPECTED.json",
+      "package-lock.json",
+      "package.json",
+      "src/identity/artifacts.ts",
+      "src/identity/domains.ts",
+      "src/runtime/claims-writing-gate.ts",
+      "src/runtime/connected-fixture105-data.ts",
+      "src/runtime/connected-fixture151-data.ts",
+      "src/runtime/connected-fixture105.ts",
+      "src/runtime/package.ts",
+      "src/runtime/performance-direction-fixture105.ts",
+      "src/runtime/performance-direction.ts",
+      "src/runtime/speech-texture.ts",
+      "test/integration/connected-fixture105.test.ts",
+      "test/support/p33-parity-runner.ts",
+      "test/unit/connected-fixture105.test.ts",
+      "tools/ci-validation/ci.py",
+      "tools/ci-validation/run-stage.sh",
+      "tools/ci-validation/test_ci.py",
+      "tsconfig.build.json",
+      "tsconfig.json",
+      "vitest.config.ts",
+    ];
+    if (
+      canonicalJson(rows.map((row) => row.path)) !==
+      canonicalJson(expectedPaths)
+    )
+      throw new ConnectedFixture105Refusal("fixture_ledger_paths");
+    const seen = new Set<string>();
+    for (const row of rows) {
       if (
-        !before.isFile() ||
-        before.size !== row.bytes ||
-        before.size > 1048576
+        !exactKeys(row, ["path", "bytes", "sha256"]) ||
+        typeof row.path !== "string" ||
+        (!/^(?:src|test|fixtures|docs|migrations)\/[A-Za-z0-9_./-]+$/u.test(
+          row.path,
+        ) &&
+          ![
+            "package.json",
+            "package-lock.json",
+            "tsconfig.json",
+            "tsconfig.build.json",
+            "eslint.config.js",
+            "vitest.config.ts",
+            "tools/ci-validation/ci.py",
+            "tools/ci-validation/test_ci.py",
+            "tools/ci-validation/run-stage.sh",
+          ].includes(row.path)) ||
+        row.path
+          .split("/")
+          .some((part) => part === ".." || part === "." || part === "") ||
+        /(?:RELEASE|ADOPTION|SOURCE-LEDGER)\.json$/u.test(row.path) ||
+        seen.has(row.path) ||
+        !Number.isSafeInteger(row.bytes) ||
+        typeof row.sha256 !== "string" ||
+        !HASH.test(row.sha256)
       )
-        throw new ConnectedFixture105Refusal("fixture_source_identity");
-      const bytes = readFileSync(fd);
-      const after = fstatSync(fd);
-      if (
-        bytes.length !== before.size ||
-        before.ino !== after.ino ||
-        before.dev !== after.dev ||
-        before.mtimeMs !== after.mtimeMs ||
-        sha256(bytes) !== row.sha256
-      )
-        throw new ConnectedFixture105Refusal("fixture_source_identity");
-    } finally {
-      closeSync(fd);
+        throw new ConnectedFixture105Refusal("fixture_ledger_row");
+      seen.add(row.path);
+      const path = fileURLToPath(new URL(`../../${row.path}`, import.meta.url));
+      const fd = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW);
+      try {
+        const before = fstatSync(fd);
+        if (
+          !before.isFile() ||
+          before.size !== row.bytes ||
+          before.size > 1048576
+        )
+          throw new ConnectedFixture105Refusal("fixture_source_identity");
+        const bytes = fixtureIntegrityMeasure("read", () => readFileSync(fd));
+        fixtureIntegrityBytes("read", bytes.length);
+        fixtureIntegrityOwnerRead(bytes.length);
+        const after = fstatSync(fd);
+        if (
+          bytes.length !== before.size ||
+          before.ino !== after.ino ||
+          before.dev !== after.dev ||
+          before.mtimeMs !== after.mtimeMs ||
+          fixtureIntegrityOwnerHash(bytes) !== row.sha256
+        )
+          throw new ConnectedFixture105Refusal("fixture_source_identity");
+      } finally {
+        closeSync(fd);
+      }
     }
-  }
-  if (
-    release.fixture_manifest_sha256 !== connectedFixture105ResourceIdentity() ||
-    release.contract_sha256 !==
-      rows.find((row) => row.path === "docs/connected-fixture105.md")?.sha256
-  )
-    throw new ConnectedFixture105Refusal("fixture_release_source_link");
-  const execution = fixtureExecutionRoot(fixtureCheckout);
-  if (
-    execution.root !== before.root ||
-    execution.rootHash !== before.rootHash ||
-    canonicalJson(execution.marker) !== canonicalJson(before.marker)
-  )
-    throw new ConnectedFixture105Refusal("fixture_release_changed");
-  return frozen({
-    binding: {
-      release,
-      digest: sha256(releaseBytes),
-      ledgerDigest: sha256(ledgerBytes),
-      subject: fixedSubject(),
-      rootHash: execution.rootHash,
-      root: execution.root,
-    },
-    observation: { root_sha256: execution.rootHash, temp: execution.temp },
+    if (
+      release.fixture_manifest_sha256 !==
+        connectedFixture105ResourceIdentity() ||
+      release.contract_sha256 !==
+        rows.find((row) => row.path === "docs/connected-fixture105.md")?.sha256
+    )
+      throw new ConnectedFixture105Refusal("fixture_release_source_link");
+    const execution = fixtureExecutionRoot(fixtureCheckout);
+    if (
+      execution.root !== before.root ||
+      execution.rootHash !== before.rootHash ||
+      canonicalJson(execution.marker) !== canonicalJson(before.marker)
+    )
+      throw new ConnectedFixture105Refusal("fixture_release_changed");
+    return frozen({
+      binding: {
+        release,
+        digest: sha256(releaseBytes),
+        ledgerDigest: sha256(ledgerBytes),
+        subject: fixedSubject(),
+        rootHash: execution.rootHash,
+        root: execution.root,
+      },
+      observation: { root_sha256: execution.rootHash, temp: execution.temp },
+    });
   });
 }
 

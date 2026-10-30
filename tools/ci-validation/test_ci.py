@@ -1062,8 +1062,72 @@ class WorkflowShape(unittest.TestCase):
     def text(self):
         return (HERE.parents[1] / '.github' / 'workflows' / 'ci.yml').read_text()
 
+    def assert_integrity_probe_workflow(self, text):
+        """Closed temporary route; the normal/native workflow assertions below remain unchanged."""
+        self.assertEqual(re.findall(r'^  ([a-z_-]+):$', text, re.M),
+                         ['pull_request', 'push', 'verify-writer', 'verify-rest', 'verify', 'container'])
+        self.assertNotIn('workflow_dispatch', text)
+        self.assertNotIn('continue-on-error', text)
+        self.assertNotIn('TEMPORARY NATIVE UNKNOWN', text)
+        self.assertNotIn('command-postgres-hosted.ts', text)
+        for job in ('verify-writer', 'container'):
+            self.assertIn('  ' + job + ':\n    if: ${{ false }}', text)
+        rest = text.split('  verify-rest:\n', 1)[1].split('\n  verify:\n', 1)[0]
+        self.assertNotIn('    services:', rest)
+        self.assertNotIn('TEST_DATABASE_URL:', rest)
+        self.assertIn('DESK_CI_PARTITION: rest', rest)
+        blocks = rest.split('      - ')[1:]
+        excluded = ('Reconstruct the fixed synthetic', 'Probe the disposable', 'Guard P33', 'Validate P33',
+                    'Collect controls', 'Retain controls', 'Validate aggregate', 'Collect full', 'Retain full',
+                    'Retain generated security', 'Upload partition security', 'Final evidence')
+        skipped = 0
+        for block in blocks:
+            should_skip = block.startswith(tuple('name: ' + name for name in excluded)) or block.startswith(('id: audit\n', 'id: gitleaks\n'))
+            if should_skip:
+                self.assertEqual(block.count('if: ${{ false }} # Integrity probe: excluded execution.'), 1)
+                skipped += 1
+            elif not block.startswith(('name: Settle the owned fixture runtime', 'name: Retain the one-shot', 'name: HOLD integrity')):
+                self.assertNotIn('if:', block)
+        self.assertEqual(skipped, 17)
+        self.assertEqual(rest.count('run-stage.sh prerequisite'), 1)
+        self.assertEqual(rest.count('run-stage.sh focused'), 1)
+        self.assertEqual(rest.count('run-stage.sh all'), 1)
+        self.assertIn("id: fixture046-cleanup\n        if: ${{ always() && steps.fixture046-runtime.outcome != 'skipped' }}", rest)
+        for required in ('node-version: 24.21.0', 'npm install --global npm@11.19.0 --ignore-scripts',
+                         'npm ci --ignore-scripts', 'npm run format:check', 'npm run lint', 'npm run typecheck',
+                         'npm run build', 'tools/ci-validation/test_ci.py', 'ci.py init', 'ci.py bind-build'):
+            self.assertEqual(rest.count(required), 1)
+        exact = ('      - name: Measure one fixed release integrity read without SQL\n'
+                 '        id: integrity-probe\n'
+                 '        timeout-minutes: 6\n'
+                 '        run: /usr/bin/timeout --signal=TERM --kill-after=20s 300s /usr/bin/python3 -I -B test/support/fixture105-integrity-owner.py\n')
+        self.assertEqual(rest.count(exact), 1)
+        self.assertEqual(rest.count('fixture105-integrity-owner.py'), 1)
+        sequence = ['id: init', 'npm run format:check', 'npm run lint', 'npm run typecheck', 'npm run build',
+                    'tools/ci-validation/test_ci.py', 'ci.py bind-build', 'id: integrity-probe',
+                    'name: Retain the one-shot', 'name: HOLD integrity', 'run-stage.sh all']
+        offsets = [rest.index(value) for value in sequence]
+        self.assertEqual(offsets, sorted(offsets))
+        retain = rest.split('      - name: Retain the one-shot', 1)[1].split('      - name: HOLD integrity', 1)[0]
+        for literal in ("if: ${{ always() && steps.integrity-probe.outcome != 'skipped' }}",
+                        'actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02',
+                        'path: ${{ runner.temp }}/ci/evidence/fixture105-integrity/retained',
+                        'if-no-files-found: error', 'retention-days: 30'):
+            self.assertEqual(retain.count(literal), 1)
+        hold = rest.split('      - name: HOLD integrity', 1)[1].split('      - name: Guard P33 aggregate', 1)[0]
+        self.assertIn('if: ${{ always() }}', hold)
+        self.assertEqual(hold.count('exit 78'), 1)
+        self.assertIn('no SQL or full CI.', hold)
+        joint = text.split('  verify:\n', 1)[1].split('  container:\n', 1)[0]
+        self.assertIn('needs: [verify-writer, verify-rest, container]', joint)
+        self.assertIn('WRITER_OUTCOME', joint)
+        self.assertIn('REST_OUTCOME', joint)
+
     def test_fixed_steps_and_ceilings(self):
         text = self.text()
+        if '# TEMPORARY INTEGRITY COST PROBE: zero SQL, one release read; mandatory HOLD.' in text:
+            self.assert_integrity_probe_workflow(text)
+            return
         for needle in ('timeout-minutes: 190', 'timeout-minutes: 122', 'timeout-minutes: 30', 'name: foundation-ci',
                        'postgres:17', 'run-stage.sh prerequisite', 'run-stage.sh focused', 'run-stage.sh all',
                        'npm audit --audit-level=high', 'gitleaks/gitleaks-action@e0c47f4f8be36e29cdc102c57e68cb5cbf0e8d1e',
