@@ -1,7 +1,5 @@
 name: foundation-ci
 
-# TEMPORARY DIAGNOSTIC ONLY: PostgreSQL representative proof; verify deliberately holds merge.
-
 on:
   pull_request:
   push:
@@ -12,7 +10,6 @@ permissions:
 
 jobs:
   verify-writer:
-    if: ${{ false }} # Diagnostic: no writer partition or service.
     runs-on: ubuntu-24.04
     timeout-minutes: 190
     services:
@@ -189,7 +186,6 @@ jobs:
         timeout-minutes: 2
       - name: Reconstruct the fixed synthetic fixture FFmpeg runtime
         id: fixture046-runtime
-        if: ${{ false }} # Diagnostic: no FFmpeg/media preparation.
         run: /usr/bin/timeout --signal=TERM --kill-after=20s 900s /usr/bin/python3 -I -B test/support/fixture046-ffmpeg-supply.py prepare
         timeout-minutes: 16
       - name: Probe the disposable database (read-only)
@@ -253,11 +249,9 @@ jobs:
           if-no-files-found: error
           retention-days: 30
       - name: Guard P33 aggregate (all)
-        if: ${{ false }} # Diagnostic: no full aggregate.
         run: /bin/bash tools/ci-validation/run-stage.sh all
         timeout-minutes: 122
       - name: Validate aggregate counts, coverage and source
-        if: ${{ false }} # Diagnostic: no full aggregate.
         run: /usr/bin/python3 -I -B tools/ci-validation/ci.py check all
         timeout-minutes: 2
       - name: Settle the owned fixture runtime before full evidence capture
@@ -267,12 +261,12 @@ jobs:
         timeout-minutes: 2
       - name: Collect full evidence
         id: collect-full
-        if: ${{ false }} # Diagnostic: cannot create a full-CI acceptance verdict.
+        if: ${{ always() && steps.init.outcome != 'skipped' }}
         run: /usr/bin/python3 -I -B tools/ci-validation/ci.py collect --scope full
         timeout-minutes: 2
       - name: Retain full evidence
         id: upload-full
-        if: ${{ false }} # Diagnostic: cannot create a full-CI acceptance verdict.
+        if: ${{ always() && steps.collect-full.outcome == 'success' }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         timeout-minutes: 3
         with:
@@ -281,11 +275,9 @@ jobs:
           if-no-files-found: error
           retention-days: 30
       - id: audit
-        if: ${{ false }} # Diagnostic: representative proof only.
         run: npm audit --audit-level=high
         timeout-minutes: 5
       - id: gitleaks
-        if: ${{ false }} # Diagnostic: representative proof only.
         uses: gitleaks/gitleaks-action@e0c47f4f8be36e29cdc102c57e68cb5cbf0e8d1e # v3.0.0
         timeout-minutes: 5
         env:
@@ -293,14 +285,14 @@ jobs:
           GITLEAKS_ENABLE_UPLOAD_ARTIFACT: "false"
       - name: Retain generated security report outside the checkout
         id: retain-security
-        if: ${{ false }} # Diagnostic: cannot create a full-CI acceptance verdict.
+        if: ${{ always() && steps.gitleaks.outcome != 'skipped' }}
         run: /usr/bin/python3 -I -B tools/ci-validation/ci.py retain-security
         timeout-minutes: 1
         env:
           GITLEAKS_OUTCOME: ${{ steps.gitleaks.outcome }}
       - name: Upload partition security report
         id: upload-security
-        if: ${{ false }} # Diagnostic: cannot create a full-CI acceptance verdict.
+        if: ${{ always() && steps.retain-security.outcome == 'success' }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         timeout-minutes: 2
         with:
@@ -310,7 +302,7 @@ jobs:
           retention-days: 30
       - name: Final evidence gate
         id: final
-        if: ${{ false }} # Diagnostic: cannot create a full-CI acceptance verdict.
+        if: ${{ always() && steps.init.outcome != 'skipped' }}
         run: /usr/bin/python3 -I -B tools/ci-validation/ci.py final
         timeout-minutes: 1
         env:
@@ -327,11 +319,6 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
-      - name: HOLD representative PostgreSQL proof cannot qualify for merge
-        timeout-minutes: 1
-        run: |
-          echo "::error::HOLD: diagnostic-only PostgreSQL proof; full CI remains unrun and merge is forbidden."
-          exit 1
       - name: Require every isolated job
         env:
           WRITER_OUTCOME: ${{ needs.verify-writer.result }}
@@ -355,7 +342,6 @@ jobs:
           CONTAINER_OUTCOME: ${{ needs.container.result }}
 
   container:
-    if: ${{ false }} # Diagnostic: no application image build.
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
