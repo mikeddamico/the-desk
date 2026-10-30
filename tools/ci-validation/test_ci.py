@@ -1056,14 +1056,511 @@ class ControlsGate(unittest.TestCase):
             return ci.cmd_precheck(stage)
 
 
+def _short_layout_workflow(test, text):
+    """Closed P1 diagnostic shape; preserve all existing normal assertions below."""
+    marker = '# P1 SHORT PHYSICAL CHECKOUT: diagnostic only; layout success gates every later rest step.'
+    present = marker in text
+    test.assertEqual(present, 'id: short-layout' in text)
+    if not present:
+        test.assertNotIn('working-directory: /tmp/d', text)
+        test.assertNotIn('fixture105-hosted-layout.py', text)
+        return text
+    test.assertEqual(hashlib.sha256(text.encode()).hexdigest(), '877e644f5442bdc5d8c10464d7d37add4af27070ceea3b61f8444eec454ed733')
+    test.assertEqual(text.count(marker), 1)
+    test.assertEqual(text.count('id: short-layout'), 1)
+    test.assertEqual(text.count('working-directory: /tmp/d'), 1)
+    test.assertEqual(text.count('working-directory: ${{ github.workspace }}'), 1)
+    rest = text.split('  verify-rest:\n', 1)[1].split('\n  verify:\n', 1)[0]
+    bootstrap = "      - name: Prepare the exclusive complete short physical checkout\n        id: short-layout\n        working-directory: ${{ github.workspace }}\n        timeout-minutes: 6\n        run: /usr/bin/timeout --signal=TERM --kill-after=20s 300s /usr/bin/python3 -I -B test/support/fixture105-hosted-layout.py\n      - name: Retain layout ownership and failed preparation evidence\n        if: ${{ always() && steps.short-layout.outputs.evidence_claimed == 'true' }}\n        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2\n        timeout-minutes: 2\n        with:\n          name: ci-short-layout-rest-${{ github.run_id }}-${{ github.run_attempt }}\n          path: ${{ runner.temp }}/fixture105-layout\n          if-no-files-found: error\n          retention-days: 30\n"
+    test.assertEqual(rest.count(bootstrap), 1)
+    test.assertIn("steps.short-layout.outputs.evidence_claimed == 'true'", bootstrap)
+    test.assertNotIn('continue-on-error', rest)
+    # Even always-run collectors/cleanup/final cannot run from a partial clone.
+    for block in rest.split(bootstrap, 1)[1].split('      - ')[1:]:
+        condition = [line for line in block.splitlines() if line.startswith('        if: ')]
+        test.assertEqual(len(condition), 1)
+        test.assertIn("steps.short-layout.outcome == 'success'", condition[0])
+    test.assertIn("steps.fixture046-runtime.outcome == 'success' || steps.fixture046-runtime.outcome == 'failure'", rest)
+    test.assertLess(rest.index('id: short-layout'), rest.index('npm ci --ignore-scripts'))
+    test.assertLess(rest.index('id: command-postgres'), rest.index('HOLD native unknown-commit diagnostic'))
+    test.assertLess(rest.index('HOLD native unknown-commit diagnostic'), rest.index('run-stage.sh all'))
+    normalized = text.replace('\n' + marker + '\n', '', 1)
+    # Remove exact bootstrap/defaults first, then undo only audited gate insertions.
+    prefix, section = normalized.split('  verify-rest:\n', 1)
+    body, suffix = section.split('\n  verify:\n', 1)
+    for new, old, count in [('    defaults:\n      run:\n        working-directory: /tmp/d\n', '', 1), ("      - name: Prepare the exclusive complete short physical checkout\n        id: short-layout\n        working-directory: ${{ github.workspace }}\n        timeout-minutes: 6\n        run: /usr/bin/timeout --signal=TERM --kill-after=20s 300s /usr/bin/python3 -I -B test/support/fixture105-hosted-layout.py\n      - name: Retain layout ownership and failed preparation evidence\n        if: ${{ always() && steps.short-layout.outputs.evidence_claimed == 'true' }}\n        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2\n        timeout-minutes: 2\n        with:\n          name: ci-short-layout-rest-${{ github.run_id }}-${{ github.run_attempt }}\n          path: ${{ runner.temp }}/fixture105-layout\n          if-no-files-found: error\n          retention-days: 30\n", '', 1), ("        if: ${{ success() && steps.short-layout.outcome == 'success' }}\n", '', 21), ("        if: ${{ steps.short-layout.outcome == 'success' && (false) }} # Native diagnostic: no media preparation.\n", '        if: ${{ false }} # Native diagnostic: no media preparation.\n', 1), ("        if: ${{ steps.short-layout.outcome == 'success' && (always() && steps.init.outcome != 'skipped') }}\n", "        if: ${{ always() && steps.init.outcome != 'skipped' }}\n", 3), ("        if: ${{ steps.short-layout.outcome == 'success' && (always() && steps.collect-controls.outcome == 'success') }}\n", "        if: ${{ always() && steps.collect-controls.outcome == 'success' }}\n", 1), ("        if: ${{ steps.short-layout.outcome == 'success' && (always() && steps.command-postgres.outcome != 'skipped') }}\n", "        if: ${{ always() && steps.command-postgres.outcome != 'skipped' }}\n", 1), ("        if: ${{ always() && steps.short-layout.outcome == 'success' && (steps.fixture046-runtime.outcome == 'success' || steps.fixture046-runtime.outcome == 'failure') }}\n", "        if: ${{ always() && steps.fixture046-runtime.outcome != 'skipped' }}\n", 1), ("        if: ${{ steps.short-layout.outcome == 'success' && (always() && steps.collect-full.outcome == 'success') }}\n", "        if: ${{ always() && steps.collect-full.outcome == 'success' }}\n", 1), ("        if: ${{ steps.short-layout.outcome == 'success' && (always() && steps.gitleaks.outcome != 'skipped') }}\n", "        if: ${{ always() && steps.gitleaks.outcome != 'skipped' }}\n", 1), ("        if: ${{ steps.short-layout.outcome == 'success' && (always() && steps.retain-security.outcome == 'success') }}\n", "        if: ${{ always() && steps.retain-security.outcome == 'success' }}\n", 1)]:
+        test.assertEqual(body.count(new), count)
+        body = body.replace(new, old)
+    normalized = prefix + '  verify-rest:\n' + body + '\n  verify:\n' + suffix
+    test.assertEqual(hashlib.sha256(normalized.encode()).hexdigest(), '2199f8eda462dfb39cde1a79c64f157822d4b9bce6635dd0911b57365a077bc2')
+    return normalized
+
+def _short_layout_controls(test, owner_path):
+    """Definitions and synthetic syscall/process inputs only; never launch Git or a child."""
+    import os
+    import runpy
+    import signal
+    import types
+
+    def realm():
+        loaded = runpy.run_path(str(owner_path), run_name='inert_layout_controls')
+        return loaded['capture'].__globals__
+
+    class Pipe:
+        def __init__(self, fd):
+            self.fd, self.closes = fd, 0
+        def fileno(self):
+            return self.fd
+        def close(self):
+            self.closes += 1
+
+    class Selection:
+        def __init__(self, clock):
+            self.clock, self.keys, self.closed = clock, {}, False
+        def register(self, pipe, _events, name):
+            self.keys[pipe.fd] = types.SimpleNamespace(fileobj=pipe, fd=pipe.fd, data=name)
+        def unregister(self, pipe):
+            del self.keys[pipe.fd]
+        def get_map(self):
+            return self.keys
+        def select(self, wait):
+            self.clock[0] += max(wait, 0.05)
+            return [(key, 1) for key in list(self.keys.values())]
+        def close(self):
+            self.closed = True
+
+    for fault in ('success', 'ignore_term_held_pipe', 'cancel_spawn', 'cancel_capture',
+                  'discovery_failed', 'cap', 'term_error', 'flush_error',
+                  'record_error', 'repeated_signal', 'output_allocation',
+                  'cancel_output_setup', 'pipe_close_error', 'selector_close_error',
+                  'discovery_iterator_error', 'unsettled_pipe'):
+        with test.subTest(layout_capture=fault), tempfile.TemporaryDirectory() as directory:
+            g = realm()
+            evidence = Path(directory) / 'evidence'
+            evidence.mkdir(mode=0o700)
+            g['EVIDENCE'] = evidence
+            g['SOURCE'] = Path(directory)
+            g['STATE']['source'] = g['identity'](Path(directory))
+            g['STATE']['evidence'] = g['identity'](evidence)
+            g['WHOLE_DEADLINE'] = 1000
+            g['GIT_ENV'] = {}
+            g['tmp'] = g['identity'](Path('/tmp'))
+            clock, launches, terms, handles = [0.0], [], [], []
+            selection = Selection(clock)
+            payload = b'x' * (g['CAP'] + 3) if fault == 'cap' else b'owned failure bytes\n'
+            data = {1000001: bytearray(payload), 1000002: bytearray(b'fixed stderr\n')}
+            process = types.SimpleNamespace(pid=900001, returncode=None,
+                stdout=Pipe(1000001), stderr=Pipe(1000002), helper=True, leader_reaped=False)
+            held = fault in ('ignore_term_held_pipe', 'term_error', 'record_error', 'repeated_signal')
+            if fault in ('pipe_close_error', 'selector_close_error', 'unsettled_pipe'):
+                held = True
+            allocated = []
+            def output_open(path, flags, *args, **kwargs):
+                if fault == 'output_allocation' and path == evidence / 'fixed.stderr':
+                    raise OSError('fixed second output allocation')
+                fd = original_open(path, flags, *args, **kwargs)
+                if path in (evidence / 'fixed.stdout', evidence / 'fixed.stderr'):
+                    allocated.append(fd)
+                return fd
+            normal_pipe_close = process.stdout.close
+            def pipe_close():
+                normal_pipe_close()
+                if fault == 'pipe_close_error':
+                    raise OSError('fixed pipe close uncertainty')
+            process.stdout.close = pipe_close
+            normal_selector_close = selection.close
+            def selector_close():
+                normal_selector_close()
+                if fault == 'selector_close_error':
+                    raise OSError('fixed selector close uncertainty')
+            selection.close = selector_close
+            def poll():
+                if process.returncode is not None:
+                    process.leader_reaped = True
+                return process.returncode
+            process.poll = poll
+            def spawn(*_args, **_kwargs):
+                launches.append(True)
+                if fault == 'cancel_spawn':
+                    g['cancel'](signal.SIGTERM, None)
+                return process
+            def kill(_group, number):
+                test.assertEqual(_group, process.pid)
+                terms.append(number)
+                if process.leader_reaped and not process.helper:
+                    raise ProcessLookupError()
+                if fault == 'repeated_signal':
+                    g['cancel'](signal.SIGINT, None)
+                if number == signal.SIGTERM and fault == 'term_error':
+                    raise PermissionError('fixed term fault')
+                if number == signal.SIGKILL or not held:
+                    if not process.leader_reaped:
+                        process.returncode = -number
+            def read(fd, amount):
+                if fd not in data:
+                    return original_read(fd, amount)
+                if fault in ('cancel_capture', 'repeated_signal') and data[fd]:
+                    g['cancel'](signal.SIGTERM, None)
+                if data[fd]:
+                    block = bytes(data[fd][:amount])
+                    del data[fd][:amount]
+                    return block
+                if fault == 'unsettled_pipe':
+                    raise BlockingIOError()
+                if held and process.returncode is None:
+                    raise BlockingIOError()
+                if process.returncode is None:
+                    process.returncode = 0
+                return b''
+            class Proc:
+                def __init__(self, pid, parent):
+                    self.name, self.parent = str(pid), parent
+                def __truediv__(self, _name):
+                    return self
+                def read_text(self):
+                    if fault == 'discovery_failed':
+                        raise PermissionError('fixed discovery fault')
+                    return f'{self.name} (git) S {self.parent} 900001 900001 0 0'
+            def iterdir(path):
+                if path == Path('/proc'):
+                    if fault == 'discovery_iterator_error':
+                        raise PermissionError('fixed proc iterator fault')
+                    return iter(([Proc(900001, 0)] if not process.leader_reaped else []) +
+                                ([Proc(900002, os.getpid())] if process.helper else []))
+                return original_iterdir(path)
+            def waitpid(pid, _flags):
+                test.assertEqual(pid, 900002)  # Direct leader is reaped only by Popen.poll.
+                if process.returncode is not None:
+                    process.helper = False
+                    return pid, 0
+                return 0, 0
+            def fdopen(fd, *args, **kwargs):
+                stream = original_fdopen(fd, *args, **kwargs)
+                handles.append(stream)
+                if fault == 'cancel_output_setup':
+                    g['cancel'](signal.SIGTERM, None)
+                return stream
+            def fsync(fd):
+                if fault == 'flush_error' and any(not f.closed and f.fileno() == fd for f in handles):
+                    raise OSError('fixed flush fault')
+                return original_fsync(fd)
+            record = g['record']
+            def receipt(name, value):
+                if fault == 'record_error' and name == 'fixed.json':
+                    raise OSError('fixed receipt fault')
+                return record(name, value)
+            original_read, original_fdopen, original_open = os.read, os.fdopen, os.open
+            original_fsync, original_iterdir = os.fsync, Path.iterdir
+            with mock.patch.object(g['subprocess'], 'Popen', side_effect=spawn), \
+                 mock.patch.object(g['selectors'], 'DefaultSelector', return_value=selection), \
+                 mock.patch.object(g['time'], 'monotonic', side_effect=lambda: clock[0]), \
+                 mock.patch.object(g['os'], 'read', side_effect=read), \
+                 mock.patch.object(g['os'], 'open', side_effect=output_open), \
+                 mock.patch.object(g['os'], 'set_blocking'), \
+                 mock.patch.object(g['os'], 'killpg', side_effect=kill), \
+                 mock.patch.object(g['os'], 'waitpid', side_effect=waitpid), \
+                 mock.patch.object(g['os'], 'fdopen', side_effect=fdopen), \
+                 mock.patch.object(g['os'], 'fsync', side_effect=fsync), \
+                 mock.patch.object(Path, 'iterdir', iterdir), \
+                 mock.patch.dict(g, {'record': receipt}):
+                if fault == 'success':
+                    # No group/pipe is held; the helper is reaped on the final scan.
+                    value = g['capture']('fixed', ['/usr/bin/git', 'inert-only'], 0.2)
+                    test.assertEqual(value, payload)
+                else:
+                    with test.assertRaises(g['LayoutFailure']):
+                        g['capture']('fixed', ['/usr/bin/git', 'inert-only'], 0.2)
+                launched = fault not in ('output_allocation', 'cancel_output_setup')
+                test.assertEqual(len(launches), int(launched))
+                test.assertTrue(selection.closed)
+                test.assertTrue(all(f.closed for f in handles))
+                test.assertEqual(process.stdout.closes, int(launched))
+                test.assertEqual(process.stderr.closes, int(launched))
+                for fd in allocated:
+                    with test.assertRaises(OSError):
+                        os.fstat(fd)
+                action = g['STATE']['actions'][0]
+                if fault != 'success':
+                    primary = dict(g['STATE']['primary'])
+                    with test.assertRaises(g['LayoutFailure']):
+                        g['capture']('forbidden', ['/usr/bin/git', 'not-launched'], 0.2)
+                    test.assertEqual(g['STATE']['primary'], primary)
+                    test.assertEqual(len(launches), int(launched))
+                if fault in ('cancel_spawn', 'cancel_capture', 'cancel_output_setup', 'repeated_signal'):
+                    test.assertEqual(g['STATE']['primary']['code'], 'owner_cancelled')
+                if fault in ('ignore_term_held_pipe', 'term_error', 'record_error',
+                              'pipe_close_error', 'selector_close_error', 'unsettled_pipe'):
+                    test.assertEqual(g['STATE']['primary']['code'], 'git_deadline')
+                    test.assertIn(signal.SIGKILL, terms)
+                if fault == 'cap':
+                    test.assertFalse(action['streams']['stdout']['complete'])
+                    test.assertTrue(action['streams']['stdout']['truncated'])
+                    test.assertEqual(action['streams']['stdout']['retained_bytes'], g['CAP'])
+                    test.assertEqual(action['streams']['stdout']['observed_bytes'], len(payload))
+                if fault in ('discovery_failed', 'discovery_iterator_error'):
+                    test.assertFalse(action['population']['complete'])
+                    test.assertEqual(action['settlement'], 'pending')
+                    test.assertTrue(process.helper)  # Unresolved BEFORE harness repair.
+                elif fault not in ('cap', 'flush_error', 'output_allocation', 'cancel_output_setup',
+                                    'unsettled_pipe'):
+                    test.assertTrue(all(s['complete'] for s in action['streams'].values()))
+                if fault in ('term_error', 'flush_error', 'record_error', 'repeated_signal',
+                              'pipe_close_error', 'selector_close_error'):
+                    test.assertTrue(g['STATE']['cleanup_errors'])
+                if fault == 'pipe_close_error':
+                    test.assertTrue(any(value is process.stdout for value in g['PENDING_RESOURCES']))
+                if fault == 'selector_close_error':
+                    test.assertTrue(any(value is selection for value in g['PENDING_RESOURCES']))
+                if fault == 'output_allocation':
+                    test.assertEqual(g['STATE']['primary']['code'], 'OSError')
+                if fault == 'unsettled_pipe':
+                    test.assertEqual(action['settlement'], 'pending')
+                    test.assertTrue(action['direct_reaped'])
+                    test.assertFalse(any(value['eof'] or value['complete'] for value in action['streams'].values()))
+                if launched and fault not in ('discovery_failed', 'discovery_iterator_error'):
+                    test.assertEqual(action['additional_reaps'], [{'pid': 900002, 'status': 0}])
+                    test.assertFalse(process.helper)
+                if fault != 'record_error':
+                    test.assertTrue((evidence / 'fixed.json').is_file())
+                # All assertions precede temporary-directory/fake-resource harness repair.
+
+    # Expired whole-owner horizon refuses before output allocation or child launch.
+    g = realm()
+    g['WHOLE_DEADLINE'] = -1
+    with mock.patch.object(g['subprocess'], 'Popen') as forbidden:
+        with test.assertRaises(g['LayoutFailure']):
+            g['capture']('expired', ['/usr/bin/git', 'not-launched'], 1)
+        forbidden.assert_not_called()
+        test.assertEqual(g['STATE']['actions'], [])
+
+    # Actual shape predicates, with synthetic caller-owned files; no chmod/chown outside temp.
+    with tempfile.TemporaryDirectory() as directory:
+        g = realm()
+        root = Path(directory)
+        leaf = root / 'leaf'
+        leaf.write_bytes(b'fixed')
+        leaf.chmod(0o600)
+        g['tracked_snapshot'](root, ['leaf'])
+        os.link(leaf, root / 'hardlink')
+        with test.assertRaises(g['LayoutFailure']):
+            g['stable_read'](leaf, 64)
+        (root / 'hardlink').unlink()
+        leaf.chmod(0o622)
+        with test.assertRaises(g['LayoutFailure']):
+            g['stable_read'](leaf, 64)
+        leaf.chmod(0o600)
+        actual_stat = os.fstat
+        leaf_inode = leaf.stat().st_ino
+        def foreign_owner(fd):
+            info = actual_stat(fd)
+            if info.st_ino == leaf_inode:
+                fields = {name: getattr(info, name) for name in
+                          ('st_dev', 'st_ino', 'st_uid', 'st_gid', 'st_mode', 'st_nlink',
+                           'st_size', 'st_mtime_ns', 'st_ctime_ns')}
+                fields['st_uid'] += 1
+                return types.SimpleNamespace(**fields)
+            return info
+        with mock.patch.object(g['os'], 'fstat', side_effect=foreign_owner):
+            with test.assertRaises(g['LayoutFailure']):
+                g['stable_read'](leaf, 64)
+        with test.assertRaises(g['LayoutFailure']):
+            g['stable_read'](root, 64)
+        (root / 'link').symlink_to(leaf)
+        with test.assertRaises(OSError):
+            g['stable_read'](root / 'link', 64)
+        real_read = os.read
+        changed = [False]
+        def drift(fd, amount):
+            value = real_read(fd, amount)
+            if value and not changed[0]:
+                changed[0] = True
+                leaf.write_bytes(b'changed')
+            return value
+        with mock.patch.object(g['os'], 'read', side_effect=drift):
+            with test.assertRaises(g['LayoutFailure']):
+                g['stable_read'](leaf, 64)
+        test.assertFalse(g['OWNED_FD_PENDING'])
+
+    # First failed close retains the exact owned descriptor without production retry.
+    with tempfile.TemporaryDirectory() as directory:
+        g = realm()
+        leaf = Path(directory) / 'leaf'
+        leaf.write_bytes(b'fixed')
+        primary = OSError('fixed source component close')
+        actual_open, actual_close, actual_fstat = os.open, os.close, os.fstat
+        opened, attempts, pending = [], {}, []
+        def opened_fd(*args, **kwargs):
+            fd = actual_open(*args, **kwargs)
+            opened.append(fd)
+            return fd
+        def close_once(fd):
+            attempts[fd] = attempts.get(fd, 0) + 1
+            if not pending:
+                pending.append(fd)
+                raise primary
+            return actual_close(fd)
+        try:
+            with mock.patch.object(g['os'], 'open', side_effect=opened_fd), \
+                 mock.patch.object(g['os'], 'close', side_effect=close_once):
+                with test.assertRaises(OSError) as refused:
+                    g['stable_read'](leaf, 64)
+                test.assertIs(refused.exception, primary)
+                test.assertEqual(g['OWNED_FD_PENDING'], pending)
+                test.assertEqual(attempts, {fd: 1 for fd in opened})
+                before = len(opened)
+                with test.assertRaises(g['LayoutFailure']):
+                    g['stable_read'](leaf, 64)
+                test.assertEqual(len(opened), before)
+                live = []
+                for fd in opened:
+                    try:
+                        actual_fstat(fd)
+                        live.append(fd)
+                    except OSError:
+                        pass
+                test.assertEqual(live, pending)  # BEFORE harness cleanup.
+        finally:
+            for fd in pending:
+                actual_close(fd)  # Test-owned repair only after all assertions.
+
+    for fault in ('success', 'existing', 'symlink', 'source_uid', 'tmp_mode', 'wrong_head', 'wrong_sha',
+                  'wrong_tree', 'partial_clone', 'imported_config', 'alternates', 'replacement',
+                  'source_mode', 'git_pointer', 'root_mode', 'preseed_modules', 'terminal_receipt',
+                  'terminal_cancel', 'tool_drift', 'wrong_git_version', 'source_git_pointer',
+                  'extra_argument', 'source_replacement'):
+        with test.subTest(layout_main=fault), tempfile.TemporaryDirectory() as directory:
+            g = realm()
+            root = Path(directory)
+            source, runner, destination = root / 'source', root / 'runner', root / 'd'
+            source.mkdir(); runner.mkdir(); (source / '.git').mkdir()
+            if fault == 'source_git_pointer':
+                (source / '.git').rmdir()
+                (source / '.git').write_text('gitdir: ../foreign\n')
+            (source / 'leaf').write_bytes(b'fixed')
+            (source / 'leaf').chmod(0o600)
+            if fault == 'source_mode': (source / 'leaf').chmod(0o622)
+            g['DESTINATION'], g['SOURCE_FILES'] = destination, 1
+            if fault == 'existing': destination.mkdir()
+            if fault == 'symlink': destination.symlink_to(source)
+            original_identity = g['identity']
+            def identity(path):
+                if path == Path('/tmp'):
+                    return {'path': '/tmp', 'dev': 1, 'ino': 2, 'uid': 0,
+                            'mode': 0o755 if fault == 'tmp_mode' else 0o1777}
+                value = original_identity(path)
+                if fault == 'source_uid' and path == source:
+                    value['uid'] += 1
+                return value
+            calls = []
+            def action(label, _argv, _seconds):
+                calls.append(label)
+                if label == 'git-version': return b'not a version\n' if fault == 'wrong_git_version' else b'git version 2.43.0 synthetic-control\n'
+                if label == 'source-head': return (('c' if fault == 'wrong_head' else 'a') * 40 + '\n').encode()
+                if label in ('source-tree', 'clone-tree'):
+                    return (('c' if fault == 'wrong_tree' and label == 'clone-tree' else 'b') * 40 + '\n').encode()
+                if label in ('source-members', 'clone-members'): return b'leaf\0'
+                if label == 'clone':
+                    if fault == 'partial_clone': raise g['LayoutFailure']('fixed_partial_clone')
+                    if fault == 'git_pointer':
+                        (destination / '.git').write_text('gitdir: ../source/.git\n')
+                    else:
+                        (destination / '.git/objects/info').mkdir(parents=True)
+                    (destination / 'leaf').write_bytes(b'fixed')
+                    (destination / 'leaf').chmod(0o600)
+                    if fault == 'alternates': (destination / '.git/objects/info/alternates').write_text('inert')
+                    if fault == 'replacement':
+                        destination.rename(root / 'retained-old')
+                        destination.mkdir(mode=0o700)
+                    if fault == 'root_mode': destination.chmod(0o755)
+                    if fault == 'preseed_modules': (destination / 'node_modules').symlink_to(root / 'absent')
+                    if fault == 'source_replacement':
+                        source.rename(root / 'retained-source')
+                        source.mkdir(mode=0o700)
+                        (source / '.git').mkdir(mode=0o700)
+                        (source / 'leaf').write_bytes(b'fixed')
+                        (source / 'leaf').chmod(0o600)
+                if label == 'clone-head': return ('a' * 40 + '\n').encode()
+                if label == 'clone-config-names': return b'http.extraheader\n' if fault == 'imported_config' else b'core.bare\n'
+                return b''
+            output = root / 'github-output'
+            output.write_bytes(b'')
+            output.chmod(0o600)
+            environment = {'GITHUB_OUTPUT': str(output), 'GITHUB_ACTIONS': 'true', 'ImageOS': 'ubuntu24', 'DESK_CI_PARTITION': 'rest',
+                           'GITHUB_REPOSITORY': 'mikeddamico/the-desk',
+                           'GITHUB_SHA': 'invalid' if fault == 'wrong_sha' else 'a' * 40,
+                           'GITHUB_WORKSPACE': str(source), 'RUNNER_TEMP': str(runner)}
+            actual_record = g['record']
+            def main_record(name, value):
+                if fault == 'terminal_receipt' and name == 'terminal.json':
+                    raise OSError('fixed terminal fsync/write failure')
+                result = actual_record(name, value)
+                if fault == 'terminal_cancel' and name == 'terminal.json':
+                    g['cancel'](signal.SIGTERM, None)
+                return result
+            printed = io.StringIO()
+            tool_reads = [0]
+            def synthetic_tools():
+                tool_reads[0] += 1
+                return {'synthetic': 'changed' if fault == 'tool_drift' and tool_reads[0] > 1 else 'fixed; no tool execution'}
+            with mock.patch.dict(os.environ, environment, clear=True), \
+                 mock.patch.object(sys, 'argv', [str(owner_path)] + (['forbidden'] if fault == 'extra_argument' else [])), \
+                 mock.patch.dict(g, {'identity': identity, 'capture': action, 'record': main_record,
+                                     'bootstrap_tools': synthetic_tools}), \
+                 mock.patch.object(g['signal'], 'signal'), \
+                 mock.patch.object(g['ctypes'], 'CDLL', return_value=types.SimpleNamespace(prctl=lambda *_: 0)), \
+                 contextlib.redirect_stdout(printed):
+                test.assertEqual(g['main'](), 0 if fault == 'success' else 1)
+            if fault == 'success':
+                test.assertIsNone(g['STATE']['primary'])
+                test.assertTrue(json.loads((runner / 'fixture105-layout/terminal.json').read_bytes())['ok'])
+                test.assertIn('evidence_claimed=true', output.read_text())
+                continue
+            test.assertIsNotNone(g['STATE']['primary'])
+            if fault == 'terminal_receipt':
+                test.assertFalse((runner / 'fixture105-layout/terminal.json').exists())
+                test.assertFalse(json.loads(printed.getvalue())['terminal_retained'])
+                test.assertTrue(destination.exists())
+                test.assertEqual((source / 'leaf').read_bytes(), b'fixed')
+                continue
+            if fault == 'terminal_cancel':
+                test.assertTrue((runner / 'fixture105-layout/terminal.json').exists())
+                revoked = json.loads((runner / 'fixture105-layout/terminal-revoked.json').read_bytes())
+                test.assertFalse(revoked['ok'])
+                test.assertEqual(g['STATE']['primary']['code'], 'owner_cancelled')
+                test.assertEqual(json.loads(printed.getvalue())['layout'], 'HELD')
+                test.assertTrue(destination.exists())
+                continue
+            if g['STATE']['evidence'] is None:
+                test.assertEqual(g['STATE']['invocation_classification'], 'refused_before_evidence_claim; no child permitted')
+                test.assertEqual(calls, [])
+            else:
+                terminal = json.loads((runner / 'fixture105-layout/terminal.json').read_bytes())
+                test.assertFalse(terminal['ok'])
+                test.assertEqual(terminal['classification'], 'HELD_partial_or_failed_layout')
+                if fault in ('partial_clone', 'imported_config', 'alternates', 'replacement',
+                              'git_pointer', 'root_mode', 'preseed_modules', 'tool_drift'):
+                    test.assertIsNotNone(terminal['owned_root'])
+                    test.assertTrue(destination.exists())
+                    test.assertEqual((source / 'leaf').read_bytes(), b'fixed')
+                if fault == 'tool_drift':
+                    test.assertFalse(terminal['bootstrap_tools_preserved'])
+                if fault == 'source_replacement':
+                    test.assertFalse(terminal['original_source_root_preserved'])
+                    test.assertEqual((root / 'retained-source/leaf').read_bytes(), b'fixed')
+
+
 class WorkflowShape(unittest.TestCase):
     """Text-level checks of the fixed shape (no YAML library: standard library only)."""
 
     def text(self):
-        return (HERE.parents[1] / '.github' / 'workflows' / 'ci.yml').read_text()
+        raw = (HERE.parents[1] / '.github' / 'workflows' / 'ci.yml').read_text()
+        return _short_layout_workflow(self, raw)
 
     def test_fixed_steps_and_ceilings(self):
         text = self.text()
+        raw = (ci.ROOT / '.github/workflows/ci.yml').read_text()
+        if '# P1 SHORT PHYSICAL CHECKOUT:' in raw:
+            _short_layout_controls(self, ci.ROOT / 'test/support/fixture105-hosted-layout.py')
         for needle in ('timeout-minutes: 190', 'timeout-minutes: 122', 'timeout-minutes: 30', 'name: foundation-ci',
                        'postgres:17', 'run-stage.sh prerequisite', 'run-stage.sh focused', 'run-stage.sh all',
                        'npm audit --audit-level=high', 'gitleaks/gitleaks-action@e0c47f4f8be36e29cdc102c57e68cb5cbf0e8d1e',

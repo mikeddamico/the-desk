@@ -1,3 +1,4 @@
+import { EventEmitter } from "node:events";
 // Native source proposal: never a mock admission or an expected receipt installer.
 // The connected host exports below are completed with the reviewed atomic owner path.
 // This file is held with that implementation; it has not been imported or executed.
@@ -113,7 +114,7 @@ async function withTestCleanup<T>(
   return outcome.value;
 }
 // Capture the installed driver's own descriptor before a prototype fault wrapper.
-// These witnesses use the text/values promise overload only; receiver stays explicit.
+// This helper is for known text/values Promise callers; raw wrappers preserve other overloads.
 function requireClaimsFailure(
   value: unknown,
 ): ConnectedFixture105ClaimsFailure {
@@ -135,6 +136,45 @@ function driverQuery(
     text: string,
     values?: unknown[],
   ) => Promise<pg.QueryResult<Obj>>;
+}
+
+// Only the fixed text Promise family is observed; callback/config/Query forms stay opaque.
+type RawDriverQuery = (this: pg.Client, ...args: unknown[]) => unknown;
+function rawDriverQuery(descriptor: PropertyDescriptor): RawDriverQuery {
+  const value: unknown = descriptor.value;
+  if (typeof value !== "function") throw new Error("driver method unavailable");
+  return value as RawDriverQuery;
+}
+function observedPromiseCall(args: readonly unknown[]): boolean {
+  return (
+    typeof args[0] === "string" &&
+    (args.length === 1 || (args.length === 2 && typeof args[1] !== "function"))
+  );
+}
+// The admitted pg driver returns native Promises for this family. Native then performs
+// its internal brand check without reading an arbitrary returned object's then getter.
+function driverPromiseThen(
+  value: unknown,
+  fulfilled: (result: pg.QueryResult<Obj>) => pg.QueryResult<Obj>,
+  rejected?: (error: unknown) => never,
+): Promise<pg.QueryResult<Obj>> {
+  return Reflect.apply(Promise.prototype.then, value, [
+    fulfilled,
+    rejected,
+  ]) as Promise<pg.QueryResult<Obj>>;
+}
+function commitWitness(
+  original: RawDriverQuery,
+  fulfilled: (this: pg.Client, text: string) => void,
+): RawDriverQuery {
+  return function (this: pg.Client, ...args: unknown[]): unknown {
+    if (!observedPromiseCall(args)) return Reflect.apply(original, this, args);
+    const returned: unknown = Reflect.apply(original, this, args);
+    return driverPromiseThen(returned, (result) => {
+      fulfilled.call(this, args[0] as string);
+      return result;
+    });
+  };
 }
 
 // Bounded same-query diagnostic facts only. Observer work can perturb timing.
@@ -760,14 +800,8 @@ class TargetObserver {
       this.observationFailed = true;
     }
   }
-  /**
-   * Wraps the driver query. The original is awaited exactly once with the original receiver and arguments; its
-   * fulfilled result is returned as the same object and its rejection is rethrown as the same value. Bookkeeping
-   * failures only set a flag and can never replace or alter the query outcome.
-   */
-  wrap(
-    original: ReturnType<typeof driverQuery>,
-  ): (this: pg.Client, ...args: unknown[]) => Promise<pg.QueryResult<Obj>> {
+  /** Callback and unknown overloads preserve exact returns/throws; only fixed Promise calls are observed. */
+  wrap(original: ReturnType<typeof driverQuery> | RawDriverQuery): RawDriverQuery {
     const enter = (text: unknown): number => this.enter(text);
     const rejected = (ordinal: number): void => {
       this.rejected(ordinal);
@@ -775,24 +809,27 @@ class TargetObserver {
     const observe = (ordinal: number, result: pg.QueryResult<Obj>): void => {
       this.observe(ordinal, result);
     };
-    return async function (
-      this: pg.Client,
-      ...args: unknown[]
-    ): Promise<pg.QueryResult<Obj>> {
+    return function (this: pg.Client, ...args: unknown[]): unknown {
+      if (!observedPromiseCall(args)) return Reflect.apply(original, this, args);
       const ordinal = enter(args[0]);
-      let result: pg.QueryResult<Obj>;
+      let returned: unknown;
       try {
-        result = (await Reflect.apply(
-          original,
-          this,
-          args,
-        )) as pg.QueryResult<Obj>;
+        returned = Reflect.apply(original, this, args);
       } catch (error) {
         rejected(ordinal);
         throw error;
       }
-      observe(ordinal, result);
-      return result;
+      return driverPromiseThen(
+        returned,
+        (result) => {
+          observe(ordinal, result);
+          return result;
+        },
+        (error) => {
+          rejected(ordinal);
+          throw error;
+        },
+      );
     };
   }
   /**
@@ -805,7 +842,7 @@ class TargetObserver {
       "query",
     );
     if (descriptor === undefined) throw new Error("driver method unavailable");
-    const original = driverQuery(descriptor);
+    const original = rawDriverQuery(descriptor);
     await withTestCleanup(
       async () => {
         Object.defineProperty(pg.Client.prototype, "query", {
@@ -1089,16 +1126,13 @@ class TargetObserver {
             "query",
           );
           if (!outer) throw new Error("selftest outer descriptor");
-          const original = driverQuery(outer);
           await withTestCleanup(
             async () => {
               Object.defineProperty(pg.Client.prototype, "query", {
                 ...outer,
-                value: async function (this: pg.Client, text: string) {
-                  const resolved = await original.call(this, text);
+                value: commitWitness(rawDriverQuery(outer), function (text) {
                   if (text === "COMMIT") throw loss;
-                  return resolved;
-                },
+                }),
               });
               const installed = Object.getOwnPropertyDescriptor(
                 pg.Client.prototype,
@@ -1120,6 +1154,219 @@ class TargetObserver {
         Object.getOwnPropertyDescriptor(pg.Client.prototype, "query"),
       ).toEqual(base);
       expect(lines.length - outputStart).toBe(2);
+      // Both installed layers must preserve pg-pool's callback completion and catch path.
+      for (const mode of ["initial", "selected"] as const) {
+        const client = new EventEmitter() as unknown as pg.PoolClient;
+        const other = new EventEmitter() as unknown as pg.PoolClient;
+        const observer = new TargetObserver("fixed");
+        const acknowledgement = new Error("fixed acknowledged COMMIT loss");
+        const emitted: unknown[] = [];
+        const releases: unknown[] = [];
+        client.on("error", (error: unknown) => { emitted.push(error); });
+        let armed = true;
+        let selected: pg.Client | undefined = client;
+        let losses = 0;
+        let delegated = 0;
+        let expectedReceiver: pg.Client = client;
+        let expectedArgs: readonly unknown[] = [];
+        let action: RawDriverQuery = () => Promise.resolve(actual);
+        const delegate: RawDriverQuery = function (...args) {
+          delegated++;
+          expect(this).toBe(expectedReceiver);
+          expect(args).toHaveLength(expectedArgs.length);
+          args.forEach((value, index) => { expect(value).toBe(expectedArgs[index]); });
+          return Reflect.apply(action, this, args);
+        };
+        const chain = commitWitness(observer.wrap(delegate), function (text) {
+          if (text !== "COMMIT" || (mode === "initial" ? !armed : this !== selected)) return;
+          armed = false;
+          selected = undefined;
+          losses++;
+          this.emit("error", acknowledgement);
+          throw acknowledgement;
+        });
+        Object.defineProperty(client, "query", { configurable: true, value: chain });
+        const call = (args: unknown[], receiver: pg.Client = client): unknown => {
+          expectedArgs = args;
+          expectedReceiver = receiver;
+          const before = delegated;
+          try { return Reflect.apply(chain, receiver, args); }
+          finally { expect(delegated).toBe(before + 1); }
+        };
+        for (const args of [["COMMIT"], ["COMMIT", values]]) {
+          let callbacks = 0;
+          const callbackReceiver = {};
+          const callbackError = new Error("fixed callback error");
+          const callback = function (this: unknown, ...received: unknown[]): void {
+            expect(this).toBe(callbackReceiver);
+            expect(received[0]).toBe(callbackError);
+            expect(received[1]).toBe(actual);
+            callbacks++;
+          };
+          action = function (...received) {
+            expect(received.at(-1)).toBe(callback);
+            Reflect.apply(callback, callbackReceiver, [callbackError, actual]);
+            return undefined;
+          };
+          expect(call([...args, callback])).toBeUndefined();
+          expect(callbacks).toBe(1);
+          expect(losses).toBe(0);
+          expect(armed).toBe(true);
+          expect(selected).toBe(client);
+        }
+        let getterReads = 0;
+        const config = Object.defineProperty({}, "callback", {
+          get() { getterReads++; throw new Error("opaque callback getter"); },
+        });
+        const queryObject = { submit: () => { throw new Error("opaque Query submit"); } };
+        const sentinel = {};
+        action = () => sentinel;
+        for (const args of [[config], [config, () => {}], [queryObject], ["COMMIT", values, undefined], ["COMMIT", values, undefined, sentinel]])
+          expect(call(args)).toBe(sentinel);
+        expect(getterReads).toBe(0);
+        const synchronous = new Error("fixed synchronous driver throw");
+        action = () => { throw synchronous; };
+        for (const args of [["SELECT fixed", values, () => {}], ["SELECT fixed"]]) {
+          let caught: unknown;
+          try { call(args); } catch (error) { caught = error; }
+          expect(caught).toBe(synchronous);
+        }
+        action = () => Promise.reject(synchronous);
+        await expect(call(["COMMIT"])).rejects.toBe(synchronous);
+        expect(losses).toBe(0);
+        expect(armed).toBe(true);
+        if (mode === "selected") {
+          action = () => Promise.resolve(actual);
+          expect(await call(["COMMIT"], other)).toBe(actual);
+          expect(selected).toBe(client);
+          expect(losses).toBe(0);
+        }
+        action = () => Promise.resolve(actual);
+        expect(await call(["SELECT fixed", undefined])).toBe(actual);
+        await expect(call(["COMMIT"])).rejects.toBe(acknowledgement);
+        expect(losses).toBe(1);
+        expect(emitted).toEqual([acknowledgement]);
+        expect(await call(["COMMIT"])).toBe(actual);
+        expect(losses).toBe(1);
+        expect(observer.count).toBe(0);
+        // Use the pinned pool's actual query algorithm. Its connect/client alone are inert.
+        for (const outcome of ["result", "callback_error", "sync_throw"] as const) {
+          let connects = 0;
+          const queriesBefore = delegated;
+          releases.length = 0;
+          emitted.length = 0;
+          client.release = (error?: Error | boolean) => { releases.push(error); };
+          const poolReceiver = {
+            Promise,
+            log: () => {},
+            connect(callback: (error: undefined, value: pg.PoolClient) => void): void {
+              connects++;
+              callback(undefined, client);
+            },
+          };
+          action = function (...args) {
+            if (outcome === "sync_throw") throw synchronous;
+            const callback = args[2];
+            if (typeof callback !== "function") throw new Error("pool callback missing");
+            Reflect.apply(callback, undefined, [outcome === "result" ? undefined : synchronous, actual]);
+            return undefined;
+          };
+          // The callback is authored inside pg-pool, so capture its reference at delegate entry.
+          const previousQuery = Object.getOwnPropertyDescriptor(client, "query");
+          Object.defineProperty(client, "query", {
+            configurable: true,
+            value: function (this: pg.Client, ...args: unknown[]): unknown {
+              expectedArgs = args;
+              expectedReceiver = this;
+              return Reflect.apply(chain, this, args);
+            },
+          });
+          try {
+            const pooled: unknown = Reflect.apply(pg.Pool.prototype.query, poolReceiver, ["SELECT fixed", values]);
+            if (outcome === "result") expect(await pooled).toBe(actual);
+            else await expect(pooled).rejects.toBe(synchronous);
+            expect(connects).toBe(1);
+            expect(delegated).toBe(queriesBefore + 1);
+            expect(releases).toEqual([outcome === "result" ? undefined : synchronous]);
+            expect(emitted).toEqual([]); // No invented error event repairs the synchronous-throw branch.
+          } finally {
+            if (!previousQuery) throw new Error("client query owner missing");
+            Object.defineProperty(client, "query", previousQuery);
+            client.removeAllListeners("error");
+            client.on("error", (error: unknown) => { emitted.push(error); });
+          }
+        }
+        // No timer/sleep: teardown must settle while the construction Promise remains gated.
+        let unblock: ((value: pg.QueryResult<Obj>) => void) | undefined;
+        const gate = new Promise<pg.QueryResult<Obj>>((resolve) => { unblock = resolve; });
+        let constructionSettled = false;
+        let teardownSettled = false;
+        let constructionError: unknown;
+        let teardownValue: unknown;
+        let connects = 0;
+        const queriesBefore = delegated;
+        releases.length = 0;
+        emitted.length = 0;
+        armed = true;
+        selected = client;
+        action = function (...args) {
+          if (args[0] === "COMMIT") return gate;
+          const callback = args[2];
+          if (typeof callback !== "function") throw new Error("teardown callback missing");
+          Reflect.apply(callback, undefined, [undefined, actual]);
+          return undefined;
+        };
+        const construction = call(["COMMIT"]) as Promise<pg.QueryResult<Obj>>;
+        void construction.then(
+          () => { constructionSettled = true; },
+          (error: unknown) => { constructionSettled = true; constructionError = error; },
+        );
+        const poolReceiver = {
+          Promise,
+          log: () => {},
+          connect(callback: (error: undefined, value: pg.PoolClient) => void): void {
+            connects++;
+            callback(undefined, client);
+          },
+        };
+        const previousQuery = Object.getOwnPropertyDescriptor(client, "query");
+        Object.defineProperty(client, "query", {
+          configurable: true,
+          value: function (this: pg.Client, ...args: unknown[]): unknown {
+            expectedArgs = args;
+            expectedReceiver = this;
+            return Reflect.apply(chain, this, args);
+          },
+        });
+        try {
+          const teardown = Reflect.apply(pg.Pool.prototype.query, poolReceiver, ["SELECT fixed ownership", values]) as Promise<unknown>;
+          void teardown.then(
+            (value: unknown) => { teardownSettled = true; teardownValue = value; },
+            (error: unknown) => { teardownSettled = true; teardownValue = error; },
+          );
+          await Promise.resolve();
+          await Promise.resolve();
+          expect(teardownSettled).toBe(true);
+          expect(teardownValue).toBe(actual);
+          expect(constructionSettled).toBe(false);
+          expect(connects).toBe(1);
+          expect(delegated).toBe(queriesBefore + 2);
+          expect(releases).toEqual([undefined]);
+          expect(losses).toBe(1);
+          unblock?.(actual);
+          for (let turn = 0; turn < 4; turn++) await Promise.resolve();
+          expect(constructionSettled).toBe(true);
+          expect(constructionError).toBe(acknowledgement);
+          expect(losses).toBe(2);
+          expect(emitted).toEqual([acknowledgement]);
+        } finally {
+          unblock?.(actual); // Only after assertions; release a failed fake gate without changing its verdict.
+          if (!previousQuery) throw new Error("client query owner missing");
+          Object.defineProperty(client, "query", previousQuery);
+          client.removeAllListeners();
+          other.removeAllListeners();
+        }
+      }
       done(10);
       const capped = new TargetObserver("fixed");
       const cappedQuery = capped.wrap(
@@ -3420,15 +3667,12 @@ suite("connected fixture105 native ownership", () => {
           );
           if (descriptor === undefined)
             throw new Error("driver method unavailable");
-          const original = driverQuery(descriptor);
           Object.defineProperty(pg.Client.prototype, "query", {
             ...descriptor,
-            value: async function (
+            value: commitWitness(rawDriverQuery(descriptor), function (
               this: pg.Client,
               text: string,
-              values?: unknown[],
-            ): Promise<pg.QueryResult> {
-              const result = await original.call(this, text, values);
+            ): void {
               if (armed && text === "COMMIT") {
                 armed = false;
                 intercepted += 1;
@@ -3436,8 +3680,7 @@ suite("connected fixture105 native ownership", () => {
                 this.emit("error", loss);
                 throw loss;
               }
-              return result;
-            },
+            }),
           });
           await withTestCleanup(
             async () => {
@@ -3524,7 +3767,6 @@ suite("connected fixture105 native ownership", () => {
             );
             if (queryDescriptor === undefined)
               throw new Error("driver method unavailable");
-            const query = driverQuery(queryDescriptor);
             const statement =
               owner === "program_run"
                 ? /^\s*INSERT INTO program_runs\s*\(/u
@@ -3533,12 +3775,10 @@ suite("connected fixture105 native ownership", () => {
                   : /^SELECT bind_evidence_package\(/u;
             Object.defineProperty(pg.Client.prototype, "query", {
               ...queryDescriptor,
-              value: async function (
+              value: commitWitness(rawDriverQuery(queryDescriptor), function (
                 this: pg.Client,
                 text: string,
-                values?: unknown[],
-              ): Promise<pg.QueryResult> {
-                const result = await query.call(this, text, values);
+              ): void {
                 if (statement.test(text)) {
                   reached++;
                   expect(reached).toBe(1);
@@ -3578,8 +3818,7 @@ suite("connected fixture105 native ownership", () => {
                   this.emit("error", loss);
                   throw loss;
                 }
-                return result;
-              },
+              }),
             });
             await withTestCleanup(
               async () => {

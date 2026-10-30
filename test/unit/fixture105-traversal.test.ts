@@ -1,5 +1,7 @@
 /** Private production functions are extracted verbatim into an isolated realm; no production test export/reset. */
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+import pg from "pg";
+import { EventEmitter } from "node:events";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import * as crypto from "node:crypto";
@@ -13,6 +15,47 @@ import {
   connectedFixture105ResourceIdentity,
 } from "../../src/runtime/connected-fixture151-data.js";
 import ts from "typescript";
+import { canonicalTimestamp } from "../../src/identity/canonical-json.js";
+
+// Reuse the existing closed extraction seam: declarations only, no native module imports or DB setup.
+async function nativeCallbackSelftest(): Promise<void> {
+  const native = fs.readFileSync(new URL("../integration/connected-fixture105.test.ts", import.meta.url), "utf8");
+  const syntax = ts.createSourceFile("native.ts", native, ts.ScriptTarget.Latest, true);
+  const functions = new Set([
+    "retainTestCleanup", "withTestCleanup", "driverQuery", "rawDriverQuery",
+    "observedPromiseCall", "driverPromiseThen", "commitWitness", "targetUnknown",
+    "targetData", "targetInt", "targetSupplement", "maintenanceStamp",
+    "captureMaintenance", "observeMaintenance",
+  ]);
+  const constants = new Set([
+    "cleanupFailures", "TARGET_PREFIX", "TARGET_OBSERVER_CAP", "TARGET_SCOPES", "MAINTENANCE_SQL",
+  ]);
+  const declarations = syntax.statements.filter((node) => {
+    if (ts.isFunctionDeclaration(node)) return functions.has(node.name?.text ?? "");
+    if (ts.isClassDeclaration(node)) return node.name?.text === "TargetObserver";
+    return ts.isVariableStatement(node) && node.declarationList.declarations.every(
+      (entry) => ts.isIdentifier(entry.name) && constants.has(entry.name.text),
+    );
+  });
+  expect(declarations).toHaveLength(functions.size + constants.size + 1);
+  const javascript = ts.transpileModule(
+    declarations.map((node) => node.getFullText(syntax)).join("\n") +
+      "\nglobalThis.callbackSelftest = () => TargetObserver.selftest();",
+    { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.None } },
+  ).outputText;
+  const realm: Record<string, unknown> = {
+    pg, expect, vi, process, Buffer, Promise, EventEmitter, canonicalTimestamp,
+  };
+  const original = Object.getOwnPropertyDescriptor(pg.Client.prototype, "query");
+  try {
+    runInNewContext(javascript, realm, { timeout: 1000 });
+    const selftest: unknown = realm.callbackSelftest;
+    if (typeof selftest !== "function") throw new Error("native callback selftest entry missing");
+    await (selftest as () => Promise<void>)();
+  } finally {
+    expect(Object.getOwnPropertyDescriptor(pg.Client.prototype, "query")).toEqual(original);
+  }
+}
 
 type Graph = (
   base: string,
@@ -1217,7 +1260,7 @@ describe("fixture105 fresh component traversal", () => {
     // The actual await/context mutation witness remains in the unchanged native suite;
     // this group exercises synchronous release filesystem cuts, not an across-await filesystem claim.
   });
-  it("V10 independently opens the complete absolute chain for every directory and file", () => {
+  it("V10 independently opens the complete absolute chain for every directory and file", async () => {
     world((w) => {
       for (let index = 0; index < 3; index++)
         fs.writeFileSync(w.leaf + String(index), "fresh", { mode: 0o600 });
@@ -1256,5 +1299,6 @@ describe("fixture105 fresh component traversal", () => {
       expect(w.held.size).toBe(0);
       expect(w.unexpectedCloses).toEqual([]);
     });
+    await nativeCallbackSelftest();
   });
 });

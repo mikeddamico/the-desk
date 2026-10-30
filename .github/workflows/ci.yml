@@ -1,5 +1,7 @@
 name: foundation-ci
 
+# P1 SHORT PHYSICAL CHECKOUT: diagnostic only; layout success gates every later rest step.
+
 # TEMPORARY NATIVE UNKNOWN DIAGNOSTIC: one case; mandatory HOLD forbids full-CI acceptance.
 
 on:
@@ -152,6 +154,9 @@ jobs:
           SECURITY_UPLOAD_OUTCOME: ${{ steps.upload-security.outcome }}
 
   verify-rest:
+    defaults:
+      run:
+        working-directory: /tmp/d
     runs-on: ubuntu-24.04
     timeout-minutes: 190
     services:
@@ -174,61 +179,90 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         timeout-minutes: 2
         with: { fetch-depth: 0 }
+      - name: Prepare the exclusive complete short physical checkout
+        id: short-layout
+        working-directory: ${{ github.workspace }}
+        timeout-minutes: 6
+        run: /usr/bin/timeout --signal=TERM --kill-after=20s 300s /usr/bin/python3 -I -B test/support/fixture105-hosted-layout.py
+      - name: Retain layout ownership and failed preparation evidence
+        if: ${{ always() && steps.short-layout.outputs.evidence_claimed == 'true' }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        timeout-minutes: 2
+        with:
+          name: ci-short-layout-rest-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/fixture105-layout
+          if-no-files-found: error
+          retention-days: 30
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        if: ${{ success() && steps.short-layout.outcome == 'success' }}
         timeout-minutes: 2
         with:
           node-version: 24.21.0
           cache: npm
       - run: npm install --global npm@11.19.0 --ignore-scripts
+        if: ${{ success() && steps.short-layout.outcome == 'success' }}
         timeout-minutes: 3
       - run: npm ci --ignore-scripts
+        if: ${{ success() && steps.short-layout.outcome == 'success' }}
         timeout-minutes: 5
       - name: Bind source, identity and runner before anything runs
+        if: ${{ success() && steps.short-layout.outcome == 'success' }}
         id: init
         run: /usr/bin/python3 -I -B tools/ci-validation/ci.py init
         timeout-minutes: 2
       - name: Reconstruct the fixed synthetic fixture FFmpeg runtime
         id: fixture046-runtime
-        if: ${{ false }} # Native diagnostic: no media preparation.
+        if: ${{ steps.short-layout.outcome == 'success' && (false) }} # Native diagnostic: no media preparation.
         run: /usr/bin/timeout --signal=TERM --kill-after=20s 900s /usr/bin/python3 -I -B test/support/fixture046-ffmpeg-supply.py prepare
         timeout-minutes: 16
       - name: Probe the disposable database (read-only)
+        if: ${{ success() && steps.short-layout.outcome == 'success' }}
         run: /usr/bin/python3 -I -B tools/ci-validation/ci.py dbprobe
         timeout-minutes: 1
       - run: npm run format:check -- --cache-location "$RUNNER_TEMP/ci/tmp/prettier-format-check-unused.json"
+        if: ${{ success() && steps.short-layout.outcome == 'success' }}
         timeout-minutes: 3
       - run: npm run lint
+        if: ${{ success() && steps.short-layout.outcome == 'success' }}
         timeout-minutes: 5
       - run: npm run typecheck
+        if: ${{ success() && steps.short-layout.outcome == 'success' }}
         timeout-minutes: 5
       - run: npm run build
+        if: ${{ success() && steps.short-layout.outcome == 'success' }}
         timeout-minutes: 5
       - name: Validate the evidence harness
+        if: ${{ success() && steps.short-layout.outcome == 'success' }}
         run: env -u DESK_CI_PARTITION /usr/bin/python3 -I -B tools/ci-validation/test_ci.py
         timeout-minutes: 2
       - name: Bind the emitted build output
+        if: ${{ success() && steps.short-layout.outcome == 'success' }}
         run: /usr/bin/python3 -I -B tools/ci-validation/ci.py bind-build
         timeout-minutes: 2
       - name: Guard P33 prerequisite
+        if: ${{ success() && steps.short-layout.outcome == 'success' }}
         run: /bin/bash tools/ci-validation/run-stage.sh prerequisite
         timeout-minutes: 1
       - name: Validate P33 prerequisite
+        if: ${{ success() && steps.short-layout.outcome == 'success' }}
         run: /usr/bin/python3 -I -B tools/ci-validation/ci.py check prerequisite
         timeout-minutes: 1
       - name: Guard P33 focused controls
+        if: ${{ success() && steps.short-layout.outcome == 'success' }}
         run: /bin/bash tools/ci-validation/run-stage.sh focused
         timeout-minutes: 3
       - name: Validate P33 focused controls
+        if: ${{ success() && steps.short-layout.outcome == 'success' }}
         run: /usr/bin/python3 -I -B tools/ci-validation/ci.py check focused
         timeout-minutes: 1
       - name: Collect controls evidence
         id: collect-controls
-        if: ${{ always() && steps.init.outcome != 'skipped' }}
+        if: ${{ steps.short-layout.outcome == 'success' && (always() && steps.init.outcome != 'skipped') }}
         run: /usr/bin/python3 -I -B tools/ci-validation/ci.py collect --scope controls
         timeout-minutes: 1
       - name: Retain controls evidence
         id: upload-controls
-        if: ${{ always() && steps.collect-controls.outcome == 'success' }}
+        if: ${{ steps.short-layout.outcome == 'success' && (always() && steps.collect-controls.outcome == 'success') }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         timeout-minutes: 2
         with:
@@ -237,6 +271,7 @@ jobs:
           if-no-files-found: error
           retention-days: 30
       - name: Diagnose the fixed native unknown-commit case
+        if: ${{ success() && steps.short-layout.outcome == 'success' }}
         id: command-postgres
         timeout-minutes: 21
         run: |
@@ -244,7 +279,7 @@ jobs:
             /usr/bin/timeout --signal=TERM --kill-after=20s 1200s \
             node --import tsx test/support/command-postgres-hosted.ts fixture105-unknown
       - name: Retain native unknown-commit diagnostic, including failed cleanup observations
-        if: ${{ always() && steps.command-postgres.outcome != 'skipped' }}
+        if: ${{ steps.short-layout.outcome == 'success' && (always() && steps.command-postgres.outcome != 'skipped') }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         timeout-minutes: 2
         with:
@@ -253,29 +288,32 @@ jobs:
           if-no-files-found: error
           retention-days: 30
       - name: HOLD native unknown-commit diagnostic cannot qualify for full CI
+        if: ${{ success() && steps.short-layout.outcome == 'success' }}
         timeout-minutes: 1
         run: |
           echo "::error::HOLD: one native case only; full CI remains unrun."
           exit 78
       - name: Guard P33 aggregate (all)
+        if: ${{ success() && steps.short-layout.outcome == 'success' }}
         run: /bin/bash tools/ci-validation/run-stage.sh all
         timeout-minutes: 122
       - name: Validate aggregate counts, coverage and source
+        if: ${{ success() && steps.short-layout.outcome == 'success' }}
         run: /usr/bin/python3 -I -B tools/ci-validation/ci.py check all
         timeout-minutes: 2
       - name: Settle the owned fixture runtime before full evidence capture
         id: fixture046-cleanup
-        if: ${{ always() && steps.fixture046-runtime.outcome != 'skipped' }}
+        if: ${{ always() && steps.short-layout.outcome == 'success' && (steps.fixture046-runtime.outcome == 'success' || steps.fixture046-runtime.outcome == 'failure') }}
         run: /usr/bin/python3 -I -B test/support/fixture046-ffmpeg-supply.py cleanup
         timeout-minutes: 2
       - name: Collect full evidence
         id: collect-full
-        if: ${{ always() && steps.init.outcome != 'skipped' }}
+        if: ${{ steps.short-layout.outcome == 'success' && (always() && steps.init.outcome != 'skipped') }}
         run: /usr/bin/python3 -I -B tools/ci-validation/ci.py collect --scope full
         timeout-minutes: 2
       - name: Retain full evidence
         id: upload-full
-        if: ${{ always() && steps.collect-full.outcome == 'success' }}
+        if: ${{ steps.short-layout.outcome == 'success' && (always() && steps.collect-full.outcome == 'success') }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         timeout-minutes: 3
         with:
@@ -284,9 +322,11 @@ jobs:
           if-no-files-found: error
           retention-days: 30
       - id: audit
+        if: ${{ success() && steps.short-layout.outcome == 'success' }}
         run: npm audit --audit-level=high
         timeout-minutes: 5
       - id: gitleaks
+        if: ${{ success() && steps.short-layout.outcome == 'success' }}
         uses: gitleaks/gitleaks-action@e0c47f4f8be36e29cdc102c57e68cb5cbf0e8d1e # v3.0.0
         timeout-minutes: 5
         env:
@@ -294,14 +334,14 @@ jobs:
           GITLEAKS_ENABLE_UPLOAD_ARTIFACT: "false"
       - name: Retain generated security report outside the checkout
         id: retain-security
-        if: ${{ always() && steps.gitleaks.outcome != 'skipped' }}
+        if: ${{ steps.short-layout.outcome == 'success' && (always() && steps.gitleaks.outcome != 'skipped') }}
         run: /usr/bin/python3 -I -B tools/ci-validation/ci.py retain-security
         timeout-minutes: 1
         env:
           GITLEAKS_OUTCOME: ${{ steps.gitleaks.outcome }}
       - name: Upload partition security report
         id: upload-security
-        if: ${{ always() && steps.retain-security.outcome == 'success' }}
+        if: ${{ steps.short-layout.outcome == 'success' && (always() && steps.retain-security.outcome == 'success') }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         timeout-minutes: 2
         with:
@@ -311,7 +351,7 @@ jobs:
           retention-days: 30
       - name: Final evidence gate
         id: final
-        if: ${{ always() && steps.init.outcome != 'skipped' }}
+        if: ${{ steps.short-layout.outcome == 'success' && (always() && steps.init.outcome != 'skipped') }}
         run: /usr/bin/python3 -I -B tools/ci-validation/ci.py final
         timeout-minutes: 1
         env:
