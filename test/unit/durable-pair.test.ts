@@ -3,7 +3,7 @@ import { beforeEach, afterEach, describe, it, expect, vi } from "vitest";
 import * as fs from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { Readable } from "node:stream";
+import { IncomingMessage } from "node:http";
 import { EventEmitter } from "node:events";
 import { TLSSocket } from "node:tls";
 import { Socket } from "node:net";
@@ -68,7 +68,7 @@ vi.mock("../../src/runtime/durable-pair-binding.js", async (original) => {
     pairSettings: vi.fn(actual.pairSettings),
     databasePassword: vi.fn(() => "test-only-not-a-credential"),
     r2Credentials: vi.fn(() => ({
-      accessKeyId: "test-only-id",
+      accessKeyId: "TESTONLYID",
       secretAccessKey: "test-only-key",
     })),
   };
@@ -122,6 +122,25 @@ const originalEnv = {
   GENERATION_KILL_SWITCH: process.env.GENERATION_KILL_SWITCH,
 };
 
+/** Actual IncomingMessage shape with no connected socket; transport still owns framing and closure. */
+function responseMessage(
+  chunks: Buffer[],
+  complete = true,
+  stalled = false,
+): IncomingMessage {
+  const source = new IncomingMessage(new Socket());
+  const length = String(Buffer.concat(chunks).length);
+  source.rawHeaders = ["content-length", length];
+  source.headers = { "content-length": length };
+  source._read = () => {
+    if (stalled) return;
+    source._read = () => undefined;
+    for (const chunk of chunks) source.push(chunk);
+    source.complete = complete;
+    source.push(null);
+  };
+  return source;
+}
 function objectKey(id: string, name: string): string {
   return id + "/" + name;
 }
@@ -854,10 +873,18 @@ describe("bounded durable synthetic pair", () => {
     expect(statements.at(-1)).toBe("ROLLBACK");
     stream.authorized = true;
   });
-  it("bounds the fixed SDK transport and refuses ignored abort without retries or a new endpoint", async () => {
+  it("bounds the fixed PUT/GET transport and refuses ignored abort without retries or a new endpoint", async () => {
     const actual = await vi.importActual<typeof r2>(
       "../../src/runtime/durable-pair-r2.js",
     );
+    const transportRegistration = {
+      ...registration,
+      storage: {
+        ...registration.storage,
+        endpoint_origin:
+          "https://00000000000000000000000000000000.r2.cloudflarestorage.com",
+      },
+    };
     const payload = Buffer.from("fixed payload");
     const expected: ObjectIdentity = {
       name: "assessment.json",
@@ -869,19 +896,19 @@ describe("bounded durable synthetic pair", () => {
       .mockImplementation(async (request) => {
         await Promise.resolve();
         expect(request.hostname).toBe(
-          new URL(registration.storage.endpoint_origin).hostname,
+          new URL(transportRegistration.storage.endpoint_origin).hostname,
         );
         expect(request.method).toBe("GET");
         return {
           response: {
             statusCode: 200,
             headers: { "content-length": String(payload.length) },
-            body: Readable.from([payload]),
+            body: responseMessage([payload]),
           },
         };
       });
     expect(
-      await actual.getPairObject(registration, operation, expected),
+      await actual.getPairObject(transportRegistration, operation, expected),
     ).toEqual(payload);
     expect(handle).toHaveBeenCalledTimes(1);
     handle.mockImplementationOnce(async (request) => {
@@ -893,13 +920,13 @@ describe("bounded durable synthetic pair", () => {
         response: {
           statusCode: 200,
           headers: { "content-length": "0" },
-          body: Readable.from([]),
+          body: responseMessage([]),
         },
       };
     });
     expect(
       await actual.putPairObject(
-        registration,
+        transportRegistration,
         operation,
         "assessment.json",
         payload,
@@ -911,23 +938,26 @@ describe("bounded durable synthetic pair", () => {
         response: {
           statusCode: 302,
           headers: { location: "https://unapproved.invalid/" },
-          body: Readable.from([Buffer.alloc(65537)]),
+          body: responseMessage([Buffer.alloc(65537)]),
         },
       }),
     );
     await expect(
-      actual.getPairObject(registration, operation, expected),
+      actual.getPairObject(transportRegistration, operation, expected),
     ).rejects.toBeInstanceOf(PairFailure);
     expect(handle).toHaveBeenCalledTimes(3);
     let bodyLaunched: (() => void) | undefined;
     const bodyReached = new Promise<void>((resolve) => {
       bodyLaunched = resolve;
     });
-    const stalledBody = new Readable({
-      read() {
-        bodyLaunched?.();
-      },
-    });
+    const stalledBody = responseMessage([], false, true);
+    stalledBody.rawHeaders = ["content-length", String(payload.length)];
+    stalledBody.headers = { "content-length": String(payload.length) };
+    const originalRead = stalledBody._read.bind(stalledBody);
+    stalledBody._read = (size) => {
+      bodyLaunched?.();
+      originalRead(size);
+    };
     handle.mockImplementationOnce(() =>
       Promise.resolve({
         response: {
@@ -938,7 +968,11 @@ describe("bounded durable synthetic pair", () => {
       }),
     );
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "performance"] });
-    const stalled = actual.getPairObject(registration, operation, expected);
+    const stalled = actual.getPairObject(
+      transportRegistration,
+      operation,
+      expected,
+    );
     const stalledAssertion = expect(stalled).rejects.toMatchObject({
       code: "storage_timeout",
       pending: false,
@@ -957,7 +991,11 @@ describe("bounded durable synthetic pair", () => {
       return new Promise(() => undefined);
     });
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "performance"] });
-    const pending = actual.getPairObject(registration, operation, expected);
+    const pending = actual.getPairObject(
+      transportRegistration,
+      operation,
+      expected,
+    );
     const assertion = expect(pending).rejects.toMatchObject({
       code: "storage_timeout",
       pending: true,
@@ -966,7 +1004,7 @@ describe("bounded durable synthetic pair", () => {
     await vi.advanceTimersByTimeAsync(20001);
     await assertion;
     await expect(
-      actual.getPairObject(registration, operation, expected),
+      actual.getPairObject(transportRegistration, operation, expected),
     ).rejects.toMatchObject({ code: "cleanup_pending", pending: true });
   });
 });

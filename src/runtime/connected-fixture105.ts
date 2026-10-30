@@ -120,7 +120,7 @@ function fixtureOpen(
 ): number {
   fixtureAbsolute(path);
   if (graphOwner) {
-    // The graph ledger owns every re-anchor descriptor, including partial acquisition/close failures.
+    // The ledger owns each fresh component chain, including partial acquisition/close failures.
     let owned = graphOwner.open(
       "/",
       fixtureFs.constants.O_RDONLY |
@@ -250,101 +250,42 @@ function fixtureGraph(
   kind: "source" | "tools",
 ): FixtureRootObject {
   if (fixtureGraphCleanupPoison) throw new Error("fixture_inventory_changed");
-  fixtureAbsolute(base);
-  interface Frame {
-    fd: number;
-    path: string;
-    parent: Frame | undefined;
-    name: string;
-    bound: boolean;
-    initial: fixtureFs.BigIntStats;
-  }
   const held = new Map<
     number,
-    {
-      ordinal: number;
-      initial: fixtureFs.BigIntStats | undefined;
-    }
+    { ordinal: number; dev?: bigint; ino?: bigint }
   >();
-  const frames: Frame[] = [];
   let ordinal = 0;
   let visited = 0;
   const result: FixtureRootObject = {};
-  const identityFields = ["dev", "ino", "uid", "gid", "mode"] as const;
-  const stableFields = [
-    ...identityFields,
-    "nlink",
-    "size",
-    "mtimeNs",
-    "ctimeNs",
-  ] as const;
-  const descriptorStat = (fd: number): fixtureFs.BigIntStats =>
-    fixtureFs.fstatSync(fd, { bigint: true });
-  function sameIdentity(
-    a: fixtureFs.BigIntStats,
-    b: fixtureFs.BigIntStats,
-  ): boolean {
-    return (
-      a.dev === b.dev &&
-      a.ino === b.ino &&
-      a.isDirectory() === b.isDirectory() &&
-      a.isFile() === b.isFile() &&
-      a.isSymbolicLink() === b.isSymbolicLink()
-    );
-  }
-  function sameSnapshot(
-    a: fixtureFs.BigIntStats,
-    b: fixtureFs.BigIntStats,
-    bound: boolean,
-  ): boolean {
-    return (bound ? stableFields : identityFields).every(
-      (key) => a[key] === b[key],
-    );
-  }
-  function childPath(parent: Frame, name: string): string {
-    if (
-      !name ||
-      name === "." ||
-      name === ".." ||
-      name.includes("/") ||
-      name.includes("\0")
-    )
-      throw new Error("fixture_root_path");
-    return `/proc/self/fd/${String(parent.fd)}/${name}`;
-  }
-  function acquire(path: string, directory: boolean, flags?: number): number {
-    const owned = {
-      ordinal: ++ordinal,
-      initial: undefined as fixtureFs.BigIntStats | undefined,
-    };
-    const fd = fixtureFs.openSync(
-      path,
-      flags ??
-        fixtureFs.constants.O_RDONLY |
-          fixtureFs.constants.O_NOFOLLOW |
-          fixtureFs.constants.O_NONBLOCK |
-          (directory ? fixtureFs.constants.O_DIRECTORY : 0),
-    );
-    held.set(fd, owned); // Register the opened descriptor before the first stat can fail.
-    owned.initial = descriptorStat(fd);
-    return fd;
-  }
-  function release(fd: number): void {
-    const owned = held.get(fd);
-    if (!owned) throw new Error("fixture_inventory_changed");
-    held.delete(fd); // Never retry a close: the kernel may already have recycled this number.
-    try {
-      fixtureFs.closeSync(fd);
-    } catch (error) {
-      fixtureGraphCleanupPoison = true;
-      fixtureGraphRetainedCloses.push({
-        fd,
-        ordinal: owned.ordinal,
-        dev: owned.initial?.dev,
-        ino: owned.initial?.ino,
-      });
-      throw error;
-    }
+  const owner = {
+    open(path: string, flags: number): number {
+      const fd = fixtureFs.openSync(path, flags);
+      held.set(fd, { ordinal: ++ordinal });
+      return fd;
+    },
+    close(fd: number): void {
+      const identity = held.get(fd);
+      if (!identity) throw new Error("fixture_inventory_changed");
+      held.delete(fd); // A failed close may already have recycled the descriptor number.
+      try {
+        fixtureFs.closeSync(fd);
+      } catch (error) {
+        fixtureGraphCleanupPoison = true;
+        fixtureGraphRetainedCloses.push({
+          fd,
+          ordinal: identity.ordinal,
+          dev: identity.dev,
+          ino: identity.ino,
+        });
+        throw error;
+      }
+    },
+  };
+  function observe(fd: number, value: fixtureFs.Stats): void {
+    const identity = held.get(fd);
+    if (!identity) throw new Error("fixture_inventory_changed");
+    if (Number.isSafeInteger(value.dev)) identity.dev = BigInt(value.dev);
+    if (Number.isSafeInteger(value.ino)) identity.ino = BigInt(value.ino);
   }
   function use<T>(fd: number, work: () => T): T {
     let failed = false;
@@ -357,7 +298,7 @@ function fixtureGraph(
       primary = error;
     }
     try {
-      release(fd);
+      owner.close(fd);
     } catch (error) {
       if (!failed) {
         failed = true;
@@ -367,214 +308,89 @@ function fixtureGraph(
     if (failed) throw primary;
     return value as T;
   }
-  function verifyFrames(): void {
-    for (const frame of frames) {
-      const actual = descriptorStat(frame.fd);
+  function read(path: string): Buffer {
+    const fd = fixtureOpen(path, false, owner);
+    return use(fd, () => {
+      const before = fixtureFs.fstatSync(fd);
+      observe(fd, before);
       if (
-        !actual.isDirectory() ||
-        !sameSnapshot(frame.initial, actual, frame.bound)
+        !before.isFile() ||
+        before.nlink !== 1 ||
+        before.uid !== process.getuid?.() ||
+        before.size > 64 * 1024 * 1024
       )
-        throw new Error("fixture_inventory_changed");
-      if (frame.parent) {
-        const entry = fixtureFs.lstatSync(childPath(frame.parent, frame.name), {
-          bigint: true,
-        });
-        if (
-          !sameIdentity(actual, entry) ||
-          !sameSnapshot(frame.initial, entry, frame.bound)
-        )
-          throw new Error("fixture_inventory_changed");
-      }
-    }
+        throw new Error("fixture_root_leaf");
+      const bytes = fixtureFs.readFileSync(fd);
+      const after = fixtureFs.fstatSync(fd);
+      if (
+        bytes.length !== before.size ||
+        before.dev !== after.dev ||
+        before.ino !== after.ino ||
+        before.mtimeMs !== after.mtimeMs ||
+        before.ctimeMs !== after.ctimeMs
+      )
+        throw new Error("fixture_root_changed");
+      return bytes;
+    });
   }
-  function visit(frame: Frame, relative: string, info: fixtureFs.Stats): void {
-    result[relative] = { type: "directory", mode: info.mode & 0o777 };
-    for (const name of fixtureFs
-      .readdirSync(`/proc/self/fd/${String(frame.fd)}`)
-      .sort()) {
-      if (
-        relative === "" &&
-        (kind === "source"
-          ? [".git", "node_modules", "dist"]
-          : [".vite-temp"]
-        ).includes(name)
-      )
-        continue;
-      if (visited++ > 20000 && Object.keys(result).length > 20000)
-        throw new Error("fixture_inventory_bound");
-      verifyFrames();
-      const path = childPath(frame, name);
-      const logical = `${frame.path}/${name}`;
-      const key = relative ? `${relative}/${name}` : name;
-      const entry = fixtureFs.lstatSync(path);
-      const first = fixtureFs.lstatSync(path, { bigint: true });
-      if (
-        (["dev", "ino", "uid", "gid", "mode", "nlink", "size"] as const).some(
-          (key) => Number(first[key]) !== entry[key],
-        )
-      )
-        throw new Error("fixture_inventory_changed");
-      if (entry.isDirectory()) {
-        const fd = acquire(path, true);
-        use(fd, () => {
-          const actual = descriptorStat(fd);
-          if (
-            !sameIdentity(first, actual) ||
-            !sameSnapshot(first, actual, true)
-          )
-            throw new Error("fixture_inventory_changed");
-          const child: Frame = {
-            fd,
-            path: logical,
-            parent: frame,
-            name,
-            bound: true,
-            initial: actual,
-          };
-          frames.push(child);
-          try {
-            visit(child, key, entry);
-            verifyFrames();
-          } finally {
-            frames.pop();
-          }
-        });
-        continue;
-      }
-      if (entry.isSymbolicLink()) {
-        if (kind !== "tools") throw new Error("fixture_source_link");
-        const target = fixtureFs.readlinkSync(path);
-        const resolved = fixturePath.resolve(
-          fixturePath.dirname(logical),
-          target,
-        );
-        if (fixturePath.isAbsolute(target) || !resolved.startsWith(base + "/"))
-          throw new Error("fixture_tool_link");
-        const after = fixtureFs.lstatSync(path, { bigint: true });
-        if (!sameIdentity(first, after) || !sameSnapshot(first, after, true))
-          throw new Error("fixture_inventory_changed");
-        verifyFrames();
-        result[key] = { type: "symlink", mode: entry.mode & 0o777, target };
-        continue;
-      }
-      if (!entry.isFile()) throw new Error("fixture_inventory_special");
-      const fd = acquire(path, false);
-      const bytes = use(fd, () => {
-        const before = fixtureFs.fstatSync(fd);
-        if (
-          !before.isFile() ||
-          before.nlink !== 1 ||
-          before.uid !== process.getuid?.() ||
-          before.size > 64 * 1024 * 1024
-        )
-          throw new Error("fixture_root_leaf");
-        const beforeExact = descriptorStat(fd);
-        if (
-          !sameIdentity(first, beforeExact) ||
-          !sameSnapshot(first, beforeExact, true)
-        )
-          throw new Error("fixture_inventory_changed");
-        const data = fixtureFs.readFileSync(fd);
-        const after = fixtureFs.fstatSync(fd);
-        if (
-          data.length !== before.size ||
-          before.dev !== after.dev ||
-          before.ino !== after.ino ||
-          before.mtimeMs !== after.mtimeMs ||
-          before.ctimeMs !== after.ctimeMs ||
-          !sameSnapshot(beforeExact, descriptorStat(fd), true)
-        )
-          throw new Error("fixture_root_changed");
-        const currentEntry = fixtureFs.lstatSync(path, { bigint: true });
-        if (
-          !sameIdentity(beforeExact, currentEntry) ||
-          !sameSnapshot(beforeExact, currentEntry, true)
-        )
-          throw new Error("fixture_inventory_changed");
-        verifyFrames();
-        return data;
-      });
-      result[key] = {
-        type: "file",
-        mode: entry.mode & 0o777,
-        bytes: bytes.length,
-        sha256: fixtureRawHash(bytes),
-      };
+  function visit(path: string, relative: string): void {
+    // Preserve the original node/key bound and independent absolute acquisition window.
+    if (visited++ > 20000 && Object.keys(result).length > 20000)
+      throw new Error("fixture_inventory_bound");
+    const info = fixtureFs.lstatSync(path);
+    if (info.isSymbolicLink()) {
+      if (kind !== "tools") throw new Error("fixture_source_link");
+      const target = fixtureFs.readlinkSync(path);
+      const resolved = fixturePath.resolve(fixturePath.dirname(path), target);
+      if (fixturePath.isAbsolute(target) || !resolved.startsWith(base + "/"))
+        throw new Error("fixture_tool_link");
+      result[relative] = { type: "symlink", mode: info.mode & 0o777, target };
+      return;
     }
-    verifyFrames();
+    if (info.isDirectory()) {
+      const fd = fixtureOpen(path, true, owner);
+      use(fd, () => {
+        const actual = fixtureFs.fstatSync(fd);
+        observe(fd, actual);
+        if (actual.ino !== info.ino || actual.dev !== info.dev)
+          throw new Error("fixture_inventory_changed");
+        result[relative] = { type: "directory", mode: info.mode & 0o777 };
+        for (const name of fixtureFs
+          .readdirSync(`/proc/self/fd/${String(fd)}`)
+          .sort()) {
+          if (
+            relative === "" &&
+            (kind === "source"
+              ? [".git", "node_modules", "dist"]
+              : [".vite-temp"]
+            ).includes(name)
+          )
+            continue;
+          visit(`${path}/${name}`, relative ? `${relative}/${name}` : name);
+        }
+      });
+      return;
+    }
+    if (!info.isFile()) throw new Error("fixture_inventory_special");
+    const bytes = read(path);
+    result[relative] = {
+      type: "file",
+      mode: info.mode & 0o777,
+      bytes: bytes.length,
+      sha256: fixtureRawHash(bytes),
+    };
   }
   let failed = false;
   let primary: unknown;
   try {
-    if (visited++ > 20000 && Object.keys(result).length > 20000)
-      throw new Error("fixture_inventory_bound");
-    const initialBase = fixtureFs.lstatSync(base);
-    const rootFd = acquire("/", true);
-    const root: Frame = {
-      fd: rootFd,
-      path: "/",
-      parent: undefined,
-      name: "",
-      bound: base === "/",
-      initial: descriptorStat(rootFd),
-    };
-    frames.push(root);
-    let parent = root;
-    const parts = base.split("/").filter(Boolean);
-    for (const [index, name] of parts.entries()) {
-      verifyFrames();
-      const path = childPath(parent, name);
-      const first = fixtureFs.lstatSync(path, { bigint: true });
-      const fd = acquire(path, true);
-      const actual = descriptorStat(fd);
-      const bound = index === parts.length - 1;
-      if (
-        !actual.isDirectory() ||
-        !sameIdentity(first, actual) ||
-        !sameSnapshot(first, actual, bound)
-      )
-        throw new Error("fixture_inventory_changed");
-      const frame: Frame = {
-        fd,
-        path: index === 0 ? `/${name}` : `${parent.path}/${name}`,
-        parent,
-        name,
-        bound,
-        initial: actual,
-      };
-      frames.push(frame);
-      parent = frame;
-    }
-    if (
-      !initialBase.isDirectory() ||
-      (["dev", "ino", "uid", "gid", "mode", "nlink", "size"] as const).some(
-        (key) => Number(parent.initial[key]) !== initialBase[key],
-      )
-    )
-      throw new Error("fixture_inventory_changed");
-    visit(parent, "", initialBase);
-    verifyFrames();
-    // Keep an independent absolute reopen; held descriptors alone can remain readable after detachment.
-    const anchor = fixtureOpen(base, true, {
-      open: (path, flags) => acquire(path, true, flags),
-      close: release,
-    });
-    use(anchor, () => {
-      const actual = descriptorStat(anchor);
-      if (
-        !sameIdentity(parent.initial, actual) ||
-        !sameSnapshot(parent.initial, actual, true)
-      )
-        throw new Error("fixture_inventory_changed");
-      verifyFrames();
-    });
+    visit(base, "");
   } catch (error) {
     failed = true;
     primary = error;
   }
   for (const fd of [...held.keys()].reverse()) {
     try {
-      release(fd);
+      owner.close(fd);
     } catch (error) {
       if (!failed) {
         failed = true;
@@ -638,6 +454,7 @@ function fixtureExecutionRoot(checkout: string): {
   marker: FixtureRootObject;
   temp: FixtureRootObject;
 } {
+  if (fixtureGraphCleanupPoison) throw new Error("fixture_inventory_changed");
   const raw = process.env.DESK_FIXTURE105_BINDING;
   if (raw === undefined || Buffer.byteLength(raw) > 8192)
     throw new Error("fixture_runner_binding_missing");
@@ -1109,6 +926,7 @@ function readRelease(): {
   binding: ReleaseBinding;
   observation: Readonly<{ root_sha256: string; temp: FixtureRootObject }>;
 } {
+  if (fixtureGraphCleanupPoison) throw new Error("fixture_inventory_changed");
   // Fresh full checks bracket this synchronous read only. Nothing is reused across
   // a guard call or await; this is not authentication against hostile same-user code.
   const before = fixtureExecutionRoot(fixtureCheckout);

@@ -691,7 +691,7 @@ def guard(args):
                'master046': ['test/unit/frozen-fixture046-master.test.ts'],
                'technical-master': ['test/unit/technical-master-admission.test.ts'],
                'technical-master-pure': ['test/unit/technical-master-admission.test.ts'],
-               'durable-pair-pure': ['test/unit/durable-pair.test.ts'],
+               'durable-pair-pure': ['test/unit/durable-pair.test.ts', 'test/unit/durable-pair-transport.test.ts'],
                'command-postgres': ['test/integration/g2-command-connection.test.ts'],
                'fixture105-unknown': ['test/integration/connected-fixture105.test.ts', '--testNamePattern', '^connected fixture105 native ownership holds unknown construction commit without inventing its missing settlement receipt$'],
                'runtime-observe': ['test/runtime-observe.test.ts'],

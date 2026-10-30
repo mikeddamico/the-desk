@@ -28,8 +28,10 @@
     "test:p33": "/usr/bin/python3 test/support/p33-parity-supervisor.py guard p33"
   },
   "dependencies": {
-    "@aws-sdk/client-s3": "3.1160.0",
+    "@smithy/core": "3.38.0",
     "@smithy/node-http-handler": "4.14.0",
+    "@smithy/signature-v4": "5.7.5",
+    "@smithy/types": "4.19.0",
     "pg": "8.16.3",
     "pino": "9.9.5",
     "zod": "4.6.6"

@@ -251,6 +251,8 @@ function duringRead(w: World, mutate: () => void): void {
 /** Authentic existing binding owner on a private source copy; no hosted identity, SQL or caller pass. */
 function boundRelease(w: World): {
   release: () => unknown;
+  graph: Graph;
+  root: () => unknown;
   bindingRoot: string;
   witness: string;
 } {
@@ -370,7 +372,8 @@ function boundRelease(w: World): {
     [
       ...canonicalFunctions,
       ...statements.map((node) => node.getText(parsed)),
-    ].join("\n") + "\nreadRelease;",
+    ].join("\n") +
+      "\n({release:readRelease,graph:fixtureGraph,root:()=>fixtureExecutionRoot(fixtureCheckout)});",
     {
       compilerOptions: {
         target: ts.ScriptTarget.ES2024,
@@ -435,10 +438,21 @@ function boundRelease(w: World): {
     },
     { timeout: 1000 },
   );
-  if (typeof release !== "function")
+  if (
+    typeof release !== "object" ||
+    release === null ||
+    ["release", "graph", "root"].some(
+      (name) => typeof Reflect.get(release, name) !== "function",
+    )
+  )
     throw new Error("private release extraction failed");
+  const functions = release as {
+    release: () => unknown;
+    graph: Graph;
+    root: () => unknown;
+  };
   return {
-    release: release as () => unknown,
+    ...functions,
     bindingRoot,
     witness: path.join(checkout, "graph-only-bound-witness.txt"),
   };
@@ -646,7 +660,11 @@ function assertNodeBound(base: string): void {
   expect(touched.has(path.join(base, children[20000] ?? "missing"))).toBe(
     false,
   );
-  expect(descriptors.size).toBe(directories.length + 20000);
+  // B absolute components plus root: one initial directory chain, then a
+  // separate B+2 descriptor chain for each of the 20,000 completed leaves.
+  const components = base.split("/").filter(Boolean).length;
+  expect(directories.length).toBe(components + 1);
+  expect(descriptors.size).toBe(components + 1 + 20000 * (components + 2));
   expect(unregisteredCloses).toBe(0);
   expect(
     [...descriptors.values()].every(
@@ -655,7 +673,7 @@ function assertNodeBound(base: string): void {
   ).toBe(true);
 }
 
-describe("fixture105 descriptor traversal", () => {
+describe("fixture105 fresh component traversal", () => {
   it("V1 matches independent Python inventories and freshly reads every included leaf", () => {
     for (const kind of ["source", "tools"] as const)
       world((w) => {
@@ -767,164 +785,115 @@ describe("fixture105 descriptor traversal", () => {
         ).toHaveLength(0);
       });
   });
-  it("V4 refuses identical-byte leaf, subtree, base and shared-ancestor replacement", () => {
-    for (const position of ["acquire", "read"])
-      for (const component of ["leaf", "subtree", "base", "ancestor"])
-        world((w) => {
-          let changed = false;
-          const target =
-            component === "leaf"
-              ? w.leaf
-              : component === "subtree"
-                ? path.dirname(w.leaf)
-                : component === "base"
-                  ? w.base
-                  : path.dirname(w.base);
-          const replace = (): void => {
-            fs.cpSync(target, target + "-copy", { recursive: true });
-            fs.renameSync(target, target + "-old");
-            fs.renameSync(target + "-copy", target);
-          };
-          w.hook = (name, args, next) => {
-            if (
-              !changed &&
-              position === "acquire" &&
-              name === "openSync" &&
-              String(args[0]).endsWith("/" + path.basename(target))
-            ) {
-              changed = true;
-              replace();
-            }
-            const value = next();
-            if (
-              !changed &&
-              position === "read" &&
-              name === "readFileSync" &&
-              targetFd(w, args[0])
-            ) {
-              changed = true;
-              replace();
-            }
-            return value;
-          };
-          refused(w);
-          expect(changed).toBe(true);
-        });
-  });
-  it("V5 separates bound mutation, observed shared detachment and restored shared churn", () => {
-    for (const mode of ["bound", "detached", "sibling", "restored"])
+  it("V4 refuses substituted symlinks at each fresh component acquisition", () => {
+    for (const component of ["leaf", "subtree", "base", "ancestor"])
       world((w) => {
-        duringRead(w, () => {
-          const parent = path.dirname(w.base);
-          if (mode === "bound") {
-            fs.renameSync(
-              path.dirname(w.leaf),
-              path.dirname(w.leaf) + "-moved",
-            );
-            fs.renameSync(
-              path.dirname(w.leaf) + "-moved",
-              path.dirname(w.leaf),
-            );
+        const target =
+          component === "leaf"
+            ? w.leaf
+            : component === "subtree"
+              ? path.dirname(w.leaf)
+              : component === "base"
+                ? w.base
+                : path.dirname(w.base);
+        let cut = false;
+        w.hook = (name, args, next) => {
+          if (
+            !cut &&
+            name === "openSync" &&
+            String(args[0]).endsWith("/" + path.basename(target))
+          ) {
+            cut = true;
+            fs.renameSync(target, target + "-saved");
+            fs.symlinkSync("/etc", target);
           }
-          if (mode === "sibling") {
-            fs.mkdirSync(path.join(parent, "sibling"));
-            fs.rmdirSync(path.join(parent, "sibling"));
-          }
-          if (mode === "detached" || mode === "restored") {
-            fs.renameSync(parent, parent + "-saved");
-            if (mode === "restored") fs.renameSync(parent + "-saved", parent);
-          }
-        });
-        if (mode === "bound" || mode === "detached") refused(w);
-        else {
-          expect(w.graph(w.base, "source")).toEqual({
-            "": { type: "directory", mode: fs.statSync(w.base).mode & 0o777 },
-            nested: {
-              type: "directory",
-              mode: fs.statSync(path.dirname(w.leaf)).mode & 0o777,
-            },
-            "nested/leaf": {
-              type: "file",
-              mode: 0o600,
-              bytes: 20,
-              sha256: crypto
-                .createHash("sha256")
-                .update("fresh governed bytes")
-                .digest("hex"),
-            },
-          });
-          expect(w.held.size).toBe(0);
-        }
+          return next();
+        };
+        refused(w);
+        expect(cut).toBe(true);
+        expect(
+          w.calls.filter((event) => event.name === "readFileSync"),
+        ).toHaveLength(0);
       });
+    world((w) => {
+      let cut = false;
+      w.hook = (name, args, next) => {
+        if (
+          !cut &&
+          name === "openSync" &&
+          String(args[0]).endsWith("/nested")
+        ) {
+          cut = true;
+          fs.cpSync(path.dirname(w.leaf), path.dirname(w.leaf) + "-copy", {
+            recursive: true,
+          });
+          fs.renameSync(path.dirname(w.leaf), path.dirname(w.leaf) + "-saved");
+          fs.renameSync(path.dirname(w.leaf) + "-copy", path.dirname(w.leaf));
+        }
+        return next();
+      };
+      refused(w, "fixture_inventory_changed");
+      expect(cut).toBe(true);
+    });
   });
-  it("V6 refuses leaf metadata and bound directory changes, allowing stable system ancestors", () => {
-    for (const field of [
-      "uid",
-      "gid",
-      "mode",
-      "nlink",
-      "size",
-      "mtimeNs",
-      "ctimeNs",
-    ])
+  it("V5 accepts restored shared churn and observes fresh permission failure after an earlier leaf", () => {
+    world((w) => {
+      duringRead(w, () => {
+        const parent = path.dirname(w.base);
+        fs.mkdirSync(path.join(parent, "sibling"));
+        fs.rmdirSync(path.join(parent, "sibling"));
+        fs.renameSync(parent, parent + "-saved");
+        fs.renameSync(parent + "-saved", parent);
+      });
+      expect(w.graph(w.base, "source")).toEqual(oracle(w.base, "source"));
+      expect(w.held.size).toBe(0);
+    });
+    world((w) => {
+      fs.writeFileSync(w.leaf + "2", "second", { mode: 0o600 });
+      const primary = Object.assign(
+        new Error("fresh ancestor permission failure"),
+        { code: "EACCES" },
+      );
+      let completedReads = 0;
+      let cut = false;
+      w.hook = (name, args, next) => {
+        if (
+          completedReads === 1 &&
+          name === "openSync" &&
+          String(args[0]).endsWith("/shared")
+        ) {
+          cut = true;
+          throw primary;
+        }
+        const value = next();
+        if (name === "readFileSync" && targetFd(w, args[0])) completedReads++;
+        return value;
+      };
+      expect(failure(() => w.graph(w.base, "source"))).toBe(primary);
+      expect(cut).toBe(true);
+      expect(completedReads).toBe(1);
+      expect(w.held.size).toBe(0);
+    });
+  });
+  it("V6 preserves original numeric leaf read stability without claiming whole-graph snapshots", () => {
+    for (const field of ["dev", "ino", "mtimeMs", "ctimeMs"])
       world((w) => {
         let read = false;
         w.hook = (name, args, next) => {
           const value = next();
           if (name === "readFileSync" && targetFd(w, args[0])) read = true;
-          if (
-            read &&
-            name === "fstatSync" &&
-            targetFd(w, args[0]) &&
-            typeof Reflect.get(Object(value), field) === "bigint"
-          )
+          if (read && name === "fstatSync" && targetFd(w, args[0]))
             return statChange(
               value,
               field,
-              (Reflect.get(Object(value), field) as bigint) + 1n,
+              Number(Reflect.get(Object(value), field)) + 1,
             );
           return value;
         };
         refused(w, "fixture_root_changed");
       });
-    for (const mode of ["bound_mode", "shared_mode", "bound_entry"])
-      world((w) => {
-        duringRead(w, () => {
-          if (mode === "bound_entry")
-            fs.writeFileSync(path.join(w.base, "new"), "new");
-          else
-            fs.chmodSync(
-              mode === "bound_mode" ? w.base : path.dirname(w.base),
-              0o755,
-            );
-        });
-        refused(w, "fixture_inventory_changed");
-      });
-    for (const bound of [true, false])
-      for (const field of ["uid", "gid"])
-        world((w) => {
-          let read = false;
-          const target = bound ? w.base : path.dirname(w.base);
-          w.hook = (name, args, next) => {
-            const value = next();
-            if (name === "readFileSync" && targetFd(w, args[0])) read = true;
-            if (
-              read &&
-              name === "fstatSync" &&
-              targetFd(w, args[0], target) &&
-              typeof Reflect.get(Object(value), field) === "bigint"
-            )
-              return statChange(
-                value,
-                field,
-                (Reflect.get(Object(value), field) as bigint) + 1n,
-              );
-            return value;
-          };
-          refused(w, "fixture_inventory_changed");
-        });
     world((w) => {
-      expect(() => w.graph(w.base, "source")).not.toThrow();
+      expect(w.graph(w.base, "source")).toEqual(oracle(w.base, "source"));
       expect(w.held.size).toBe(0);
     });
   });
@@ -1027,10 +996,13 @@ describe("fixture105 descriptor traversal", () => {
           const secondaryClose = new Error("secondary close");
           const uncertain = new Set<Acquisition>();
           let remaining = closeCount;
+          let reachedRead = false;
           w.hook = (name, args, next) => {
-            if (primary && name === "readFileSync" && targetFd(w, args[0]))
-              throw first;
-            if (name === "closeSync" && remaining-- > 0) {
+            if (name === "readFileSync" && targetFd(w, args[0])) {
+              reachedRead = true;
+              if (primary) throw first;
+            }
+            if (reachedRead && name === "closeSync" && remaining-- > 0) {
               const acquired = w.active.get(Number(args[0]));
               if (!acquired) throw new Error("fault target not owned");
               const closeFailure =
@@ -1055,26 +1027,26 @@ describe("fixture105 descriptor traversal", () => {
       "first_open",
       "partial_initial_ancestry",
       "first_post_open_stat",
-      "partial_reanchor_open",
-      "partial_reanchor_close",
+      "partial_child_chain_open",
+      "partial_child_chain_close",
     ] as const)
       world((w) => {
         const original = new Error(phase);
         const uncertain = new Set<Acquisition>();
         let rootOpens = 0;
         let initialOpens = 0;
-        let anchorOpens = 0;
+        let childOpens = 0;
         let injected = false;
         w.hook = (name, args, next) => {
           if (name === "openSync") {
             if (args[0] === "/") rootOpens++;
             if (rootOpens === 1) initialOpens++;
-            else anchorOpens++;
+            else childOpens++;
             if (
               !injected &&
               ((phase === "first_open" && initialOpens === 1) ||
                 (phase === "partial_initial_ancestry" && initialOpens === 3) ||
-                (phase === "partial_reanchor_open" && anchorOpens === 3))
+                (phase === "partial_child_chain_open" && childOpens === 3))
             ) {
               injected = true;
               throw original;
@@ -1085,19 +1057,23 @@ describe("fixture105 descriptor traversal", () => {
             phase === "first_post_open_stat" &&
             name === "fstatSync"
           ) {
-            expect(w.acquisitions).toHaveLength(1);
+            expect(w.acquisitions.length).toBe(
+              w.base.split("/").filter(Boolean).length + 1,
+            );
+            expect(w.active.size).toBe(1);
             injected = true;
             throw original;
           }
           if (
             !injected &&
-            phase === "partial_reanchor_close" &&
+            phase === "partial_child_chain_close" &&
             rootOpens === 2 &&
             name === "closeSync"
           ) {
-            expect(anchorOpens).toBe(2);
+            expect(childOpens).toBe(2);
             const acquired = w.active.get(Number(args[0]));
-            if (!acquired) throw new Error("anchor close target not owned");
+            if (!acquired)
+              throw new Error("fresh component close target not owned");
             expect(acquired.path).toBe("/");
             uncertain.add(acquired);
             injected = true;
@@ -1113,14 +1089,51 @@ describe("fixture105 descriptor traversal", () => {
         if (phase === "partial_initial_ancestry")
           expect(w.acquisitions).toHaveLength(2);
         if (phase === "first_post_open_stat")
-          expect(w.acquisitions).toHaveLength(1);
-        if (phase === "partial_reanchor_open") expect(anchorOpens).toBe(3);
+          expect(w.acquisitions.length).toBe(
+            w.base.split("/").filter(Boolean).length + 1,
+          );
+        if (phase === "partial_child_chain_open") expect(childOpens).toBe(3);
         ownership(w, uncertain);
         if (uncertain.size) {
           poisoned(w);
           ownership(w, uncertain);
         }
       });
+    world((w) => {
+      const bound = boundRelease(w);
+      const primary = new Error(
+        "uncertain component close before root or release",
+      );
+      let injected = false;
+      w.hook = (name, _args, next) => {
+        if (name === "closeSync" && !injected) {
+          injected = true;
+          throw primary;
+        }
+        return next();
+      };
+      expect(failure(() => bound.graph(w.base, "source"))).toBe(primary);
+      expect(injected).toBe(true);
+      const uncertain = new Set(
+        w.acquisitions.filter((entry) => !entry.settled),
+      );
+      expect(uncertain.size).toBe(1);
+      ownership(w, uncertain);
+      for (const invoke of [
+        () => bound.graph(w.base, "source"),
+        bound.root,
+        bound.release,
+      ]) {
+        const count = w.calls.length;
+        const acquired = w.acquisitions.length;
+        expect(failure(invoke)).toMatchObject({
+          message: "fixture_inventory_changed",
+        });
+        expect(w.calls.length).toBe(count);
+        expect(w.acquisitions.length).toBe(acquired);
+        ownership(w, uncertain);
+      }
+    });
   });
   it("V9 runs genuine release root comparisons across an internal cut and a subsequent call", () => {
     world((w) => {
@@ -1204,36 +1217,44 @@ describe("fixture105 descriptor traversal", () => {
     // The actual await/context mutation witness remains in the unchanged native suite;
     // this group exercises synchronous release filesystem cuts, not an across-await filesystem claim.
   });
-  it("V10 keeps descriptor ownership bounded and opens absolute ancestry only twice per graph", () => {
+  it("V10 independently opens the complete absolute chain for every directory and file", () => {
     world((w) => {
-      for (let i = 0; i < 20; i++)
-        fs.writeFileSync(
-          path.join(w.base, "nested", "leaf" + String(i)),
-          "fresh",
-          { mode: 0o600 },
-        );
-      let peak = 0;
-      w.hook = (_name, _args, next) => {
-        const value = next();
-        peak = Math.max(peak, w.held.size);
-        return value;
-      };
+      for (let index = 0; index < 3; index++)
+        fs.writeFileSync(w.leaf + String(index), "fresh", { mode: 0o600 });
       w.graph(w.base, "source");
+      const roots = w.acquisitions.filter((entry) => entry.path === "/");
+      expect(roots).toHaveLength(6); // Two directories and four leaves, each with its own root acquisition.
+      const expected = [
+        w.base,
+        path.dirname(w.leaf),
+        w.leaf,
+        w.leaf + "0",
+        w.leaf + "1",
+        w.leaf + "2",
+      ];
+      const chains: string[][] = [];
+      for (const acquired of w.acquisitions) {
+        if (acquired.path === "/") chains.push([]);
+        chains.at(-1)?.push(acquired.path);
+      }
+      expect(chains).toEqual(
+        expected.map((target) => {
+          const parts = target.split("/").filter(Boolean);
+          return [
+            "/",
+            ...parts.map(
+              (_part, index) => "/" + parts.slice(0, index + 1).join("/"),
+            ),
+          ];
+        }),
+      );
       expect(
-        w.calls.filter(
-          (event) => event.name === "openSync" && event.args[0] === "/",
+        w.acquisitions.every(
+          (entry) => entry.closeAttempts === 1 && entry.settled,
         ),
-      ).toHaveLength(2);
-      expect(
-        w.calls.filter((event) => event.name === "readFileSync"),
-      ).toHaveLength(21);
-      expect(peak).toBeLessThanOrEqual(
-        w.base.split("/").filter(Boolean).length + 4,
-      );
+      ).toBe(true);
       expect(w.held.size).toBe(0);
-      expect(w.calls.filter((event) => event.name === "openSync").length).toBe(
-        w.calls.filter((event) => event.name === "closeSync").length,
-      );
+      expect(w.unexpectedCloses).toEqual([]);
     });
   });
 });
