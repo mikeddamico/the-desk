@@ -379,6 +379,7 @@ export const KNOWN_OUTCOME_CODES: ReadonlySet<string> = new Set([
   "texture_reconcile_failed",
   "texture_stage_conflict",
   "timestamp_precision",
+  "transaction_mode_unsupported",
   "unexpected_failure",
   "unit_rights_identity_mismatch",
 ]);

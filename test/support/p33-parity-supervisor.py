@@ -693,6 +693,8 @@ def guard(args):
                'technical-master-pure': ['test/unit/technical-master-admission.test.ts'],
                'durable-pair-pure': ['test/unit/durable-pair.test.ts'],
                'command-postgres': ['test/integration/g2-command-connection.test.ts'],
+               'fixture105-unknown': ['test/integration/connected-fixture105.test.ts', '--testNamePattern', '^connected fixture105 native ownership holds unknown construction commit without inventing its missing settlement receipt$'],
+               'runtime-observe': ['test/runtime-observe.test.ts'],
                'parity': ['test/unit/fixture-pack-extraction-parity.test.ts'], 'p33': ['test/unit/fixture-pack-extraction-parity.test.ts',
                    '--testNamePattern', '^P28-P37 legacy formats, freshness and discarded faults P33 multidisk$']}
     command = [node, str(ROOT/'node_modules/vitest/vitest.mjs'), 'run', *filters[args.profile]]
@@ -822,7 +824,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest='role', required=True)
     g = sub.add_parser('guard')
-    g.add_argument('profile', choices=['prerequisite', 'focused', 'p33', 'parity', 'unit', 'integration', 'all', 'writer', 'rest', 'master046', 'technical-master', 'technical-master-pure', 'durable-pair-pure', 'command-postgres'])
+    g.add_argument('profile', choices=['prerequisite', 'focused', 'p33', 'parity', 'unit', 'integration', 'all', 'writer', 'rest', 'master046', 'technical-master', 'technical-master-pure', 'durable-pair-pure', 'command-postgres', 'fixture105-unknown', 'runtime-observe'])
     o = sub.add_parser('owner')
     for key in ('lease', 'device', 'inode', 'link', 'guard'):
         o.add_argument('--'+key, type=int, required=True)

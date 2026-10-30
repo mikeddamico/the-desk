@@ -1,5 +1,7 @@
 name: foundation-ci
 
+# TEMPORARY NATIVE UNKNOWN DIAGNOSTIC: one case; mandatory HOLD forbids full-CI acceptance.
+
 on:
   pull_request:
   push:
@@ -10,6 +12,7 @@ permissions:
 
 jobs:
   verify-writer:
+    if: ${{ false }} # Native diagnostic: no writer partition.
     runs-on: ubuntu-24.04
     timeout-minutes: 190
     services:
@@ -186,6 +189,7 @@ jobs:
         timeout-minutes: 2
       - name: Reconstruct the fixed synthetic fixture FFmpeg runtime
         id: fixture046-runtime
+        if: ${{ false }} # Native diagnostic: no media preparation.
         run: /usr/bin/timeout --signal=TERM --kill-after=20s 900s /usr/bin/python3 -I -B test/support/fixture046-ffmpeg-supply.py prepare
         timeout-minutes: 16
       - name: Probe the disposable database (read-only)
@@ -232,22 +236,27 @@ jobs:
           path: ${{ runner.temp }}/ci/upload-controls
           if-no-files-found: error
           retention-days: 30
-      - name: Prove PostgreSQL command snapshots and complete receipt visibility
+      - name: Diagnose the fixed native unknown-commit case
         id: command-postgres
         timeout-minutes: 21
         run: |
           /usr/bin/env HOME="$RUNNER_TEMP/ci/home" TMPDIR="$RUNNER_TEMP/ci/tmp" \
             /usr/bin/timeout --signal=TERM --kill-after=20s 1200s \
-            node --import tsx test/support/command-postgres-hosted.ts
-      - name: Retain PostgreSQL command proof, including failed guard cleanup observations
+            node --import tsx test/support/command-postgres-hosted.ts fixture105-unknown
+      - name: Retain native unknown-commit diagnostic, including failed cleanup observations
         if: ${{ always() && steps.command-postgres.outcome != 'skipped' }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         timeout-minutes: 2
         with:
-          name: ci-command-postgres-rest-${{ github.run_id }}-${{ github.run_attempt }}
-          path: ${{ runner.temp }}/ci/evidence/command-postgres/retained
+          name: ci-fixture105-unknown-rest-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/ci/evidence/fixture105-unknown/retained
           if-no-files-found: error
           retention-days: 30
+      - name: HOLD native unknown-commit diagnostic cannot qualify for full CI
+        timeout-minutes: 1
+        run: |
+          echo "::error::HOLD: one native case only; full CI remains unrun."
+          exit 78
       - name: Guard P33 aggregate (all)
         run: /bin/bash tools/ci-validation/run-stage.sh all
         timeout-minutes: 122
@@ -342,6 +351,7 @@ jobs:
           CONTAINER_OUTCOME: ${{ needs.container.result }}
 
   container:
+    if: ${{ false }} # Native diagnostic: no image build.
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:

@@ -1,4 +1,4 @@
-/** One hosted seven-case proof on the existing disposable PostgreSQL service; never a cloud-storage or deployment runner. */
+/** Two closed hosted PostgreSQL scopes: the seven-case precheck, or one native diagnostic; never a storage/deployment runner. */
 import * as fs from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -9,8 +9,11 @@ import { sha256, canonicalJson } from "../../src/identity/canonical-json.js";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 const temporary = process.env.RUNNER_TEMP;
+const nativeDiagnostic =
+  process.argv.length === 3 && process.argv[2] === "fixture105-unknown";
+const profile = nativeDiagnostic ? "fixture105-unknown" : "command-postgres";
 if (
-  process.argv.length !== 2 ||
+  (!nativeDiagnostic && process.argv.length !== 2) ||
   process.platform !== "linux" ||
   process.env.GITHUB_ACTIONS !== "true" ||
   process.env.ImageOS !== "ubuntu24" ||
@@ -19,7 +22,7 @@ if (
 )
   throw new Error("hosted_rest_fixture_required");
 const base = join(temporary, "ci");
-const stage = join(base, "evidence", "command-postgres");
+const stage = join(base, "evidence", profile);
 const retained = join(stage, "retained");
 const databaseUrl = process.env.TEST_DATABASE_URL;
 if (!databaseUrl) throw new Error("local_database_required");
@@ -53,16 +56,29 @@ import contextlib,io,json,os,runpy,sys
 from pathlib import Path
 c=runpy.run_path('tools/ci-validation/ci.py',run_name='command_postgres_source_check')
 base=c['ci_dir']();ev=base/'evidence';summary_evidence={}
+if sys.argv[2] not in ('command-postgres','fixture105-unknown'):raise RuntimeError('fixed profile required')
+stage=ev/sys.argv[2]
 if sys.argv[1]=='after':
-  raw=c['fixture_read'](ev/'command-postgres/stdout',8*1024*1024)
+  raw=c['fixture_read'](stage/'stdout',8*1024*1024)
   summary,problems=c['parse_summary'](raw.decode('utf8',errors='strict'))
   files=c['parse_file_lines'](raw.decode('utf8',errors='strict'))
   summary_evidence={'summary':summary,'summary_errors':problems,'file_results':files}
   for name in ('stdout','stderr'):
-    data=c['fixture_read'](ev/'command-postgres'/name,8*1024*1024)
+    data=c['fixture_read'](stage/name,8*1024*1024)
     from urllib.parse import urlparse
     secret=urlparse(os.environ['TEST_DATABASE_URL']).password or ''
-    c['fixture_write_raw'](ev/'command-postgres/retained'/name,c['redact'](data,(secret,)),8*1024*1024)
+    c['fixture_write_raw'](stage/'retained'/name,c['redact'](data,(secret,)),8*1024*1024)
+  if sys.argv[2]=='fixture105-unknown':
+    try:
+      journal=c['fixture_read'](ev/'fixture105-suite.json',c['SNAPSHOT_LIMIT'])
+      c['fixture_write_raw'](stage/'retained/fixture105-suite.json',c['redact'](journal,(secret,)),c['SNAPSHOT_LIMIT'])
+      record=json.loads(journal);cases=record.get('cases');expected=['expected_construction_unknown']*3+['expected_later_phase_unknown']
+      case=cases[0] if isinstance(cases,list) and len(cases)==1 else {}
+      calls=case.get('calls')
+      summary_evidence['native_case_complete']=(record.get('suite_complete') is False and case.get('case_id')=='holds unknown construction commit without inventing its missing settlement receipt' and case.get('completed') is True and case.get('expected')==expected and isinstance(calls,list) and len(calls)==4 and all(call.get('ordinal')==i and call.get('expected')==expected[i] and call.get('completed') is True and call.get('returned') is False for i,call in enumerate(calls)))
+    except Exception as error:
+      summary_evidence['native_case_complete']=False
+      summary_evidence['native_journal_error']=type(error).__name__
 partition=c['check_partition_binding']()
 if partition['partition']!='rest':raise RuntimeError('rest binding required')
 pre=c['load_pre'](ev);build=c['load_json'](ev/'bind-build.json')
@@ -82,12 +98,16 @@ print(json.dumps(result,separators=(',',':')))
 `;
 function checkSource(phase: "before" | "after"): Record<string, unknown> {
   return JSON.parse(
-    execFileSync("/usr/bin/python3", ["-I", "-B", "-c", sourceCheck, phase], {
-      cwd: root,
-      timeout: 30000,
-      maxBuffer: 262144,
-      encoding: "utf8",
-    }),
+    execFileSync(
+      "/usr/bin/python3",
+      ["-I", "-B", "-c", sourceCheck, phase, profile],
+      {
+        cwd: root,
+        timeout: 30000,
+        maxBuffer: 262144,
+        encoding: "utf8",
+      },
+    ),
   ) as Record<string, unknown>;
 }
 function record(name: string, value: unknown): void {
@@ -215,6 +235,7 @@ const command = [
   "guard",
   "command-postgres",
 ];
+if (nativeDiagnostic) command[command.length - 1] = "fixture105-unknown";
 record("invocation.json", {
   argv: ["/usr/bin/timeout", ...command],
   cwd: root,
@@ -222,6 +243,8 @@ record("invocation.json", {
   environment_names: Object.keys(environment).sort(),
   node_sha256: sha256(fs.readFileSync(process.execPath)),
   guard_invocations: 1,
+  profile,
+  native_case_timeout_ms: nativeDiagnostic ? 120000 : null,
 });
 
 // One maintenance connection from the already-existing local bootstrap URL survives guard failure and observes cleanup independently.
@@ -444,23 +467,40 @@ try {
   ])
     if (canonicalJson(after[key]) !== canonicalJson(before[key]))
       throw new Error("source_tool_owner_changed");
-  const expectedSummary = {
-    files: { passed: 1, total: 1 },
-    tests: { passed: 7, total: 7 },
-  };
+  const expectedSummary = nativeDiagnostic
+    ? {
+        files: { passed: 1, total: 1 },
+        tests: { passed: 1, skipped: 33, total: 34 },
+      }
+    : {
+        files: { passed: 1, total: 1 },
+        tests: { passed: 7, total: 7 },
+      };
   if (
     canonicalJson(after.summary) !== canonicalJson(expectedSummary) ||
     canonicalJson(after.summary_errors) !== "[]"
   )
-    throw new Error("seven_complete_cases_required");
+    throw new Error("fixed_complete_cases_required");
+  if (nativeDiagnostic && after.native_case_complete !== true)
+    throw new Error("native_case_journal_incomplete");
   const files = after.file_results as Record<
     string,
     { tests: number; failed: number; skipped: number; todo: number }[]
   >;
   if (
     Object.keys(files).length !== 1 ||
-    canonicalJson(files["test/integration/g2-command-connection.test.ts"]) !==
-      canonicalJson([{ tests: 7, failed: 0, skipped: 0, todo: 0 }])
+    canonicalJson(
+      files[
+        nativeDiagnostic
+          ? "test/integration/connected-fixture105.test.ts"
+          : "test/integration/g2-command-connection.test.ts"
+      ],
+    ) !==
+      canonicalJson([
+        nativeDiagnostic
+          ? { tests: 34, failed: 0, skipped: 33, todo: 0 }
+          : { tests: 7, failed: 0, skipped: 0, todo: 0 },
+      ])
   )
     throw new Error("fixed_file_results_required");
 } catch (error) {
@@ -566,9 +606,11 @@ for (const name of fs
 console.log(
   stripVTControlCharacters(
     JSON.stringify({
-      command_postgres: ok ? "pass" : "hold",
+      [nativeDiagnostic ? "fixture105_unknown" : "command_postgres"]: ok
+        ? "pass"
+        : "hold",
       evidence: retained,
-      tests: ok ? 7 : null,
+      tests: ok ? (nativeDiagnostic ? 1 : 7) : null,
     }),
   ),
 );

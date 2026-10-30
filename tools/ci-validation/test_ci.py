@@ -1106,7 +1106,17 @@ class WorkflowShape(unittest.TestCase):
         self.assertNotIn('TEMPORARY DIAGNOSTIC', text)
         self.assertNotIn('# Diagnostic:', text)
         self.assertNotIn('HOLD representative PostgreSQL proof', text)
-        self.assertNotIn('if: ${{ false }}', text)
+        native_diagnostic = '# TEMPORARY NATIVE UNKNOWN DIAGNOSTIC: one case; mandatory HOLD forbids full-CI acceptance.' in text
+        if native_diagnostic:
+            self.assertEqual(text.count('if: ${{ false }}'), 3)
+            for exact in ('  verify-writer:\n    if: ${{ false }} # Native diagnostic: no writer partition.',
+                          '  container:\n    if: ${{ false }} # Native diagnostic: no image build.',
+                          'id: fixture046-runtime\n        if: ${{ false }} # Native diagnostic: no media preparation.'):
+                self.assertIn(exact, text)
+        else:
+            self.assertNotIn('if: ${{ false }}', text)
+            self.assertNotIn('Native diagnostic:', text)
+            self.assertNotIn('HOLD native unknown-commit diagnostic', text)
         rest = text.split('  verify-rest:\n', 1)[1].split('\n  verify:\n', 1)[0]
         proof = ('      - name: Prove PostgreSQL command snapshots and complete receipt visibility\n'
                  '        id: command-postgres\n'
@@ -1124,6 +1134,17 @@ class WorkflowShape(unittest.TestCase):
                      '          path: ${{ runner.temp }}/ci/evidence/command-postgres/retained\n'
                      '          if-no-files-found: error\n'
                      '          retention-days: 30\n')
+        if native_diagnostic:
+            proof = proof.replace('Prove PostgreSQL command snapshots and complete receipt visibility', 'Diagnose the fixed native unknown-commit case').replace('command-postgres-hosted.ts\n', 'command-postgres-hosted.ts fixture105-unknown\n')
+            retention = retention.replace('Retain PostgreSQL command proof, including failed guard cleanup observations', 'Retain native unknown-commit diagnostic, including failed cleanup observations').replace('ci-command-postgres-rest-', 'ci-fixture105-unknown-rest-').replace('/ci/evidence/command-postgres/retained', '/ci/evidence/fixture105-unknown/retained')
+            hold = ('      - name: HOLD native unknown-commit diagnostic cannot qualify for full CI\n'
+                    '        timeout-minutes: 1\n'
+                    '        run: |\n'
+                    '          echo "::error::HOLD: one native case only; full CI remains unrun."\n'
+                    '          exit 78\n')
+            self.assertEqual(rest.count(hold), 1)
+            self.assertLess(rest.index(retention), rest.index(hold))
+            self.assertLess(rest.index(hold), rest.index('run-stage.sh all'))
         self.assertEqual(rest.count(proof), 1)
         self.assertEqual(rest.count(retention), 1)
         self.assertEqual(text.count('node --import tsx test/support/command-postgres-hosted.ts'), 1)
@@ -2206,12 +2227,14 @@ class FixtureTargetObserverShapeTests(unittest.TestCase):
         self.assertIsInstance(filters[0], ast.Dict)
         routes = {key.value: value for key, value in zip(filters[0].keys, filters[0].values)
                   if isinstance(key, ast.Constant)}
-        self.assertEqual(set(routes), {'focused', 'p33', 'parity', 'unit', 'integration', 'all', 'writer', 'rest', 'master046', 'technical-master', 'technical-master-pure', 'durable-pair-pure', 'command-postgres'})
+        self.assertEqual(set(routes), {'focused', 'p33', 'parity', 'unit', 'integration', 'all', 'writer', 'rest', 'master046', 'technical-master', 'technical-master-pure', 'durable-pair-pure', 'command-postgres', 'fixture105-unknown', 'runtime-observe'})
         self.assertIn("    test = 'test/unit/p33-parity-harness.test.ts'", guard_source)
         self.assertEqual(ast.literal_eval(routes['writer']), ['test/unit/writer-fixture-input.test.ts'])
         self.assertEqual(ast.literal_eval(routes['master046']), ['test/unit/frozen-fixture046-master.test.ts'])
         self.assertEqual(ast.literal_eval(routes['durable-pair-pure']), ['test/unit/durable-pair.test.ts'])
         self.assertEqual(ast.literal_eval(routes['command-postgres']), ['test/integration/g2-command-connection.test.ts'])
+        self.assertEqual(ast.literal_eval(routes['fixture105-unknown']), ['test/integration/connected-fixture105.test.ts', '--testNamePattern', '^connected fixture105 native ownership holds unknown construction commit without inventing its missing settlement receipt$'])
+        self.assertEqual(ast.literal_eval(routes['runtime-observe']), ['test/runtime-observe.test.ts'])
         for profile in ('technical-master', 'technical-master-pure'):
             self.assertEqual(ast.literal_eval(routes[profile]), ['test/unit/technical-master-admission.test.ts'])
         profile_choices = [keyword.value for node in ast.walk(guard)
@@ -2222,7 +2245,7 @@ class FixtureTargetObserverShapeTests(unittest.TestCase):
                            for keyword in node.keywords if keyword.arg == 'choices']
         self.assertEqual(len(profile_choices), 1)
         self.assertEqual(ast.literal_eval(profile_choices[0]),
-                         ['prerequisite', 'focused', 'p33', 'parity', 'unit', 'integration', 'all', 'writer', 'rest', 'master046', 'technical-master', 'technical-master-pure', 'durable-pair-pure', 'command-postgres'])
+                         ['prerequisite', 'focused', 'p33', 'parity', 'unit', 'integration', 'all', 'writer', 'rest', 'master046', 'technical-master', 'technical-master-pure', 'durable-pair-pure', 'command-postgres', 'fixture105-unknown', 'runtime-observe'])
         for profile, expression in (('all', "['--exclude', test]"),
                                     ('rest', "['--exclude', test, '--exclude', 'test/unit/writer-fixture-input.test.ts']")):
             self.assertEqual(ast.dump(routes[profile]), ast.dump(ast.parse(expression, mode='eval').body))

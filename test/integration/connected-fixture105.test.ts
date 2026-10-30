@@ -3360,7 +3360,51 @@ suite("connected fixture105 native ownership", () => {
     caseBody(
       "holds unknown construction commit without inventing its missing settlement receipt",
       async () => {
+        // Test-only bounded progress labels: no SQL, credentials, database names or arbitrary errors.
+        const started = performance.now();
+        let ordinal = 0;
+        let markerFailure: unknown;
+        const mark = (
+          owner:
+            | "initial"
+            | "program_run"
+            | "program_attempt"
+            | "package_binding",
+          phase:
+            | "case"
+            | "setup"
+            | "construction"
+            | "readback"
+            | "counts_before"
+            | "receipt_readback"
+            | "reconcile"
+            | "counts_after"
+            | "close",
+          state: "before" | "after",
+        ): void => {
+          if (markerFailure !== undefined) return;
+          try {
+            if (++ordinal > 64) throw new Error("fixed lifecycle marker bound");
+            process.stderr.write(
+              "FIXTURE105_UNKNOWN_LIFECYCLE " +
+                JSON.stringify({
+                  schema: "fixture105-unknown-lifecycle/1",
+                  ordinal,
+                  owner,
+                  phase,
+                  state,
+                  elapsed_ms: Math.floor(performance.now() - started),
+                }) +
+                "\n",
+            );
+          } catch (error) {
+            markerFailure = error; // Observation must never skip close or replace an existing test failure.
+          }
+        };
+        mark("initial", "case", "before");
+        mark("initial", "setup", "before");
         const env = await fresh();
+        mark("initial", "setup", "after");
         let armed = false;
         let intercepted = 0;
         const observer = new TargetObserver(
@@ -3368,6 +3412,7 @@ suite("connected fixture105 native ownership", () => {
           "unknown_construction",
           maintenanceOwner(),
         );
+        mark("initial", "construction", "before");
         await observer.around(async () => {
           const descriptor = Object.getOwnPropertyDescriptor(
             pg.Client.prototype,
@@ -3419,8 +3464,11 @@ suite("connected fixture105 native ownership", () => {
             },
           );
         });
+        mark("initial", "construction", "after");
         expect(intercepted).toBe(1);
+        mark("initial", "counts_before", "before");
         const before = await counts(env);
+        mark("initial", "counts_before", "after");
         expect(before).toEqual({
           packages: 1,
           directions: 0,
@@ -3428,11 +3476,18 @@ suite("connected fixture105 native ownership", () => {
           gates: 0,
           audits: 0,
         });
+        mark("initial", "reconcile", "before");
         await expect(reconcileConnectedFixture105()).rejects.toThrow(
           "fixture_construction_receipt_unavailable",
         );
-        expect(await counts(env)).toEqual(before);
+        mark("initial", "reconcile", "after");
+        mark("initial", "counts_after", "before");
+        const after = await counts(env);
+        mark("initial", "counts_after", "after");
+        expect(after).toEqual(before);
+        mark("initial", "close", "before");
         await env.close();
+        mark("initial", "close", "after");
         current = undefined;
         // Three direct historical-owner transactions, each on a new real database.
         // The actual matching statement arms only its own client; COMMIT reaches the
@@ -3442,7 +3497,9 @@ suite("connected fixture105 native ownership", () => {
           "program_attempt",
           "package_binding",
         ] as const) {
+          mark(owner, "setup", "before");
           const separate = await fresh();
+          mark(owner, "setup", "after");
           const selected: { client?: pg.Client } = {};
           let reached = 0;
           let lost = 0;
@@ -3459,6 +3516,7 @@ suite("connected fixture105 native ownership", () => {
             scopes[owner],
             maintenanceOwner(),
           );
+          mark(owner, "construction", "before");
           await observer.around(async () => {
             const queryDescriptor = Object.getOwnPropertyDescriptor(
               pg.Client.prototype,
@@ -3541,10 +3599,12 @@ suite("connected fixture105 native ownership", () => {
               },
             );
           });
+          mark(owner, "construction", "after");
           try {
             expect(reached).toBe(1);
             expect(lost).toBe(1);
             const fixed = connectedFixture105Data().identities.ids as Obj;
+            mark(owner, "readback", "before");
             await inspect(separate, async (pool) => {
               expect(
                 (
@@ -3570,7 +3630,10 @@ suite("connected fixture105 native ownership", () => {
                     ],
               );
             });
+            mark(owner, "readback", "after");
+            mark(owner, "counts_before", "before");
             const retained = await counts(separate);
+            mark(owner, "counts_before", "after");
             expect(retained).toEqual({
               packages: owner === "package_binding" ? 1 : 0,
               directions: 0,
@@ -3579,6 +3642,7 @@ suite("connected fixture105 native ownership", () => {
               audits: 0,
             });
             if (owner === "package_binding") {
+              mark(owner, "receipt_readback", "before");
               if (
                 executionRoot === undefined ||
                 targetKey === undefined ||
@@ -3605,14 +3669,28 @@ suite("connected fixture105 native ownership", () => {
                   ),
                 ),
               ).toEqual(terminalBefore);
+              mark(owner, "receipt_readback", "after");
             }
+            mark(owner, "reconcile", "before");
             await expect(reconcileConnectedFixture105()).rejects.toThrow();
-            expect(await counts(separate)).toEqual(retained);
+            mark(owner, "reconcile", "after");
+            mark(owner, "counts_after", "before");
+            const after = await counts(separate);
+            mark(owner, "counts_after", "after");
+            expect(after).toEqual(retained);
           } finally {
+            mark(owner, "close", "before");
             await separate.close();
+            mark(owner, "close", "after");
             current = undefined;
           }
         }
+        mark("initial", "case", "after");
+        if (markerFailure !== undefined)
+          throw new Error("fixed lifecycle observation failed", {
+            cause: markerFailure,
+          });
+        expect(ordinal).toBe(58);
       },
     ),
     LIMIT,
