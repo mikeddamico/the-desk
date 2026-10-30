@@ -12,7 +12,7 @@ no installation, Docker or media is started. It never touches
 the repository tree. Tests that need a checkout build a
 synthetic one under a temporary directory and patch ci.ROOT / ci.tracked_files only inside mock contexts.
 
-Pinned fail-closed rules: aggregate 83 files / 8,738 tests and all 29 integration files, each selected file exactly once
+Pinned fail-closed rules: aggregate 84 files / 8,748 tests and all 29 integration files, each selected file exactly once
 with no failed/skipped/todo test, a changed tracked-test inventory, a missing or foreign TEST_DATABASE_URL, a database
 that is not PostgreSQL 17 / the_desk_test / superuser, skipped integration files, root dist output accepted only when it
 is the unchanged build output (added, modified, empty, absent, symlinked or pre-existing dist and any tracked drift,
@@ -63,7 +63,7 @@ def file_lines(counts=None, extra=''):
 
 SUMMARY = {
     'focused': ' Test Files  1 passed (1)\n      Tests  2 passed (2)\n',
-    'all': ' Test Files  83 passed (83)\n      Tests  8738 passed (8738)\n',
+    'all': ' Test Files  84 passed (84)\n      Tests  8748 passed (8748)\n',
 }
 
 
@@ -222,7 +222,7 @@ class SummaryAndFileLines(unittest.TestCase):
 
 class AggregateSelection(unittest.TestCase):
     def test_synthetic_inventory_matches_the_fixed_expectations(self):
-        self.assertEqual((len(TESTS), len(SELECTED), len(INTEGRATION)), (84, 83, 29))
+        self.assertEqual((len(TESTS), len(SELECTED), len(INTEGRATION)), (85, 84, 29))
         self.assertEqual(sum(PER_FILE.values()), ci.EXPECTED_ALL_TESTS)
         self.assertNotIn(ci.HARNESS_TEST, SELECTED)
 
@@ -266,10 +266,10 @@ class AggregateSelection(unittest.TestCase):
     def test_count_drift_and_duplicates(self):
         counts = dict(PER_FILE)
         counts[SELECTED[0]] -= 1
-        self.assertTrue(any('sum to 8737' in e for e in self.check(file_lines(counts))[0]))
+        self.assertTrue(any('sum to 8747' in e for e in self.check(file_lines(counts))[0]))
         counts = dict(PER_FILE)
         counts[SELECTED[0]] += 1
-        self.assertTrue(any('sum to 8739' in e for e in self.check(file_lines(counts))[0]))
+        self.assertTrue(any('sum to 8749' in e for e in self.check(file_lines(counts))[0]))
         dup = file_lines() + ' ✓ %s (1 tests) 1ms\n' % SELECTED[0]
         self.assertTrue(any('2 result lines' in e for e in self.check(dup)[0]))
 
@@ -281,22 +281,22 @@ class AggregateSelection(unittest.TestCase):
 
     def test_changed_tracked_inventory_is_hold_not_a_relaxed_count(self):
         grown = sorted(TRACKED + ['test/unit/extra.test.ts'])
-        self.assertTrue(any('inventory is 85' in e for e in self.check(file_lines(), grown)[0]))
+        self.assertTrue(any('inventory is 86' in e for e in self.check(file_lines(), grown)[0]))
         moved = [n for n in TRACKED if n != INTEGRATION[0]] + ['test/unit/moved.test.ts']
         self.assertTrue(any('integration file count 28' in e for e in self.check(file_lines(), sorted(moved))[0]))
         shrunk = [n for n in TRACKED if n != ci.HARNESS_TEST]
         self.assertTrue(self.check(file_lines(), shrunk)[0])
 
     def test_summary_count_mismatch_with_correct_files(self):
-        for wrong in (8737, 8739):
+        for wrong in (8747, 8749):
             with self.subTest(tests=wrong):
                 def change(stage_dir, attempt):
-                    write(stage_dir / 'stdout', file_lines() + ' Test Files  83 passed (83)\n      Tests  %d passed (%d)\n' % (wrong, wrong))
+                    write(stage_dir / 'stdout', file_lines() + ' Test Files  84 passed (84)\n      Tests  %d passed (%d)\n' % (wrong, wrong))
                 self.assertTrue(any('Tests counts' in e for e in evaluate('all', change)))
 
     def test_skipped_summary_with_exit_zero_is_not_accepted(self):
         def change(stage_dir, attempt):
-            write(stage_dir / 'stdout', file_lines() + ' Test Files  83 passed (83)\n      Tests  8652 passed | 86 skipped (8738)\n')
+            write(stage_dir / 'stdout', file_lines() + ' Test Files  84 passed (84)\n      Tests  8662 passed | 86 skipped (8748)\n')
         self.assertTrue(any('Tests counts' in e for e in evaluate('all', change)))
 
 
@@ -1062,72 +1062,8 @@ class WorkflowShape(unittest.TestCase):
     def text(self):
         return (HERE.parents[1] / '.github' / 'workflows' / 'ci.yml').read_text()
 
-    def assert_integrity_probe_workflow(self, text):
-        """Closed temporary route; the normal/native workflow assertions below remain unchanged."""
-        self.assertEqual(re.findall(r'^  ([a-z_-]+):$', text, re.M),
-                         ['pull_request', 'push', 'verify-writer', 'verify-rest', 'verify', 'container'])
-        self.assertNotIn('workflow_dispatch', text)
-        self.assertNotIn('continue-on-error', text)
-        self.assertNotIn('TEMPORARY NATIVE UNKNOWN', text)
-        self.assertNotIn('command-postgres-hosted.ts', text)
-        for job in ('verify-writer', 'container'):
-            self.assertIn('  ' + job + ':\n    if: ${{ false }}', text)
-        rest = text.split('  verify-rest:\n', 1)[1].split('\n  verify:\n', 1)[0]
-        self.assertNotIn('    services:', rest)
-        self.assertNotIn('TEST_DATABASE_URL:', rest)
-        self.assertIn('DESK_CI_PARTITION: rest', rest)
-        blocks = rest.split('      - ')[1:]
-        excluded = ('Reconstruct the fixed synthetic', 'Probe the disposable', 'Guard P33', 'Validate P33',
-                    'Collect controls', 'Retain controls', 'Validate aggregate', 'Collect full', 'Retain full',
-                    'Retain generated security', 'Upload partition security', 'Final evidence')
-        skipped = 0
-        for block in blocks:
-            should_skip = block.startswith(tuple('name: ' + name for name in excluded)) or block.startswith(('id: audit\n', 'id: gitleaks\n'))
-            if should_skip:
-                self.assertEqual(block.count('if: ${{ false }} # Integrity probe: excluded execution.'), 1)
-                skipped += 1
-            elif not block.startswith(('name: Settle the owned fixture runtime', 'name: Retain the one-shot', 'name: HOLD integrity')):
-                self.assertNotIn('if:', block)
-        self.assertEqual(skipped, 17)
-        self.assertEqual(rest.count('run-stage.sh prerequisite'), 1)
-        self.assertEqual(rest.count('run-stage.sh focused'), 1)
-        self.assertEqual(rest.count('run-stage.sh all'), 1)
-        self.assertIn("id: fixture046-cleanup\n        if: ${{ always() && steps.fixture046-runtime.outcome != 'skipped' }}", rest)
-        for required in ('node-version: 24.21.0', 'npm install --global npm@11.19.0 --ignore-scripts',
-                         'npm ci --ignore-scripts', 'npm run format:check', 'npm run lint', 'npm run typecheck',
-                         'npm run build', 'tools/ci-validation/test_ci.py', 'ci.py init', 'ci.py bind-build'):
-            self.assertEqual(rest.count(required), 1)
-        exact = ('      - name: Measure one fixed release integrity read without SQL\n'
-                 '        id: integrity-probe\n'
-                 '        timeout-minutes: 6\n'
-                 '        run: /usr/bin/timeout --signal=TERM --kill-after=20s 300s /usr/bin/python3 -I -B test/support/fixture105-integrity-owner.py\n')
-        self.assertEqual(rest.count(exact), 1)
-        self.assertEqual(rest.count('fixture105-integrity-owner.py'), 1)
-        sequence = ['id: init', 'npm run format:check', 'npm run lint', 'npm run typecheck', 'npm run build',
-                    'tools/ci-validation/test_ci.py', 'ci.py bind-build', 'id: integrity-probe',
-                    'name: Retain the one-shot', 'name: HOLD integrity', 'run-stage.sh all']
-        offsets = [rest.index(value) for value in sequence]
-        self.assertEqual(offsets, sorted(offsets))
-        retain = rest.split('      - name: Retain the one-shot', 1)[1].split('      - name: HOLD integrity', 1)[0]
-        for literal in ("if: ${{ always() && steps.integrity-probe.outcome != 'skipped' }}",
-                        'actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02',
-                        'path: ${{ runner.temp }}/ci/evidence/fixture105-integrity/retained',
-                        'if-no-files-found: error', 'retention-days: 30'):
-            self.assertEqual(retain.count(literal), 1)
-        hold = rest.split('      - name: HOLD integrity', 1)[1].split('      - name: Guard P33 aggregate', 1)[0]
-        self.assertIn('if: ${{ always() }}', hold)
-        self.assertEqual(hold.count('exit 78'), 1)
-        self.assertIn('no SQL or full CI.', hold)
-        joint = text.split('  verify:\n', 1)[1].split('  container:\n', 1)[0]
-        self.assertIn('needs: [verify-writer, verify-rest, container]', joint)
-        self.assertIn('WRITER_OUTCOME', joint)
-        self.assertIn('REST_OUTCOME', joint)
-
     def test_fixed_steps_and_ceilings(self):
         text = self.text()
-        if '# TEMPORARY INTEGRITY COST PROBE: zero SQL, one release read; mandatory HOLD.' in text:
-            self.assert_integrity_probe_workflow(text)
-            return
         for needle in ('timeout-minutes: 190', 'timeout-minutes: 122', 'timeout-minutes: 30', 'name: foundation-ci',
                        'postgres:17', 'run-stage.sh prerequisite', 'run-stage.sh focused', 'run-stage.sh all',
                        'npm audit --audit-level=high', 'gitleaks/gitleaks-action@e0c47f4f8be36e29cdc102c57e68cb5cbf0e8d1e',
@@ -1288,7 +1224,7 @@ class Fixture105Tooling(unittest.TestCase):
             counts.update({'test/unit/connected-fixture105.test.ts': unit, 'test/integration/connected-fixture105.test.ts': native})
             errors = []
             ci.check_all_files(file_lines(counts), TRACKED, errors, {})
-            self.assertEqual(sum(counts.values()), 8738)
+            self.assertEqual(sum(counts.values()), 8748)
             self.assertEqual(sum('connected per-file count drift' in e for e in errors), 2)
 
     def test_frozen_render046_file_and_exact_count_are_required(self):
@@ -1307,7 +1243,7 @@ class Fixture105Tooling(unittest.TestCase):
                     counts[OLD_SELECTED[0]] += pinned - count
                     errors = []
                     ci.check_all_files(file_lines(counts), TRACKED, errors, {})
-                    self.assertEqual(sum(counts.values()), 8738)
+                    self.assertEqual(sum(counts.values()), 8748)
                     self.assertIn('frozen-render046 per-file count drift: ' + name, errors)
 
     def test_fixture_namespace_does_not_match_supervisor_prefix(self):
@@ -1964,8 +1900,8 @@ class Partition155Tests(unittest.TestCase):
     def test_exact_pair_and_disjoint_union(self):
         self.assertEqual(self.joint(), [])
         self.assertEqual(set(self.proofs['writer']['files']) & set(self.proofs['rest']['files']), set())
-        self.assertEqual(sum(sum(p['files'].values()) for p in self.proofs.values()), 8738)
-        self.assertEqual(len(ci.partition_files(self.tracked, 'all')), 83)
+        self.assertEqual(sum(sum(p['files'].values()) for p in self.proofs.values()), 8748)
+        self.assertEqual(len(ci.partition_files(self.tracked, 'all')), 84)
 
     def test_missing_unknown_and_legacy_labels(self):
         self.assertEqual(ci.partition_label(), 'all')
@@ -2203,7 +2139,7 @@ class Partition155Tests(unittest.TestCase):
             proof = self.copy(original); proof['identity'][key] = value
             with self.assertRaises(RuntimeError): ci.parse_partition_proof(ci.fixture_bytes(proof).decode().rstrip('\n'))
         for counts in ({'test/' + 'a' * 513 + '.test.ts': 4908}, {'test/../x.test.ts': 4908},
-                       {'test/x%d.test.ts' % n: 1 for n in range(84)}):
+                       {'test/x%d.test.ts' % n: 1 for n in range(85)}):
             proof = self.copy(original); proof['files'] = counts
             with self.assertRaises(RuntimeError): ci.parse_partition_proof(ci.fixture_bytes(proof).decode().rstrip('\n'))
         with self.assertRaises(RuntimeError): ci.parse_partition_proof(json.dumps(original))
@@ -2291,7 +2227,7 @@ class FixtureTargetObserverShapeTests(unittest.TestCase):
         self.assertIsInstance(filters[0], ast.Dict)
         routes = {key.value: value for key, value in zip(filters[0].keys, filters[0].values)
                   if isinstance(key, ast.Constant)}
-        self.assertEqual(set(routes), {'focused', 'p33', 'parity', 'unit', 'integration', 'all', 'writer', 'rest', 'master046', 'technical-master', 'technical-master-pure', 'durable-pair-pure', 'command-postgres', 'fixture105-unknown', 'runtime-observe'})
+        self.assertEqual(set(routes), {'focused', 'p33', 'parity', 'unit', 'integration', 'all', 'writer', 'rest', 'master046', 'technical-master', 'technical-master-pure', 'durable-pair-pure', 'command-postgres', 'fixture105-unknown', 'runtime-observe', 'fixture105-traversal'})
         self.assertIn("    test = 'test/unit/p33-parity-harness.test.ts'", guard_source)
         self.assertEqual(ast.literal_eval(routes['writer']), ['test/unit/writer-fixture-input.test.ts'])
         self.assertEqual(ast.literal_eval(routes['master046']), ['test/unit/frozen-fixture046-master.test.ts'])
@@ -2299,6 +2235,7 @@ class FixtureTargetObserverShapeTests(unittest.TestCase):
         self.assertEqual(ast.literal_eval(routes['command-postgres']), ['test/integration/g2-command-connection.test.ts'])
         self.assertEqual(ast.literal_eval(routes['fixture105-unknown']), ['test/integration/connected-fixture105.test.ts', '--testNamePattern', '^connected fixture105 native ownership holds unknown construction commit without inventing its missing settlement receipt$'])
         self.assertEqual(ast.literal_eval(routes['runtime-observe']), ['test/runtime-observe.test.ts'])
+        self.assertEqual(ast.literal_eval(routes['fixture105-traversal']), ['test/unit/fixture105-traversal.test.ts'])
         for profile in ('technical-master', 'technical-master-pure'):
             self.assertEqual(ast.literal_eval(routes[profile]), ['test/unit/technical-master-admission.test.ts'])
         profile_choices = [keyword.value for node in ast.walk(guard)
@@ -2309,13 +2246,14 @@ class FixtureTargetObserverShapeTests(unittest.TestCase):
                            for keyword in node.keywords if keyword.arg == 'choices']
         self.assertEqual(len(profile_choices), 1)
         self.assertEqual(ast.literal_eval(profile_choices[0]),
-                         ['prerequisite', 'focused', 'p33', 'parity', 'unit', 'integration', 'all', 'writer', 'rest', 'master046', 'technical-master', 'technical-master-pure', 'durable-pair-pure', 'command-postgres', 'fixture105-unknown', 'runtime-observe'])
+                         ['prerequisite', 'focused', 'p33', 'parity', 'unit', 'integration', 'all', 'writer', 'rest', 'master046', 'technical-master', 'technical-master-pure', 'durable-pair-pure', 'command-postgres', 'fixture105-unknown', 'runtime-observe', 'fixture105-traversal'])
         for profile, expression in (('all', "['--exclude', test]"),
                                     ('rest', "['--exclude', test, '--exclude', 'test/unit/writer-fixture-input.test.ts']")):
             self.assertEqual(ast.dump(routes[profile]), ast.dump(ast.parse(expression, mode='eval').body))
         self.assertNotIn('target-diagnostic', guard_source)
         self.assertEqual(ci.FIXTURE_CONNECTED_COUNTS, {
             'test/unit/connected-fixture105.test.ts': 58,
+            'test/unit/fixture105-traversal.test.ts': 10,
             'test/integration/connected-fixture105.test.ts': 34})
         self.assertEqual(len(ci.FIXTURE_CASE_EXPECTATIONS), 34)
         self.assertEqual(ci.FIXTURE_CASE_EXPECTATIONS[-1], {'case_id': name, 'expected': ['pre_target_failure']})

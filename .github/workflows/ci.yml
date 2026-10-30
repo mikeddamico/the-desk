@@ -1,6 +1,6 @@
 name: foundation-ci
 
-# TEMPORARY INTEGRITY COST PROBE: zero SQL, one release read; mandatory HOLD.
+# TEMPORARY NATIVE UNKNOWN DIAGNOSTIC: one case; mandatory HOLD forbids full-CI acceptance.
 
 on:
   pull_request:
@@ -154,10 +154,22 @@ jobs:
   verify-rest:
     runs-on: ubuntu-24.04
     timeout-minutes: 190
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: the_desk_test
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres -d the_desk_test"
+          --health-interval 5s --health-timeout 5s --health-retries 10
     outputs:
       proof: ${{ steps.final.outputs.proof }}
     env:
       DESK_CI_PARTITION: rest
+      TEST_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/the_desk_test
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         timeout-minutes: 2
@@ -177,11 +189,10 @@ jobs:
         timeout-minutes: 2
       - name: Reconstruct the fixed synthetic fixture FFmpeg runtime
         id: fixture046-runtime
-        if: ${{ false }} # Integrity probe: excluded execution.
+        if: ${{ false }} # Native diagnostic: no media preparation.
         run: /usr/bin/timeout --signal=TERM --kill-after=20s 900s /usr/bin/python3 -I -B test/support/fixture046-ffmpeg-supply.py prepare
         timeout-minutes: 16
       - name: Probe the disposable database (read-only)
-        if: ${{ false }} # Integrity probe: excluded execution.
         run: /usr/bin/python3 -I -B tools/ci-validation/ci.py dbprobe
         timeout-minutes: 1
       - run: npm run format:check -- --cache-location "$RUNNER_TEMP/ci/tmp/prettier-format-check-unused.json"
@@ -199,29 +210,25 @@ jobs:
         run: /usr/bin/python3 -I -B tools/ci-validation/ci.py bind-build
         timeout-minutes: 2
       - name: Guard P33 prerequisite
-        if: ${{ false }} # Integrity probe: excluded execution.
         run: /bin/bash tools/ci-validation/run-stage.sh prerequisite
         timeout-minutes: 1
       - name: Validate P33 prerequisite
-        if: ${{ false }} # Integrity probe: excluded execution.
         run: /usr/bin/python3 -I -B tools/ci-validation/ci.py check prerequisite
         timeout-minutes: 1
       - name: Guard P33 focused controls
-        if: ${{ false }} # Integrity probe: excluded execution.
         run: /bin/bash tools/ci-validation/run-stage.sh focused
         timeout-minutes: 3
       - name: Validate P33 focused controls
-        if: ${{ false }} # Integrity probe: excluded execution.
         run: /usr/bin/python3 -I -B tools/ci-validation/ci.py check focused
         timeout-minutes: 1
       - name: Collect controls evidence
         id: collect-controls
-        if: ${{ false }} # Integrity probe: excluded execution.
+        if: ${{ always() && steps.init.outcome != 'skipped' }}
         run: /usr/bin/python3 -I -B tools/ci-validation/ci.py collect --scope controls
         timeout-minutes: 1
       - name: Retain controls evidence
         id: upload-controls
-        if: ${{ false }} # Integrity probe: excluded execution.
+        if: ${{ always() && steps.collect-controls.outcome == 'success' }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         timeout-minutes: 2
         with:
@@ -229,31 +236,31 @@ jobs:
           path: ${{ runner.temp }}/ci/upload-controls
           if-no-files-found: error
           retention-days: 30
-      - name: Measure one fixed release integrity read without SQL
-        id: integrity-probe
-        timeout-minutes: 6
-        run: /usr/bin/timeout --signal=TERM --kill-after=20s 300s /usr/bin/python3 -I -B test/support/fixture105-integrity-owner.py
-      - name: Retain the one-shot integrity probe even on refusal
-        if: ${{ always() && steps.integrity-probe.outcome != 'skipped' }}
+      - name: Diagnose the fixed native unknown-commit case
+        id: command-postgres
+        timeout-minutes: 21
+        run: |
+          /usr/bin/env HOME="$RUNNER_TEMP/ci/home" TMPDIR="$RUNNER_TEMP/ci/tmp" \
+            /usr/bin/timeout --signal=TERM --kill-after=20s 1200s \
+            node --import tsx test/support/command-postgres-hosted.ts fixture105-unknown
+      - name: Retain native unknown-commit diagnostic, including failed cleanup observations
+        if: ${{ always() && steps.command-postgres.outcome != 'skipped' }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         timeout-minutes: 2
         with:
-          name: ci-fixture105-integrity-rest-${{ github.run_id }}-${{ github.run_attempt }}
-          path: ${{ runner.temp }}/ci/evidence/fixture105-integrity/retained
+          name: ci-fixture105-unknown-rest-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/ci/evidence/fixture105-unknown/retained
           if-no-files-found: error
           retention-days: 30
-      - name: HOLD integrity probe cannot qualify for full CI
-        if: ${{ always() }}
+      - name: HOLD native unknown-commit diagnostic cannot qualify for full CI
         timeout-minutes: 1
         run: |
-          echo "::error::HOLD: one integrity measurement only; no SQL or full CI."
+          echo "::error::HOLD: one native case only; full CI remains unrun."
           exit 78
       - name: Guard P33 aggregate (all)
-        if: ${{ false }} # Integrity probe: excluded execution.
         run: /bin/bash tools/ci-validation/run-stage.sh all
         timeout-minutes: 122
       - name: Validate aggregate counts, coverage and source
-        if: ${{ false }} # Integrity probe: excluded execution.
         run: /usr/bin/python3 -I -B tools/ci-validation/ci.py check all
         timeout-minutes: 2
       - name: Settle the owned fixture runtime before full evidence capture
@@ -263,12 +270,12 @@ jobs:
         timeout-minutes: 2
       - name: Collect full evidence
         id: collect-full
-        if: ${{ false }} # Integrity probe: excluded execution.
+        if: ${{ always() && steps.init.outcome != 'skipped' }}
         run: /usr/bin/python3 -I -B tools/ci-validation/ci.py collect --scope full
         timeout-minutes: 2
       - name: Retain full evidence
         id: upload-full
-        if: ${{ false }} # Integrity probe: excluded execution.
+        if: ${{ always() && steps.collect-full.outcome == 'success' }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         timeout-minutes: 3
         with:
@@ -277,11 +284,9 @@ jobs:
           if-no-files-found: error
           retention-days: 30
       - id: audit
-        if: ${{ false }} # Integrity probe: excluded execution.
         run: npm audit --audit-level=high
         timeout-minutes: 5
       - id: gitleaks
-        if: ${{ false }} # Integrity probe: excluded execution.
         uses: gitleaks/gitleaks-action@e0c47f4f8be36e29cdc102c57e68cb5cbf0e8d1e # v3.0.0
         timeout-minutes: 5
         env:
@@ -289,14 +294,14 @@ jobs:
           GITLEAKS_ENABLE_UPLOAD_ARTIFACT: "false"
       - name: Retain generated security report outside the checkout
         id: retain-security
-        if: ${{ false }} # Integrity probe: excluded execution.
+        if: ${{ always() && steps.gitleaks.outcome != 'skipped' }}
         run: /usr/bin/python3 -I -B tools/ci-validation/ci.py retain-security
         timeout-minutes: 1
         env:
           GITLEAKS_OUTCOME: ${{ steps.gitleaks.outcome }}
       - name: Upload partition security report
         id: upload-security
-        if: ${{ false }} # Integrity probe: excluded execution.
+        if: ${{ always() && steps.retain-security.outcome == 'success' }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         timeout-minutes: 2
         with:
@@ -306,7 +311,7 @@ jobs:
           retention-days: 30
       - name: Final evidence gate
         id: final
-        if: ${{ false }} # Integrity probe: excluded execution.
+        if: ${{ always() && steps.init.outcome != 'skipped' }}
         run: /usr/bin/python3 -I -B tools/ci-validation/ci.py final
         timeout-minutes: 1
         env:
