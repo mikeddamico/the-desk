@@ -1062,6 +1062,90 @@ class WorkflowShape(unittest.TestCase):
     def text(self):
         return (HERE.parents[1] / '.github' / 'workflows' / 'ci.yml').read_text()
 
+    def assert_postgres_diagnostic_shape(self, text):
+        """Accept only the fixed representative-only route; it must remain impossible to pass merge."""
+        marker = '# TEMPORARY DIAGNOSTIC ONLY: PostgreSQL representative proof; verify deliberately holds merge.'
+        self.assertEqual(text.count(marker), 1)
+        parts = re.split(r'^  ([a-z0-9-]+):\n', text.split('jobs:\n', 1)[1], flags=re.M)
+        self.assertEqual(parts[0], '')
+        self.assertEqual(parts[1::2], ['verify-writer', 'verify-rest', 'verify', 'container'])
+        jobs = dict(zip(parts[1::2], parts[2::2]))
+        for name, comment in (('verify-writer', 'no writer partition or service.'),
+                              ('container', 'no application image build.')):
+            self.assertEqual(re.findall(r'^    if: (.+)$', jobs[name], flags=re.M),
+                             ['${{ false }} # Diagnostic: ' + comment])
+        rest = jobs['verify-rest']
+        self.assertEqual(re.findall(r'^    if: (.+)$', rest, flags=re.M), [])
+        blocks = re.split(r'(?=^      - )', rest, flags=re.M)[1:]
+        self.assertEqual(len(blocks), 31)
+        for job in (jobs['verify-writer'], rest):
+            self.assertEqual(job.count('run-stage.sh all'), 1)
+            self.assertEqual(job.count('ci.py check all'), 1)
+        for fixed in ('run-stage.sh prerequisite', 'ci.py check prerequisite', 'run-stage.sh focused', 'ci.py check focused'):
+            self.assertEqual(rest.count(fixed), 1)
+        def step(label):
+            found = [block for block in blocks if block.startswith('      - name: ' + label + '\n')
+                     or re.search(r'^        id: ' + re.escape(label) + r'$', block, flags=re.M)
+                     or block.startswith('      - id: ' + label + '\n')]
+            self.assertEqual(len(found), 1, label)
+            return found[0]
+        def condition(label, expected):
+            self.assertEqual(re.findall(r'^        if: (.+)$', step(label), flags=re.M), [expected], label)
+        condition('fixture046-runtime', '${{ false }} # Diagnostic: no FFmpeg/media preparation.')
+        for name in ('Guard P33 aggregate (all)', 'Validate aggregate counts, coverage and source'):
+            condition(name, '${{ false }} # Diagnostic: no full aggregate.')
+        self.assertIn('        timeout-minutes: 122\n', step('Guard P33 aggregate (all)'))
+        self.assertIn('        timeout-minutes: 2\n', step('Validate aggregate counts, coverage and source'))
+        for name in ('collect-full', 'upload-full', 'retain-security', 'upload-security', 'final'):
+            condition(name, '${{ false }} # Diagnostic: cannot create a full-CI acceptance verdict.')
+        for name in ('audit', 'gitleaks'):
+            condition(name, '${{ false }} # Diagnostic: representative proof only.')
+        condition('fixture046-cleanup', "${{ always() && steps.fixture046-runtime.outcome != 'skipped' }}")
+        proof = ('      - name: Prove PostgreSQL command snapshots and complete receipt visibility\n'
+                 '        id: command-postgres\n'
+                 '        timeout-minutes: 21\n'
+                 '        run: |\n'
+                 '          /usr/bin/env HOME="$RUNNER_TEMP/ci/home" TMPDIR="$RUNNER_TEMP/ci/tmp" \\\n'
+                 '            /usr/bin/timeout --signal=TERM --kill-after=20s 1200s \\\n'
+                 '            node --import tsx test/support/command-postgres-hosted.ts\n')
+        self.assertEqual(step('command-postgres'), proof)
+        self.assertEqual(text.count('node --import tsx test/support/command-postgres-hosted.ts'), 1)
+        retention = ('      - name: Retain PostgreSQL command proof, including failed guard cleanup observations\n'
+                     "        if: ${{ always() && steps.command-postgres.outcome != 'skipped' }}\n"
+                     '        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2\n'
+                     '        timeout-minutes: 2\n'
+                     '        with:\n'
+                     '          name: ci-command-postgres-rest-${{ github.run_id }}-${{ github.run_attempt }}\n'
+                     '          path: ${{ runner.temp }}/ci/evidence/command-postgres/retained\n'
+                     '          if-no-files-found: error\n'
+                     '          retention-days: 30\n')
+        self.assertEqual(step('Retain PostgreSQL command proof, including failed guard cleanup observations'), retention)
+        sequence = ['run-stage.sh prerequisite', 'ci.py check prerequisite', 'run-stage.sh focused',
+                    'ci.py check focused', 'id: collect-controls', 'id: upload-controls',
+                    'id: command-postgres', "steps.command-postgres.outcome != 'skipped'", 'run-stage.sh all']
+        offsets = [rest.index(value) for value in sequence]
+        self.assertEqual(offsets, sorted(offsets))
+        for name in ('Guard P33 prerequisite', 'Validate P33 prerequisite', 'Guard P33 focused controls',
+                     'Validate P33 focused controls'):
+            self.assertEqual(re.findall(r'^        if: (.+)$', step(name), flags=re.M), [])
+        condition('collect-controls', "${{ always() && steps.init.outcome != 'skipped' }}")
+        condition('upload-controls', "${{ always() && steps.collect-controls.outcome == 'success' }}")
+        wrapper = (ci.ROOT / 'test/support/command-postgres-hosted.ts').read_text()
+        self.assertIn('tests: { passed: 7, total: 7 }', wrapper)
+        self.assertIn('"command-postgres",', wrapper)
+        verify = jobs['verify']
+        self.assertIn('needs: [verify-writer, verify-rest, container]', verify)
+        self.assertEqual(re.findall(r'^    if: (.+)$', verify, flags=re.M), ['${{ always() }}'])
+        hold = ('      - name: HOLD representative PostgreSQL proof cannot qualify for merge\n'
+                '        timeout-minutes: 1\n'
+                '        run: |\n'
+                '          echo "::error::HOLD: diagnostic-only PostgreSQL proof; full CI remains unrun and merge is forbidden."\n'
+                '          exit 1\n')
+        verify_steps = re.split(r'(?=^      - )', verify, flags=re.M)[1:]
+        self.assertEqual(verify_steps[0], hold)
+        self.assertNotIn('\n        if:', ''.join(verify_steps[1:]))
+        self.assertNotIn('continue-on-error', text)
+
     def test_fixed_steps_and_ceilings(self):
         text = self.text()
         for needle in ('timeout-minutes: 190', 'timeout-minutes: 122', 'timeout-minutes: 30', 'name: foundation-ci',
@@ -1075,33 +1159,55 @@ class WorkflowShape(unittest.TestCase):
         self.assertNotIn('workflow_dispatch', text)
         self.assertNotIn('diagnostic120', text)
         self.assertNotIn('target-diagnostic', text)
-        normal = ('      - name: Guard P33 aggregate (all)\n'
-                  '        run: /bin/bash tools/ci-validation/run-stage.sh all\n'
-                  '        timeout-minutes: 122\n'
-                  '      - name: Validate aggregate counts, coverage and source\n'
-                  '        run: /usr/bin/python3 -I -B tools/ci-validation/ci.py check all\n'
-                  '        timeout-minutes: 2\n')
-        for job in (text.split('  verify-writer:', 1)[1].split('  verify-rest:', 1)[0],
-                    text.split('  verify-rest:', 1)[1].split('  container:', 1)[0]):
-            with self.subTest(job=job.splitlines()[0]):
-                self.assertEqual(job.count('run-stage.sh all'), 1)
-                self.assertEqual(job.count('ci.py check all'), 1)
-                self.assertEqual(job.count(normal), 1)
-                stages = ['run-stage.sh prerequisite', 'run-stage.sh focused', 'id: upload-controls',
-                          'run-stage.sh all', 'ci.py check all', 'id: collect-full', 'id: upload-full',
-                          'id: audit', 'id: gitleaks', 'id: retain-security', 'id: upload-security', 'id: final']
-                offsets = [job.index(stage) for stage in stages]
-                self.assertEqual(offsets, sorted(offsets))
-                end = job.index('name: Settle the owned fixture runtime') if 'name: Settle the owned fixture runtime' in job else job.index('name: Collect full evidence')
-                aggregate = job[job.index('name: Guard P33 aggregate (all)'):end]
-                self.assertNotIn('if:', aggregate)  # Both steps retain default success() gating.
-                self.assertNotIn('continue-on-error', job)
-                for exact in ("id: collect-full\n        if: ${{ always() && steps.init.outcome != 'skipped' }}",
-                              "id: upload-full\n        if: ${{ always() && steps.collect-full.outcome == 'success' }}",
-                              "id: retain-security\n        if: ${{ always() && steps.gitleaks.outcome != 'skipped' }}",
-                              "id: upload-security\n        if: ${{ always() && steps.retain-security.outcome == 'success' }}",
-                              "id: final\n        if: ${{ always() && steps.init.outcome != 'skipped' }}"):
-                    self.assertIn(exact, job)
+        marker = '# TEMPORARY DIAGNOSTIC ONLY: PostgreSQL representative proof; verify deliberately holds merge.'
+        if marker in text:
+            self.assert_postgres_diagnostic_shape(text)
+            # Reject mixed/enabled variants rather than treating this temporary route as ordinary CI.
+            for old, new in (
+                (marker, '# incomplete diagnostic'),
+                ('${{ false }} # Diagnostic: no writer partition or service.', '${{ true }} # Diagnostic: no writer partition or service.'),
+                ('${{ false }} # Diagnostic: no FFmpeg/media preparation.', '${{ true }} # Diagnostic: no FFmpeg/media preparation.'),
+                ('${{ false }} # Diagnostic: no full aggregate.', '${{ true }} # Diagnostic: no full aggregate.'),
+                ('${{ false }} # Diagnostic: cannot create a full-CI acceptance verdict.', '${{ true }} # Diagnostic: cannot create a full-CI acceptance verdict.'),
+                ('node --import tsx test/support/command-postgres-hosted.ts', 'node --import tsx test/support/other.ts'),
+                ("${{ always() && steps.command-postgres.outcome != 'skipped' }}", '${{ success() }}'),
+                ('          exit 1\n', '          exit 0\n'),
+            ):
+                with self.subTest(diagnostic_mutation=old):
+                    self.assertIn(old, text)
+                    with self.assertRaises(AssertionError):
+                        self.assert_postgres_diagnostic_shape(text.replace(old, new, 1))
+        else:
+            self.assertNotIn('command-postgres-hosted.ts', text)
+            self.assertNotIn('HOLD representative PostgreSQL proof', text)
+            self.assertNotIn(' # Diagnostic:', text)
+            normal = ('      - name: Guard P33 aggregate (all)\n'
+                      '        run: /bin/bash tools/ci-validation/run-stage.sh all\n'
+                      '        timeout-minutes: 122\n'
+                      '      - name: Validate aggregate counts, coverage and source\n'
+                      '        run: /usr/bin/python3 -I -B tools/ci-validation/ci.py check all\n'
+                      '        timeout-minutes: 2\n')
+            for job in (text.split('  verify-writer:', 1)[1].split('  verify-rest:', 1)[0],
+                        text.split('  verify-rest:', 1)[1].split('  container:', 1)[0]):
+                with self.subTest(job=job.splitlines()[0]):
+                    self.assertEqual(job.count('run-stage.sh all'), 1)
+                    self.assertEqual(job.count('ci.py check all'), 1)
+                    self.assertEqual(job.count(normal), 1)
+                    stages = ['run-stage.sh prerequisite', 'run-stage.sh focused', 'id: upload-controls',
+                              'run-stage.sh all', 'ci.py check all', 'id: collect-full', 'id: upload-full',
+                              'id: audit', 'id: gitleaks', 'id: retain-security', 'id: upload-security', 'id: final']
+                    offsets = [job.index(stage) for stage in stages]
+                    self.assertEqual(offsets, sorted(offsets))
+                    end = job.index('name: Settle the owned fixture runtime') if 'name: Settle the owned fixture runtime' in job else job.index('name: Collect full evidence')
+                    aggregate = job[job.index('name: Guard P33 aggregate (all)'):end]
+                    self.assertNotIn('if:', aggregate)  # Both steps retain default success() gating.
+                    self.assertNotIn('continue-on-error', job)
+                    for exact in ("id: collect-full\n        if: ${{ always() && steps.init.outcome != 'skipped' }}",
+                                  "id: upload-full\n        if: ${{ always() && steps.collect-full.outcome == 'success' }}",
+                                  "id: retain-security\n        if: ${{ always() && steps.gitleaks.outcome != 'skipped' }}",
+                                  "id: upload-security\n        if: ${{ always() && steps.retain-security.outcome == 'success' }}",
+                                  "id: final\n        if: ${{ always() && steps.init.outcome != 'skipped' }}"):
+                        self.assertIn(exact, job)
         wrapper = (HERE / 'run-stage.sh').read_text()
         guard = (ci.ROOT / 'test/support/p33-parity-supervisor.py').read_text()
         for retired in ('diagnostic120', 'DIAGNOSTIC120', 'target-diagnostic', 'EXIT_FAIL'):
