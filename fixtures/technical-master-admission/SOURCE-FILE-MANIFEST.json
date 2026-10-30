@@ -1,0 +1,38 @@
+{
+  "SOURCE.json": {
+    "bytes": 2648,
+    "raw_sha256": "af3dbc7ed4e8998f92dec9606e4922c85852d098453a4d859ef2a86b93a34706"
+  },
+  "input-1.wav": {
+    "bytes": 2880044,
+    "raw_sha256": "426a40e45b815671b2497e213bcfb8a00379be3e6b6ee7e3e44a2e0bedf80993"
+  },
+  "input-2.wav": {
+    "bytes": 2880044,
+    "raw_sha256": "defbe0c37c95c3fd737e8ce064b6c6a9b1a592132fd96edcb060ecadfda0e7aa"
+  },
+  "master.wav": {
+    "bytes": 5760044,
+    "raw_sha256": "e4b417f05066694b031e8216111863e04aa457fe5d77dea9f9b2d81312e84eb4"
+  },
+  "recipe.json": {
+    "bytes": 656,
+    "raw_sha256": "06a1cca7f09736cf1b58006f79a7c25381bb278d439bf62266c2b9e604ab84e2"
+  },
+  "map.json": {
+    "bytes": 1987,
+    "raw_sha256": "0ac6f83cdedc43add2f0f51906901457bfa6d5c400933e3c0594b1da931cf4a9"
+  },
+  "context.json": {
+    "bytes": 772,
+    "raw_sha256": "aff958362c5a40a2af7899821627521c5722cfaac902b46373eda18ed61fd9fc"
+  },
+  "policy.json": {
+    "bytes": 520,
+    "raw_sha256": "51cdf7c9377a05cd5360e81f1a8c511bc3c12505da40d0d329e8ae2755052e9c"
+  },
+  "profile.json": {
+    "bytes": 1735,
+    "raw_sha256": "f5eaa2e3c7294030e78bfced2c5f7e983142fb95679a840930289aa5252fbfae"
+  }
+}
