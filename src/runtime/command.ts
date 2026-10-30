@@ -1,5 +1,6 @@
 // A5.1 durable command helpers: the transaction boundary shared by every command.
-// One command = one pinned connection, one READ COMMITTED transaction. A command that returns `conflict` or `rejected` ROLLS BACK
+// One command = one pinned connection and transaction (READ COMMITTED by default; explicit snapshot readers use REPEATABLE READ READ ONLY).
+// A command that returns `conflict` or `rejected` ROLLS BACK
 // (nothing it did is committed, including incidental rows); only `created` / `converged` commit. Possibly-conflicting INSERTs run in
 // a SAVEPOINT (`Tx.attempt`): after a unique violation PostgreSQL aborts the transaction until ROLLBACK TO SAVEPOINT, which
 // `attempt` performs before returning, so the caller may re-read the winner's committed row. Unrelated database errors are never
@@ -165,11 +166,23 @@ export function emitPreflight(
   }));
 }
 
+export type CommandTransactionMode =
+  | "read_committed"
+  | "repeatable_read_read_only";
+
+/** The optional read-only snapshot mode fixes BEGIN before any query; existing callers keep READ COMMITTED. */
 export async function runCommand<R>(
   pool: Pool,
   fn: (tx: Tx) => Promise<Outcome<R>>,
   trace?: CommandTrace,
+  transactionMode: CommandTransactionMode = "read_committed",
 ): Promise<Outcome<R>> {
+  if (
+    !["read_committed", "repeatable_read_read_only"].includes(transactionMode)
+  ) {
+    emitPreflight(trace, "transaction_mode_unsupported");
+    throw new Rejection("transaction_mode_unsupported");
+  }
   const startedAt = performance.now();
   let committedAck = false as boolean; // set only after COMMIT is ACKNOWLEDGED (assigned inside `execute`)
   let client: PoolClient | undefined;
@@ -216,7 +229,12 @@ export async function runCommand<R>(
       client = await pool.connect();
       client.on("error", onClientError);
       const c = client;
-      await q(c, "BEGIN ISOLATION LEVEL READ COMMITTED");
+      await q(
+        c,
+        transactionMode === "read_committed"
+          ? "BEGIN ISOLATION LEVEL READ COMMITTED"
+          : "BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY",
+      );
       open = true;
       const tx: Tx = {
         query: (text, values) => q(c, text, values),
@@ -245,9 +263,16 @@ export async function runCommand<R>(
         },
       };
       const isolation = await tx.query(
-        "SELECT current_setting('transaction_isolation') AS level",
+        transactionMode === "read_committed"
+          ? "SELECT current_setting('transaction_isolation') AS level"
+          : "SELECT current_setting('transaction_isolation') AS level,current_setting('transaction_read_only') AS read_only",
       );
-      if (isolation.rows[0]?.level !== "read committed")
+      if (
+        transactionMode === "read_committed"
+          ? isolation.rows[0]?.level !== "read committed"
+          : isolation.rows[0]?.level !== "repeatable read" ||
+            isolation.rows[0].read_only !== "on"
+      )
         return { kind: "rejected", code: "isolation_unsupported" };
       let outcome: Outcome<R>;
       try {

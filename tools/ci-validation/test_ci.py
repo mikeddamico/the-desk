@@ -12,7 +12,7 @@ no installation, Docker or media is started. It never touches
 the repository tree. Tests that need a checkout build a
 synthetic one under a temporary directory and patch ci.ROOT / ci.tracked_files only inside mock contexts.
 
-Pinned fail-closed rules: aggregate 81 files / 8,705 tests and all 29 integration files, each selected file exactly once
+Pinned fail-closed rules: aggregate 83 files / 8,738 tests and all 29 integration files, each selected file exactly once
 with no failed/skipped/todo test, a changed tracked-test inventory, a missing or foreign TEST_DATABASE_URL, a database
 that is not PostgreSQL 17 / the_desk_test / superuser, skipped integration files, root dist output accepted only when it
 is the unchanged build output (added, modified, empty, absent, symlinked or pre-existing dist and any tracked drift,
@@ -51,7 +51,7 @@ INTEGRATION = [n for n in SELECTED if n.startswith('test/integration/')]
 URL = 'postgresql://postgres:postgres@localhost:5432/the_desk_test'
 NONCES = {'focused': ('a' * 48, 'b' * 48), 'all': ('c' * 48,)}
 ATTEMPTS = {'prerequisite': 'attempt-p', 'focused': 'attempt-f', 'all': 'attempt-3'}
-PER_FILE = {n: 8468 // 76 + (1 if i < 8468 % 76 else 0) for i, n in enumerate(OLD_SELECTED)}
+PER_FILE = {n: 8469 // 76 + (1 if i < 8469 % 76 else 0) for i, n in enumerate(OLD_SELECTED)}
 PER_FILE.update(ci.FIXTURE_CONNECTED_COUNTS)
 PER_FILE.update(ci.FROZEN_RENDER046_COUNTS)
 
@@ -63,7 +63,7 @@ def file_lines(counts=None, extra=''):
 
 SUMMARY = {
     'focused': ' Test Files  1 passed (1)\n      Tests  2 passed (2)\n',
-    'all': ' Test Files  82 passed (82)\n      Tests  8717 passed (8717)\n',
+    'all': ' Test Files  83 passed (83)\n      Tests  8738 passed (8738)\n',
 }
 
 
@@ -222,7 +222,7 @@ class SummaryAndFileLines(unittest.TestCase):
 
 class AggregateSelection(unittest.TestCase):
     def test_synthetic_inventory_matches_the_fixed_expectations(self):
-        self.assertEqual((len(TESTS), len(SELECTED), len(INTEGRATION)), (83, 82, 29))
+        self.assertEqual((len(TESTS), len(SELECTED), len(INTEGRATION)), (84, 83, 29))
         self.assertEqual(sum(PER_FILE.values()), ci.EXPECTED_ALL_TESTS)
         self.assertNotIn(ci.HARNESS_TEST, SELECTED)
 
@@ -266,10 +266,10 @@ class AggregateSelection(unittest.TestCase):
     def test_count_drift_and_duplicates(self):
         counts = dict(PER_FILE)
         counts[SELECTED[0]] -= 1
-        self.assertTrue(any('sum to 8716' in e for e in self.check(file_lines(counts))[0]))
+        self.assertTrue(any('sum to 8737' in e for e in self.check(file_lines(counts))[0]))
         counts = dict(PER_FILE)
         counts[SELECTED[0]] += 1
-        self.assertTrue(any('sum to 8718' in e for e in self.check(file_lines(counts))[0]))
+        self.assertTrue(any('sum to 8739' in e for e in self.check(file_lines(counts))[0]))
         dup = file_lines() + ' ✓ %s (1 tests) 1ms\n' % SELECTED[0]
         self.assertTrue(any('2 result lines' in e for e in self.check(dup)[0]))
 
@@ -281,22 +281,22 @@ class AggregateSelection(unittest.TestCase):
 
     def test_changed_tracked_inventory_is_hold_not_a_relaxed_count(self):
         grown = sorted(TRACKED + ['test/unit/extra.test.ts'])
-        self.assertTrue(any('inventory is 84' in e for e in self.check(file_lines(), grown)[0]))
+        self.assertTrue(any('inventory is 85' in e for e in self.check(file_lines(), grown)[0]))
         moved = [n for n in TRACKED if n != INTEGRATION[0]] + ['test/unit/moved.test.ts']
         self.assertTrue(any('integration file count 28' in e for e in self.check(file_lines(), sorted(moved))[0]))
         shrunk = [n for n in TRACKED if n != ci.HARNESS_TEST]
         self.assertTrue(self.check(file_lines(), shrunk)[0])
 
     def test_summary_count_mismatch_with_correct_files(self):
-        for wrong in (8716, 8718):
+        for wrong in (8737, 8739):
             with self.subTest(tests=wrong):
                 def change(stage_dir, attempt):
-                    write(stage_dir / 'stdout', file_lines() + ' Test Files  82 passed (82)\n      Tests  %d passed (%d)\n' % (wrong, wrong))
+                    write(stage_dir / 'stdout', file_lines() + ' Test Files  83 passed (83)\n      Tests  %d passed (%d)\n' % (wrong, wrong))
                 self.assertTrue(any('Tests counts' in e for e in evaluate('all', change)))
 
     def test_skipped_summary_with_exit_zero_is_not_accepted(self):
         def change(stage_dir, attempt):
-            write(stage_dir / 'stdout', file_lines() + ' Test Files  82 passed (82)\n      Tests  8631 passed | 86 skipped (8717)\n')
+            write(stage_dir / 'stdout', file_lines() + ' Test Files  83 passed (83)\n      Tests  8652 passed | 86 skipped (8738)\n')
         self.assertTrue(any('Tests counts' in e for e in evaluate('all', change)))
 
 
@@ -1171,7 +1171,7 @@ class Fixture105Tooling(unittest.TestCase):
             counts.update({'test/unit/connected-fixture105.test.ts': unit, 'test/integration/connected-fixture105.test.ts': native})
             errors = []
             ci.check_all_files(file_lines(counts), TRACKED, errors, {})
-            self.assertEqual(sum(counts.values()), 8717)
+            self.assertEqual(sum(counts.values()), 8738)
             self.assertEqual(sum('connected per-file count drift' in e for e in errors), 2)
 
     def test_frozen_render046_file_and_exact_count_are_required(self):
@@ -1190,7 +1190,7 @@ class Fixture105Tooling(unittest.TestCase):
                     counts[OLD_SELECTED[0]] += pinned - count
                     errors = []
                     ci.check_all_files(file_lines(counts), TRACKED, errors, {})
-                    self.assertEqual(sum(counts.values()), 8717)
+                    self.assertEqual(sum(counts.values()), 8738)
                     self.assertIn('frozen-render046 per-file count drift: ' + name, errors)
 
     def test_fixture_namespace_does_not_match_supervisor_prefix(self):
@@ -1822,7 +1822,7 @@ class Partition155Tests(unittest.TestCase):
                          'repository': 'mikeddamico/the-desk', 'run_id': '123', 'run_attempt': '1', 'source_sha256': 'd' * 64}
         rest = ci.partition_files(self.tracked, 'rest')
         other = [p for p in rest if p not in ci.FIXTURE_CONNECTED_COUNTS and p not in ci.FROZEN_RENDER046_COUNTS]
-        self.counts = {p: 3560 // len(other) + (i < 3560 % len(other)) for i, p in enumerate(other)}
+        self.counts = {p: 3561 // len(other) + (i < 3561 % len(other)) for i, p in enumerate(other)}
         self.counts.update(ci.FIXTURE_CONNECTED_COUNTS)
         self.counts.update(ci.FROZEN_RENDER046_COUNTS)
         self.counts[ci.WRITER_TEST] = 4908
@@ -1847,8 +1847,8 @@ class Partition155Tests(unittest.TestCase):
     def test_exact_pair_and_disjoint_union(self):
         self.assertEqual(self.joint(), [])
         self.assertEqual(set(self.proofs['writer']['files']) & set(self.proofs['rest']['files']), set())
-        self.assertEqual(sum(sum(p['files'].values()) for p in self.proofs.values()), 8717)
-        self.assertEqual(len(ci.partition_files(self.tracked, 'all')), 82)
+        self.assertEqual(sum(sum(p['files'].values()) for p in self.proofs.values()), 8738)
+        self.assertEqual(len(ci.partition_files(self.tracked, 'all')), 83)
 
     def test_missing_unknown_and_legacy_labels(self):
         self.assertEqual(ci.partition_label(), 'all')
@@ -2086,7 +2086,7 @@ class Partition155Tests(unittest.TestCase):
             proof = self.copy(original); proof['identity'][key] = value
             with self.assertRaises(RuntimeError): ci.parse_partition_proof(ci.fixture_bytes(proof).decode().rstrip('\n'))
         for counts in ({'test/' + 'a' * 513 + '.test.ts': 4908}, {'test/../x.test.ts': 4908},
-                       {'test/x%d.test.ts' % n: 1 for n in range(83)}):
+                       {'test/x%d.test.ts' % n: 1 for n in range(84)}):
             proof = self.copy(original); proof['files'] = counts
             with self.assertRaises(RuntimeError): ci.parse_partition_proof(ci.fixture_bytes(proof).decode().rstrip('\n'))
         with self.assertRaises(RuntimeError): ci.parse_partition_proof(json.dumps(original))
@@ -2174,10 +2174,12 @@ class FixtureTargetObserverShapeTests(unittest.TestCase):
         self.assertIsInstance(filters[0], ast.Dict)
         routes = {key.value: value for key, value in zip(filters[0].keys, filters[0].values)
                   if isinstance(key, ast.Constant)}
-        self.assertEqual(set(routes), {'focused', 'p33', 'parity', 'unit', 'integration', 'all', 'writer', 'rest', 'master046', 'technical-master', 'technical-master-pure'})
+        self.assertEqual(set(routes), {'focused', 'p33', 'parity', 'unit', 'integration', 'all', 'writer', 'rest', 'master046', 'technical-master', 'technical-master-pure', 'durable-pair-pure', 'command-postgres'})
         self.assertIn("    test = 'test/unit/p33-parity-harness.test.ts'", guard_source)
         self.assertEqual(ast.literal_eval(routes['writer']), ['test/unit/writer-fixture-input.test.ts'])
         self.assertEqual(ast.literal_eval(routes['master046']), ['test/unit/frozen-fixture046-master.test.ts'])
+        self.assertEqual(ast.literal_eval(routes['durable-pair-pure']), ['test/unit/durable-pair.test.ts'])
+        self.assertEqual(ast.literal_eval(routes['command-postgres']), ['test/integration/g2-command-connection.test.ts'])
         for profile in ('technical-master', 'technical-master-pure'):
             self.assertEqual(ast.literal_eval(routes[profile]), ['test/unit/technical-master-admission.test.ts'])
         profile_choices = [keyword.value for node in ast.walk(guard)
@@ -2188,7 +2190,7 @@ class FixtureTargetObserverShapeTests(unittest.TestCase):
                            for keyword in node.keywords if keyword.arg == 'choices']
         self.assertEqual(len(profile_choices), 1)
         self.assertEqual(ast.literal_eval(profile_choices[0]),
-                         ['prerequisite', 'focused', 'p33', 'parity', 'unit', 'integration', 'all', 'writer', 'rest', 'master046', 'technical-master', 'technical-master-pure'])
+                         ['prerequisite', 'focused', 'p33', 'parity', 'unit', 'integration', 'all', 'writer', 'rest', 'master046', 'technical-master', 'technical-master-pure', 'durable-pair-pure', 'command-postgres'])
         for profile, expression in (('all', "['--exclude', test]"),
                                     ('rest', "['--exclude', test, '--exclude', 'test/unit/writer-fixture-input.test.ts']")):
             self.assertEqual(ast.dump(routes[profile]), ast.dump(ast.parse(expression, mode='eval').body))
