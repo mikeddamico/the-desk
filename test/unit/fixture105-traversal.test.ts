@@ -19,41 +19,87 @@ import { canonicalTimestamp } from "../../src/identity/canonical-json.js";
 
 // Reuse the existing closed extraction seam: declarations only, no native module imports or DB setup.
 async function nativeCallbackSelftest(): Promise<void> {
-  const native = fs.readFileSync(new URL("../integration/connected-fixture105.test.ts", import.meta.url), "utf8");
-  const syntax = ts.createSourceFile("native.ts", native, ts.ScriptTarget.Latest, true);
+  const native = fs.readFileSync(
+    new URL("../integration/connected-fixture105.test.ts", import.meta.url),
+    "utf8",
+  );
+  const syntax = ts.createSourceFile(
+    "native.ts",
+    native,
+    ts.ScriptTarget.Latest,
+    true,
+  );
   const functions = new Set([
-    "retainTestCleanup", "withTestCleanup", "driverQuery", "rawDriverQuery",
-    "observedPromiseCall", "driverPromiseThen", "commitWitness", "targetUnknown",
-    "targetData", "targetInt", "targetSupplement", "maintenanceStamp",
-    "captureMaintenance", "observeMaintenance",
+    "retainTestCleanup",
+    "withTestCleanup",
+    "driverQuery",
+    "rawDriverQuery",
+    "observedPromiseCall",
+    "driverPromiseThen",
+    "commitWitness",
+    "targetUnknown",
+    "targetData",
+    "targetInt",
+    "targetSupplement",
+    "maintenanceStamp",
+    "captureMaintenance",
+    "observeMaintenance",
   ]);
   const constants = new Set([
-    "cleanupFailures", "TARGET_PREFIX", "TARGET_OBSERVER_CAP", "TARGET_SCOPES", "MAINTENANCE_SQL",
+    "cleanupFailures",
+    "TARGET_PREFIX",
+    "TARGET_OBSERVER_CAP",
+    "TARGET_SCOPES",
+    "MAINTENANCE_SQL",
   ]);
   const declarations = syntax.statements.filter((node) => {
-    if (ts.isFunctionDeclaration(node)) return functions.has(node.name?.text ?? "");
-    if (ts.isClassDeclaration(node)) return node.name?.text === "TargetObserver";
-    return ts.isVariableStatement(node) && node.declarationList.declarations.every(
-      (entry) => ts.isIdentifier(entry.name) && constants.has(entry.name.text),
+    if (ts.isFunctionDeclaration(node))
+      return functions.has(node.name?.text ?? "");
+    if (ts.isClassDeclaration(node))
+      return node.name?.text === "TargetObserver";
+    return (
+      ts.isVariableStatement(node) &&
+      node.declarationList.declarations.every(
+        (entry) =>
+          ts.isIdentifier(entry.name) && constants.has(entry.name.text),
+      )
     );
   });
   expect(declarations).toHaveLength(functions.size + constants.size + 1);
   const javascript = ts.transpileModule(
     declarations.map((node) => node.getFullText(syntax)).join("\n") +
       "\nglobalThis.callbackSelftest = () => TargetObserver.selftest();",
-    { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.None } },
+    {
+      compilerOptions: {
+        target: ts.ScriptTarget.ES2022,
+        module: ts.ModuleKind.None,
+      },
+    },
   ).outputText;
   const realm: Record<string, unknown> = {
-    pg, expect, vi, process, Buffer, Promise, EventEmitter, canonicalTimestamp,
+    pg,
+    expect,
+    vi,
+    process,
+    Buffer,
+    Promise,
+    EventEmitter,
+    canonicalTimestamp,
   };
-  const original = Object.getOwnPropertyDescriptor(pg.Client.prototype, "query");
+  const original = Object.getOwnPropertyDescriptor(
+    pg.Client.prototype,
+    "query",
+  );
   try {
     runInNewContext(javascript, realm, { timeout: 1000 });
     const selftest: unknown = realm.callbackSelftest;
-    if (typeof selftest !== "function") throw new Error("native callback selftest entry missing");
+    if (typeof selftest !== "function")
+      throw new Error("native callback selftest entry missing");
     await (selftest as () => Promise<void>)();
   } finally {
-    expect(Object.getOwnPropertyDescriptor(pg.Client.prototype, "query")).toEqual(original);
+    expect(
+      Object.getOwnPropertyDescriptor(pg.Client.prototype, "query"),
+    ).toEqual(original);
   }
 }
 
