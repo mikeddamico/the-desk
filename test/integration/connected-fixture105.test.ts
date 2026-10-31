@@ -158,7 +158,7 @@ function driverPromiseThen(
   fulfilled: (result: pg.QueryResult<Obj>) => pg.QueryResult<Obj>,
   rejected?: (error: unknown) => never,
 ): Promise<pg.QueryResult<Obj>> {
-  return Reflect.apply(Promise.prototype.then, value, [
+  return Reflect.apply(Reflect.get(Promise.prototype, "then"), value, [
     fulfilled,
     rejected,
   ]) as Promise<pg.QueryResult<Obj>>;
@@ -1169,15 +1169,15 @@ class TargetObserver {
           emitted.push(error);
         });
         let armed = true;
-        let selected: pg.Client | undefined = client;
+        let selected: pg.ClientBase | undefined = client;
         let losses = 0;
         let delegated = 0;
-        let expectedReceiver: pg.Client = client;
+        const expectedReceiver: { value: pg.ClientBase } = { value: client };
         let expectedArgs: readonly unknown[] = [];
         let action: RawDriverQuery = () => Promise.resolve(actual);
         const delegate: RawDriverQuery = function (...args) {
           delegated++;
-          expect(this).toBe(expectedReceiver);
+          expect(this).toBe(expectedReceiver.value);
           expect(args).toHaveLength(expectedArgs.length);
           args.forEach((value, index) => {
             expect(value).toBe(expectedArgs[index]);
@@ -1202,10 +1202,10 @@ class TargetObserver {
         });
         const call = (
           args: unknown[],
-          receiver: pg.Client = client,
+          receiver: pg.ClientBase = client,
         ): unknown => {
           expectedArgs = args;
-          expectedReceiver = receiver;
+          expectedReceiver.value = receiver;
           const before = delegated;
           try {
             return Reflect.apply(chain, receiver, args);
@@ -1253,7 +1253,7 @@ class TargetObserver {
         action = () => sentinel;
         for (const args of [
           [config],
-          [config, () => {}],
+          [config, () => undefined],
           [queryObject],
           ["COMMIT", values, undefined],
           ["COMMIT", values, undefined, sentinel],
@@ -1265,7 +1265,7 @@ class TargetObserver {
           throw synchronous;
         };
         for (const args of [
-          ["SELECT fixed", values, () => {}],
+          ["SELECT fixed", values, () => undefined],
           ["SELECT fixed"],
         ]) {
           let caught: unknown;
@@ -1309,7 +1309,7 @@ class TargetObserver {
           };
           const poolReceiver = {
             Promise,
-            log: () => {},
+            log: () => undefined,
             connect(
               callback: (error: undefined, value: pg.PoolClient) => void,
             ): void {
@@ -1333,17 +1333,18 @@ class TargetObserver {
             client,
             "query",
           );
+          if (!previousQuery) throw new Error("client query owner missing");
           Object.defineProperty(client, "query", {
             configurable: true,
             value: function (this: pg.Client, ...args: unknown[]): unknown {
               expectedArgs = args;
-              expectedReceiver = this;
+              expectedReceiver.value = this;
               return Reflect.apply(chain, this, args);
             },
           });
           try {
             const pooled: unknown = Reflect.apply(
-              pg.Pool.prototype.query,
+              Reflect.get(pg.Pool.prototype, "query") as RawDriverQuery,
               poolReceiver,
               ["SELECT fixed", values],
             );
@@ -1356,7 +1357,6 @@ class TargetObserver {
             ]);
             expect(emitted).toEqual([]); // No invented error event repairs the synchronous-throw branch.
           } finally {
-            if (!previousQuery) throw new Error("client query owner missing");
             Object.defineProperty(client, "query", previousQuery);
             client.removeAllListeners("error");
             client.on("error", (error: unknown) => {
@@ -1364,6 +1364,8 @@ class TargetObserver {
             });
           }
         }
+        const previousQuery = Object.getOwnPropertyDescriptor(client, "query");
+        if (!previousQuery) throw new Error("client query owner missing");
         // No timer/sleep: teardown must settle while the construction Promise remains gated.
         let unblock: ((value: pg.QueryResult<Obj>) => void) | undefined;
         const gate = new Promise<pg.QueryResult<Obj>>((resolve) => {
@@ -1399,7 +1401,7 @@ class TargetObserver {
         );
         const poolReceiver = {
           Promise,
-          log: () => {},
+          log: () => undefined,
           connect(
             callback: (error: undefined, value: pg.PoolClient) => void,
           ): void {
@@ -1407,18 +1409,17 @@ class TargetObserver {
             callback(undefined, client);
           },
         };
-        const previousQuery = Object.getOwnPropertyDescriptor(client, "query");
         Object.defineProperty(client, "query", {
           configurable: true,
           value: function (this: pg.Client, ...args: unknown[]): unknown {
             expectedArgs = args;
-            expectedReceiver = this;
+            expectedReceiver.value = this;
             return Reflect.apply(chain, this, args);
           },
         });
         try {
           const teardown = Reflect.apply(
-            pg.Pool.prototype.query,
+            Reflect.get(pg.Pool.prototype, "query") as RawDriverQuery,
             poolReceiver,
             ["SELECT fixed ownership", values],
           ) as Promise<unknown>;
@@ -1449,7 +1450,6 @@ class TargetObserver {
           expect(emitted).toEqual([acknowledgement]);
         } finally {
           unblock?.(actual); // Only after assertions; release a failed fake gate without changing its verdict.
-          if (!previousQuery) throw new Error("client query owner missing");
           Object.defineProperty(client, "query", previousQuery);
           client.removeAllListeners();
           other.removeAllListeners();

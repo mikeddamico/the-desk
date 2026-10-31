@@ -2989,9 +2989,36 @@ class FixtureTargetObserverShapeTests(unittest.TestCase):
                         cleanup.index('this.maintenanceRecord = await observeMaintenance('))
         self.assertLess(cleanup.index('this.maintenanceRecord = await observeMaintenance('),
                         cleanup.index('          this.emit();'))
-        self.assertEqual(observer.count('await Reflect.apply('), 1)
-        self.assertIn('rejected(ordinal);\n        throw error;', observer)
-        self.assertIn('observe(ordinal, result);\n      return result;', observer)
+        # The callback-transparent wrapper delegates outside an async boundary. Unknown
+        # overloads stay opaque; only the known driver's Promise result is observed.
+        wrapper = observer[observer.index('  wrap('):observer.index('  /**\n   * Runs')]
+
+        def callback_transparent_shape(candidate):
+            self.assertIn('return function (this: pg.Client, ...args: unknown[]): unknown {', candidate)
+            self.assertNotIn('return async function', candidate)
+            self.assertIn('if (!observedPromiseCall(args))\n        return Reflect.apply(original, this, args);', candidate)
+            self.assertEqual(candidate.count('Reflect.apply(original, this, args)'), 2)
+            self.assertIn('returned = Reflect.apply(original, this, args);', candidate)
+            self.assertLess(candidate.index('returned = Reflect.apply('), candidate.index('return driverPromiseThen('))
+            self.assertIn('} catch (error) {\n        rejected(ordinal);\n        throw error;\n      }', candidate)
+            self.assertIn('(result) => {\n          observe(ordinal, result);\n          return result;\n        },', candidate)
+            self.assertIn('(error) => {\n          rejected(ordinal);\n          throw error;\n        },', candidate)
+
+        callback_transparent_shape(wrapper)
+        fulfillment_prefix = '(result) => {\n          observe(ordinal, result);'
+        self.assertEqual(wrapper.count(fulfillment_prefix), 1)
+        mutations = {
+            'async wrapper': wrapper.replace('return function (this:', 'return async function (this:', 1),
+            'dropped receiver': wrapper.replace('Reflect.apply(original, this, args)', 'Reflect.apply(original, undefined, args)', 1),
+            'dropped arguments': wrapper.replace('Reflect.apply(original, this, args)', 'Reflect.apply(original, this, [])', 1),
+            'callback observation': wrapper.replace('if (!observedPromiseCall(args))\n        return Reflect.apply(original, this, args);', '', 1),
+            'swallowed synchronous error': wrapper.replace('rejected(ordinal);\n        throw error;', 'rejected(ordinal);\n        return undefined;', 1),
+            'omitted fulfillment observation': wrapper.replace(fulfillment_prefix, '(result) => {', 1),
+            'omitted rejection observation': wrapper.replace('(error) => {\n          rejected(ordinal);', '(error) => {', 1),
+        }
+        for name, mutation in mutations.items():
+            with self.subTest(wrapper=name), self.assertRaises(AssertionError):
+                callback_transparent_shape(mutation)
         self.assertIn('this.count === 0 ||', observer)
         self.assertIn('this.vectors.some(\n            (entry) =>\n              entry.vector.outcome === "rejected" ||\n              entry.supplement.status === "inconclusive",\n          ) ||', observer)
         self.assertEqual(observer.count('process.stderr.write'), 3)
@@ -3407,7 +3434,21 @@ class Fixture046ConstructionShape(unittest.TestCase):
         self.assertLess(rest.index('id: fixture046-runtime'), rest.index('ci.py dbprobe'))
         self.assertLess(rest.index('ci.py check all'), rest.index('id: fixture046-cleanup'))
         self.assertLess(rest.index('id: fixture046-cleanup'), rest.index('id: collect-full'))
-        self.assertIn("id: fixture046-cleanup\n        if: ${{ always() && steps.fixture046-runtime.outcome != 'skipped' }}", rest)
+        cleanup_condition = "id: fixture046-cleanup\n        if: ${{ always() && steps.short-layout.outcome == 'success' && (steps.fixture046-runtime.outcome == 'success' || steps.fixture046-runtime.outcome == 'failure') }}"
+
+        def cleanup_shape(candidate):
+            self.assertEqual(candidate.count(cleanup_condition), 1)
+
+        cleanup_shape(rest)
+        mutations = {
+            'missing layout gate': rest.replace(cleanup_condition, cleanup_condition.replace("steps.short-layout.outcome == 'success' && ", ''), 1),
+            'missing always': rest.replace(cleanup_condition, cleanup_condition.replace('always() && ', ''), 1),
+            'missing success outcome': rest.replace(cleanup_condition, cleanup_condition.replace("steps.fixture046-runtime.outcome == 'success' || ", ''), 1),
+            'missing failure outcome': rest.replace(cleanup_condition, cleanup_condition.replace(" || steps.fixture046-runtime.outcome == 'failure'", ''), 1),
+        }
+        for name, mutation in mutations.items():
+            with self.subTest(cleanup=name), self.assertRaises(AssertionError):
+                cleanup_shape(mutation)
         self.assertIn("FIXTURE046_CLEANUP_OUTCOME: ${{ steps.fixture046-cleanup.outcome }}", rest)
         source = (ci.ROOT / 'test/unit/frozen-fixture046-master.test.ts').read_text()
         self.assertEqual(len(re.findall(r'^  it\(', source, re.M)), 16)
