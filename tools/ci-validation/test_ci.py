@@ -1423,11 +1423,133 @@ def _short_layout_controls(test, owner_path):
             for fd in pending:
                 actual_close(fd)  # Test-owned repair only after all assertions.
 
+    # Independently authored complete generated profile; never a production-map oracle.
+    config_expected = {
+        'core.repositoryformatversion': '0', 'core.filemode': 'true',
+        'core.bare': 'false', 'core.logallrefupdates': 'true',
+        'remote.origin.url': 'https://github.com/mikeddamico/the-desk.git',
+        'remote.origin.fetch': '+refs/heads/*:refs/remotes/origin/*',
+        'remote.origin.tagopt': '--no-tags',
+    }
+    config_cases = [('success', None)]
+    for key in sorted(config_expected):
+        config_cases += [('missing', key), ('wrong', key), ('duplicate', key)]
+    config_cases += [(name, None) for name in (
+        'extra_http', 'extra_credential', 'extra_hook', 'extra_include',
+        'extra_includeif', 'extra_rewrite', 'extra_pushurl', 'extra_remote',
+        'branch_pair', 'capability_symlinks', 'capability_ignorecase',
+        'capability_precompose', 'capability_extension', 'capability_shared',
+        'duplicate_mixed', 'empty_value', 'multiline_value', 'boolean_alias',
+        'url_userinfo', 'url_query', 'url_other', 'fetch_wide', 'tag_wrong',
+        'no_terminal_nul', 'extra_terminal_nul', 'non_utf8', 'empty_names',
+        'wrong_match_record', 'extra_match_record', 'capture_error',
+        'cancel_match', 'bytes_drift', 'config_replaced', 'mode_drift',
+        'git_root_replaced', 'names_drift', 'bounded_read')]
+    for fault, selected in config_cases:
+        with test.subTest(layout_config=fault, key=selected), tempfile.TemporaryDirectory() as directory:
+            g = realm()
+            root = Path(directory)
+            destination, evidence = root / 'd', root / 'evidence'
+            destination.mkdir(mode=0o700); evidence.mkdir(mode=0o700)
+            git = destination / '.git'; git.mkdir(mode=0o700)
+            config = git / 'config'
+            actual = {key: [value] for key, value in config_expected.items()}
+            sentinel = 'DUMMY_UNEXPECTED_CREDENTIAL_7ac52'
+            extras = {'extra_http': 'http.extraheader', 'extra_credential': 'credential.helper',
+                      'extra_hook': 'core.hookspath', 'extra_include': 'include.path',
+                      'extra_includeif': 'includeif.gitdir:/foreign/.path',
+                      'extra_rewrite': 'url.foreign.insteadof', 'extra_pushurl': 'remote.origin.pushurl',
+                      'extra_remote': 'remote.other.url', 'capability_symlinks': 'core.symlinks',
+                      'capability_ignorecase': 'core.ignorecase', 'capability_precompose': 'core.precomposeunicode',
+                      'capability_extension': 'extensions.refstorage', 'capability_shared': 'core.sharedrepository'}
+            if fault == 'missing': del actual[selected]
+            if fault == 'wrong': actual[selected] = [sentinel]
+            if fault == 'duplicate': actual[selected] *= 2
+            if fault in extras: actual[extras[fault]] = [sentinel]
+            if fault == 'branch_pair': actual.update({'branch.main.remote': ['origin'], 'branch.main.merge': ['refs/heads/main']})
+            if fault == 'duplicate_mixed': actual['remote.origin.url'] += ['https://user:' + sentinel + '@example.invalid/']
+            if fault in ('empty_value', 'multiline_value', 'boolean_alias'):
+                actual['core.bare'] = [{'empty_value': '', 'multiline_value': 'false\n' + sentinel, 'boolean_alias': '0'}[fault]]
+            if fault in ('url_userinfo', 'url_query', 'url_other'):
+                actual['remote.origin.url'] = [{'url_userinfo': 'https://user:' + sentinel + '@github.com/mikeddamico/the-desk.git',
+                    'url_query': config_expected['remote.origin.url'] + '?token=' + sentinel,
+                    'url_other': 'https://example.invalid/' + sentinel}[fault]]
+            if fault == 'fetch_wide': actual['remote.origin.fetch'] = ['+refs/*:refs/*']
+            if fault == 'tag_wrong': actual['remote.origin.tagopt'] = ['--tags']
+            config.write_text(json.dumps(actual)); config.chmod(0o600)
+            if fault == 'bounded_read': config.write_bytes(b'x' * 65)
+            g.update({'SOURCE': root, 'DESTINATION': destination, 'EVIDENCE': evidence,
+                      'GIT': ['/usr/bin/git'], 'CAP': 64 if fault == 'bounded_read' else 262144})
+            g['STATE']['source'] = g['identity'](root)
+            g['STATE']['owned_root'] = g['identity'](destination)
+            g['STATE']['evidence'] = g['identity'](evidence)
+            calls, emitted = [], []
+            primary = g['LayoutFailure']('fixed_config_capture_primary')
+            def query(label, argv, seconds):
+                test.assertEqual(seconds, 10)
+                calls.append((label, argv, seconds))
+                if label in ('clone-config-names', 'clone-config-names-after'):
+                    test.assertEqual(argv, ['/usr/bin/git', '-C', str(destination), 'config', 'list',
+                                           '--local', '--no-includes', '--null', '--name-only'])
+                    result = b''.join(key.encode() + b'\0' for key, values in actual.items() for _ in values)
+                    if fault == 'no_terminal_nul': result = result[:-1]
+                    if fault == 'extra_terminal_nul': result += b'\0'
+                    if fault == 'non_utf8': result = b'\xff\0' + result
+                    if fault == 'empty_names': result = b''
+                    if fault == 'names_drift' and label.endswith('-after'): result += b'http.extraheader\0'
+                else:
+                    key = argv[-1]; value = config_expected[key]
+                    index = sorted(config_expected).index(key)
+                    test.assertEqual(label, 'clone-config-match-' + str(index))
+                    test.assertEqual(argv, ['/usr/bin/git', '-C', str(destination), 'config', 'get',
+                        '--local', '--no-includes', '--all', '--fixed-value', '--value=' + value,
+                        '--null', '--show-names', '--name-only', '--', key])
+                    if fault == 'capture_error': raise primary
+                    # Model pinned Git's literal filtering BEFORE names-only formatting.
+                    result = b''.join(key.encode() + b'\0' for observed in actual[key] if observed == value)
+                    emitted.append((result, b''))
+                    if not result: raise primary  # Actual get returns1 for no match; capture refuses.
+                    if fault == 'wrong_match_record': result = b'wrong\0'
+                    if fault == 'extra_match_record': result *= 2
+                    if index == 0:
+                        if fault == 'cancel_match':
+                            g['cancel'](signal.SIGTERM, None); raise primary
+                        if fault == 'bytes_drift': config.write_bytes(config.read_bytes() + b' ')
+                        if fault == 'config_replaced':
+                            body = config.read_bytes(); config.rename(git / 'retained-config'); config.write_bytes(body); config.chmod(0o600)
+                        if fault == 'mode_drift': config.chmod(0o640)
+                        if fault == 'git_root_replaced':
+                            git.rename(destination / 'retained-git'); git.mkdir(mode=0o700); config.write_bytes(b'fixed')
+                emitted.append((result, b''))
+                return result
+            with mock.patch.dict(g, {'capture': query}):
+                if fault == 'success':
+                    g['validate_clone_config'](g['STATE']['owned_root'])
+                    test.assertEqual([row[0] for row in calls], ['clone-config-names'] +
+                        ['clone-config-match-' + str(i) for i in range(7)] + ['clone-config-names-after'])
+                    test.assertTrue(json.loads((evidence / 'clone-config-proof.json').read_bytes())['stable'])
+                else:
+                    with test.assertRaises(g['LayoutFailure']) as refused:
+                        g['validate_clone_config'](g['STATE']['owned_root'])
+                    if fault in ('capture_error', 'cancel_match', 'wrong', 'empty_value', 'multiline_value',
+                                 'boolean_alias', 'url_userinfo', 'url_query', 'url_other', 'fetch_wide', 'tag_wrong'):
+                        test.assertIs(refused.exception, primary)
+                    if fault in extras or fault in ('missing', 'duplicate', 'duplicate_mixed', 'branch_pair',
+                                                   'no_terminal_nul', 'extra_terminal_nul', 'non_utf8', 'empty_names'):
+                        test.assertFalse(any(row[0].startswith('clone-config-match-') for row in calls))
+                    test.assertFalse((evidence / 'clone-config-proof.json').exists())
+                    test.assertNotIn(sentinel, str(refused.exception))
+            test.assertNotIn(sentinel, repr(calls) + repr(emitted) +
+                             ''.join(p.read_text() for p in evidence.iterdir() if p.is_file()))
+            test.assertEqual(g['OWNED_FD_PENDING'], [])
+            test.assertEqual(g['PENDING_RESOURCES'], [])
+
     for fault in ('success', 'existing', 'symlink', 'source_uid', 'tmp_mode', 'wrong_head', 'wrong_sha',
                   'wrong_tree', 'partial_clone', 'imported_config', 'alternates', 'replacement',
                   'source_mode', 'git_pointer', 'root_mode', 'preseed_modules', 'terminal_receipt',
                   'terminal_cancel', 'tool_drift', 'wrong_git_version', 'source_git_pointer',
-                  'extra_argument', 'source_replacement'):
+                  'extra_argument', 'source_replacement', 'config_wrong_url',
+                  'config_duplicate', 'config_drift'):
         with test.subTest(layout_main=fault), tempfile.TemporaryDirectory() as directory:
             g = realm()
             root = Path(directory)
@@ -1452,9 +1574,13 @@ def _short_layout_controls(test, owner_path):
                     value['uid'] += 1
                 return value
             calls = []
+            main_config = dict(config_expected)
+            main_sentinel = 'DUMMY_UNEXPECTED_CREDENTIAL_7ac52'
+            if fault == 'config_wrong_url':
+                main_config['remote.origin.url'] = 'https://user:' + main_sentinel + '@example.invalid/'
             def action(label, _argv, _seconds):
                 calls.append(label)
-                if label == 'git-version': return b'not a version\n' if fault == 'wrong_git_version' else b'git version 2.43.0 synthetic-control\n'
+                if label == 'git-version': return b'not a version\n' if fault == 'wrong_git_version' else b'git version 2.56.0 synthetic-control\n'
                 if label == 'source-head': return (('c' if fault == 'wrong_head' else 'a') * 40 + '\n').encode()
                 if label in ('source-tree', 'clone-tree'):
                     return (('c' if fault == 'wrong_tree' and label == 'clone-tree' else 'b') * 40 + '\n').encode()
@@ -1465,6 +1591,9 @@ def _short_layout_controls(test, owner_path):
                         (destination / '.git').write_text('gitdir: ../source/.git\n')
                     else:
                         (destination / '.git/objects/info').mkdir(parents=True)
+                    if fault != 'git_pointer':
+                        (destination / '.git/config').write_text(json.dumps(main_config))
+                        (destination / '.git/config').chmod(0o600)
                     (destination / 'leaf').write_bytes(b'fixed')
                     (destination / 'leaf').chmod(0o600)
                     if fault == 'alternates': (destination / '.git/objects/info/alternates').write_text('inert')
@@ -1480,7 +1609,18 @@ def _short_layout_controls(test, owner_path):
                         (source / 'leaf').write_bytes(b'fixed')
                         (source / 'leaf').chmod(0o600)
                 if label == 'clone-head': return ('a' * 40 + '\n').encode()
-                if label == 'clone-config-names': return b'http.extraheader\n' if fault == 'imported_config' else b'core.bare\n'
+                if label in ('clone-config-names', 'clone-config-names-after'):
+                    result = b'http.extraheader\0' if fault == 'imported_config' else b''.join(key.encode() + b'\0' for key in main_config)
+                    return result + b'remote.origin.url\0' if fault == 'config_duplicate' else result
+                if label.startswith('clone-config-match-'):
+                    key = _argv[-1]
+                    test.assertEqual(_argv[-7:], ['--fixed-value', '--value=' + config_expected[key], '--null', '--show-names', '--name-only', '--', key])
+                    if main_config[key] != config_expected[key]:
+                        raise g['LayoutFailure']('git_action_or_settlement_failed')
+                    if fault == 'config_drift' and label.endswith('-0'):
+                        config = destination / '.git/config'
+                        config.write_bytes(config.read_bytes() + b' ')
+                    return key.encode() + b'\0'
                 return b''
             output = root / 'github-output'
             output.write_bytes(b'')
@@ -1516,6 +1656,16 @@ def _short_layout_controls(test, owner_path):
                 test.assertIn('evidence_claimed=true', output.read_text())
                 continue
             test.assertIsNotNone(g['STATE']['primary'])
+            if fault in ('config_wrong_url', 'config_duplicate', 'config_drift'):
+                test.assertEqual(g['STATE']['primary']['phase'], 'clone_config_check')
+                test.assertFalse(g['STATE']['prepared'])
+                test.assertFalse((runner / 'fixture105-layout/clone-config-proof.json').exists())
+                if fault == 'config_duplicate':
+                    test.assertFalse(any(label.startswith('clone-config-match-') for label in calls))
+                test.assertNotIn(main_sentinel, printed.getvalue() + repr(calls) +
+                    ''.join(p.read_text() for p in (runner / 'fixture105-layout').iterdir() if p.is_file()))
+                test.assertEqual(g['OWNED_FD_PENDING'], [])
+                test.assertEqual(g['PENDING_RESOURCES'], [])
             if fault == 'terminal_receipt':
                 test.assertFalse((runner / 'fixture105-layout/terminal.json').exists())
                 test.assertFalse(json.loads(printed.getvalue())['terminal_retained'])

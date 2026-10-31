@@ -463,6 +463,56 @@ def capture(label, argv, seconds):
     STATE['settling'] = False
     return stable_read(EVIDENCE / (label + '.stdout'), CAP)[0]
 
+def validate_clone_config(owned):
+    """Admit one closed generated profile without capturing observed values."""
+    expected = {
+        'core.repositoryformatversion': '0', 'core.filemode': 'true',
+        'core.bare': 'false', 'core.logallrefupdates': 'true',
+        'remote.origin.url': 'https://github.com/mikeddamico/the-desk.git',
+        'remote.origin.fetch': '+refs/heads/*:refs/remotes/origin/*',
+        'remote.origin.tagopt': '--no-tags',
+    }
+    code = 'no_imported_git_credentials_or_hooks'
+    git_root = identity(DESTINATION / '.git')
+    need(git_root['uid'] == UID and git_root['mode'] & 0o022 == 0, code)
+    def unchanged():
+        need(identity(DESTINATION) == owned and
+             identity(DESTINATION / '.git') == git_root, code)
+    def names(raw):
+        need(raw.endswith(b'\0'), code)
+        rows = raw[:-1].split(b'\0')
+        need(len(rows) == len(expected) and len(set(rows)) == len(rows) and
+             set(rows) == {name.encode('utf8') for name in expected}, code)
+        return rows
+    unchanged()
+    before, before_stat = stable_read(DESTINATION / '.git/config', CAP)
+    command = GIT + ['-C', str(DESTINATION), 'config', 'list', '--local',
+                     '--no-includes', '--null', '--name-only']
+    first = capture('clone-config-names', command, 10)
+    names(first)
+    unchanged()
+    for index, (key, value) in enumerate(sorted(expected.items())):
+        # Git filters with literal strcmp before formatting. Names-only output
+        # also prevents a wrong observed URL/token from entering capture files.
+        result = capture('clone-config-match-' + str(index), GIT + [
+            '-C', str(DESTINATION), 'config', 'get', '--local', '--no-includes',
+            '--all', '--fixed-value', '--value=' + value, '--null',
+            '--show-names', '--name-only', '--', key], 10)
+        need(result == key.encode('utf8') + b'\0', code)
+        unchanged()
+    last = capture('clone-config-names-after', command, 10)
+    names(last)
+    after, after_stat = stable_read(DESTINATION / '.git/config', CAP)
+    need(first == last and before == after and all(
+        getattr(before_stat, key) == getattr(after_stat, key) for key in
+        ('st_dev', 'st_ino', 'st_uid', 'st_gid', 'st_mode', 'st_nlink', 'st_size',
+         'st_mtime_ns', 'st_ctime_ns')), code)
+    unchanged()
+    record('clone-config-proof.json', {
+        'keys': sorted(expected), 'values': 'fixed-equality, names-only output',
+        'config_bytes': len(after), 'config_sha256': hashlib.sha256(after).hexdigest(),
+        'stable': True, 'observed_values_retained': False})
+
 def main():
     global SOURCE, EVIDENCE, GIT_ENV, GIT, tmp, WHOLE_DEADLINE
     before, names, tools_before = None, None, None
@@ -557,14 +607,8 @@ def main():
         STATE['phase'] = 'clone_identity_check'
         need(head == SHA and tree == original_tree and identity(DESTINATION) == owned,
              'actual_git_identity')
-        config_names = capture('clone-config-names', GIT + ['-C', str(DESTINATION),
-                                                            'config', '--local', '--name-only', '--list'], 10).decode().splitlines()
         STATE['phase'] = 'clone_config_check'
-        need(len(config_names) <= 64 and all(
-            name in {'core.repositoryformatversion', 'core.filemode', 'core.bare',
-                     'core.logallrefupdates', 'remote.origin.url', 'remote.origin.fetch'} or
-            re.fullmatch(r'branch\.[A-Za-z0-9_./-]+\.(?:remote|merge)', name)
-            for name in config_names), 'no_imported_git_credentials_or_hooks')
+        validate_clone_config(owned)
         STATE['phase'] = 'source_readback'
         need(tracked_snapshot(DESTINATION, names) == before and
              tracked_snapshot(SOURCE, names) == before, 'complete_source_preservation')
