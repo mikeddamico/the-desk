@@ -83,6 +83,8 @@ function json(bytes: Buffer): Data {
 }
 export interface Acquired {
   subject: Subject;
+  /** Exact fixed-source buffers; held only by internal assessment/persistence owners. */
+  snapshots: ReadonlyMap<string, Buffer>;
   recheck: () => Promise<void>;
   cleanup: () => Promise<void>;
 }
@@ -101,6 +103,7 @@ export async function acquireSubject(
   );
   const manifest = object(JSON.parse(manifestBytes.toString()) as unknown);
   const acquiredFiles = new Map<string, string>();
+  const snapshots = new Map<string, Buffer>();
   let capturedBytes = 0;
   const get = async (name: string): Promise<Buffer> => {
     const expected = object(manifest[name]);
@@ -124,6 +127,7 @@ export async function acquireSubject(
     );
     capturedBytes += bytes.length;
     acquiredFiles.set(name, sha(bytes));
+    snapshots.set(name, bytes);
     return bytes;
   };
   const policy = json(await get("policy.json"));
@@ -454,6 +458,7 @@ export async function acquireSubject(
   const oldMapHash = sha(Buffer.from(canonicalJson(subject.map) + "\n"));
   const inputHashes = subject.inputs.map((input) => sha(input.bytes));
   const acquired: Acquired = {
+    snapshots,
     subject,
     cleanup: async () => {
       if (ownedRoot) await fs.rm(ownedRoot, { recursive: true });

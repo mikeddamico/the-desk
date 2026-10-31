@@ -468,7 +468,7 @@ describe("runCommand emits ONE truthful event per invocation (scripted client, n
     }
   });
 
-  it("a request refused before any transaction emits one not_committed event", () => {
+  it("a request refused before any transaction emits one not_committed event", async () => {
     const t = traced();
     emitPreflight(t.trace, "invalid_uuid");
     expect(t.events).toHaveLength(1);
@@ -479,6 +479,27 @@ describe("runCommand emits ONE truthful event per invocation (scripted client, n
       duration_ms: 0,
     });
     emitPreflight(undefined, "invalid_uuid"); // no trace: nothing, no error
+    const unsupported = traced();
+    const connect = vi.fn();
+    const work = vi.fn(() => Promise.resolve(created));
+    await expect(
+      runCommand(
+        { connect } as unknown as Pool,
+        work,
+        unsupported.trace,
+        "serializable" as import("../src/runtime/command.js").CommandTransactionMode,
+      ),
+    ).rejects.toMatchObject({ code: "transaction_mode_unsupported" });
+    expect(connect).not.toHaveBeenCalled();
+    expect(work).not.toHaveBeenCalled();
+    expect(unsupported.events).toHaveLength(1);
+    expect(unsupported.events[0]).toMatchObject({
+      outcome: "rejected",
+      code: "transaction_mode_unsupported",
+      code_known: true,
+      durability: "not_committed",
+      duration_ms: 0,
+    });
   });
 
   it("connection lost BEFORE COMMIT: error / not_committed / commit_outcome not_attempted (COMMIT never sent)", async () => {

@@ -1,0 +1,456 @@
+{
+  "schema": "durable-pair-independent-vectors/1",
+  "authority": "synthetic_test_only",
+  "source_contract_sha256": "987e666eff40b98281c26bc9b98ad25edfa714ca2876d27e37511d177cc8fcca",
+  "storage_binding": {
+    "schema": "durable-pair-r2-binding/1",
+    "environment_id": "vector-only",
+    "endpoint_origin": "https://r2-binding-vector.invalid",
+    "bucket": "vector-only-private",
+    "prefix": "durable-pair-v1",
+    "credential_reference": "vector-only-not-a-credential",
+    "credential_scope_attestation": "0000000000000000000000000000000000000000000000000000000000000000",
+    "private_access_attestation": "0000000000000000000000000000000000000000000000000000000000000000",
+    "retention_attestation": "0000000000000000000000000000000000000000000000000000000000000000"
+  },
+  "database_binding": {
+    "schema": "durable-pair-database-binding/1",
+    "environment_id": "vector-only",
+    "endpoint_host": "database-binding-vector.invalid",
+    "endpoint_port": "5432",
+    "database_name": "vector_only",
+    "schema_name": "public",
+    "runtime_role": "desk_runtime",
+    "credential_reference": "vector-only-not-a-credential",
+    "schema_identity": "0000000000000000000000000000000000000000000000000000000000000000"
+  },
+  "request": {
+    "schema": "durable-pair-request/1",
+    "operation_id": "b6200001-0000-4000-8000-000000000001",
+    "created_at": "2026-10-29T00:00:00.000000Z",
+    "candidate_scope": "synthetic60-positive",
+    "attempt_id": null,
+    "show_config_version_hash": null,
+    "source_manifest_sha256": "3b2ee2b90bc7a1e1ccfc36c0cff857cce06b5134bb0f066913805af1c7241123",
+    "storage_binding_digest": "103008fc28a54ce25b5cef0d89157e40a1406109735a9ee4c704724e47cbf88a",
+    "database_binding_digest": "51f9ded95212d428f496279a4512fc748de2829ccd520ad54532a7f9d0f2078d",
+    "context_digest": "afacd302dd0a4e4ea81a16eccaa2e2cc44358e87176577e143b39c680a8e2941",
+    "policy_digest": "07e1b9d6a2af81966da080ce76d40551292f588d1e3e50a78391d7ed82389f11",
+    "inspection_profile_digest": "7b2a24e57766f86379a78fa595c65baac44d53239618a27eda123522bc110dd8",
+    "selected_inputs_digest": "3ace0f4ba7e9ec9e2623e2bbcd397560c33b8527d54a679a48dea4ee13aaf259",
+    "assembly_fingerprint": "22900a69f032d888a6131e20ac3501f90e3744ed1f95f8f24dca43b55d341ef9",
+    "technical_input_fingerprint": "6c3a34c8a16a5e883d34f9016b36c0931daafb67e66a1b7dcf286dbf5fa06fa7",
+    "objects": [
+      {
+        "name": "SOURCE.json",
+        "byte_length": "2648",
+        "raw_sha256": "af3dbc7ed4e8998f92dec9606e4922c85852d098453a4d859ef2a86b93a34706"
+      },
+      {
+        "name": "input-1.wav",
+        "byte_length": "2880044",
+        "raw_sha256": "426a40e45b815671b2497e213bcfb8a00379be3e6b6ee7e3e44a2e0bedf80993"
+      },
+      {
+        "name": "input-2.wav",
+        "byte_length": "2880044",
+        "raw_sha256": "defbe0c37c95c3fd737e8ce064b6c6a9b1a592132fd96edcb060ecadfda0e7aa"
+      },
+      {
+        "name": "recipe.json",
+        "byte_length": "656",
+        "raw_sha256": "06a1cca7f09736cf1b58006f79a7c25381bb278d439bf62266c2b9e604ab84e2"
+      },
+      {
+        "name": "map.json",
+        "byte_length": "1987",
+        "raw_sha256": "0ac6f83cdedc43add2f0f51906901457bfa6d5c400933e3c0594b1da931cf4a9"
+      },
+      {
+        "name": "context.json",
+        "byte_length": "772",
+        "raw_sha256": "aff958362c5a40a2af7899821627521c5722cfaac902b46373eda18ed61fd9fc"
+      },
+      {
+        "name": "policy.json",
+        "byte_length": "520",
+        "raw_sha256": "51cdf7c9377a05cd5360e81f1a8c511bc3c12505da40d0d329e8ae2755052e9c"
+      },
+      {
+        "name": "profile.json",
+        "byte_length": "1735",
+        "raw_sha256": "f5eaa2e3c7294030e78bfced2c5f7e983142fb95679a840930289aa5252fbfae"
+      },
+      {
+        "name": "assessment.json",
+        "byte_length": "782",
+        "raw_sha256": "e3e4365e5072fc282237e33ebf11a5874e9fef000a3057977447e90b3db254b6"
+      },
+      {
+        "name": "master.wav",
+        "byte_length": "5760044",
+        "raw_sha256": "e4b417f05066694b031e8216111863e04aa457fe5d77dea9f9b2d81312e84eb4"
+      }
+    ],
+    "rows": {
+      "artifacts": [
+        {
+          "artifact_id": "b6100001-0000-4000-8000-000000000001",
+          "artifact_type": "audio/synthetic_input",
+          "schema_version": "synthetic-audio-provenance/1",
+          "content_hash": "426a40e45b815671b2497e213bcfb8a00379be3e6b6ee7e3e44a2e0bedf80993",
+          "storage_uri": "r2://vector-only-private/durable-pair-v1/operations/b6200001-0000-4000-8000-000000000001/input-1.wav",
+          "byte_size": 2880044,
+          "canonical_payload": {
+            "schema": "synthetic-audio-provenance/1",
+            "source_manifest_sha256": "3b2ee2b90bc7a1e1ccfc36c0cff857cce06b5134bb0f066913805af1c7241123",
+            "source_file": "input-1.wav",
+            "synthetic_only": true,
+            "selection_authority": "authored-synthetic-selection/1",
+            "frame_count": "1440000",
+            "sample_rate_hz": 48000,
+            "channels": 1,
+            "sample_format": "s16le"
+          },
+          "parent_artifact_id": null,
+          "supersedes_artifact_id": null,
+          "created_at": "2026-10-29T00:00:00.000000Z"
+        },
+        {
+          "artifact_id": "b6100001-0000-4000-8000-000000000002",
+          "artifact_type": "audio/synthetic_input",
+          "schema_version": "synthetic-audio-provenance/1",
+          "content_hash": "defbe0c37c95c3fd737e8ce064b6c6a9b1a592132fd96edcb060ecadfda0e7aa",
+          "storage_uri": "r2://vector-only-private/durable-pair-v1/operations/b6200001-0000-4000-8000-000000000001/input-2.wav",
+          "byte_size": 2880044,
+          "canonical_payload": {
+            "schema": "synthetic-audio-provenance/1",
+            "source_manifest_sha256": "3b2ee2b90bc7a1e1ccfc36c0cff857cce06b5134bb0f066913805af1c7241123",
+            "source_file": "input-2.wav",
+            "synthetic_only": true,
+            "selection_authority": "authored-synthetic-selection/1",
+            "frame_count": "1440000",
+            "sample_rate_hz": 48000,
+            "channels": 1,
+            "sample_format": "s16le"
+          },
+          "parent_artifact_id": null,
+          "supersedes_artifact_id": null,
+          "created_at": "2026-10-29T00:00:00.000000Z"
+        },
+        {
+          "artifact_id": "b6100001-0000-4000-8000-000000000003",
+          "artifact_type": "audio/clean_master",
+          "schema_version": "synthetic-audio-provenance/1",
+          "content_hash": "e4b417f05066694b031e8216111863e04aa457fe5d77dea9f9b2d81312e84eb4",
+          "storage_uri": "r2://vector-only-private/durable-pair-v1/operations/b6200001-0000-4000-8000-000000000001/master.wav",
+          "byte_size": 5760044,
+          "canonical_payload": {
+            "schema": "synthetic-audio-provenance/1",
+            "source_manifest_sha256": "3b2ee2b90bc7a1e1ccfc36c0cff857cce06b5134bb0f066913805af1c7241123",
+            "source_file": "master.wav",
+            "synthetic_only": true,
+            "selection_authority": "authored-synthetic-selection/1",
+            "frame_count": "2880000",
+            "sample_rate_hz": 48000,
+            "channels": 1,
+            "sample_format": "s16le"
+          },
+          "parent_artifact_id": null,
+          "supersedes_artifact_id": null,
+          "created_at": "2026-10-29T00:00:00.000000Z"
+        },
+        {
+          "artifact_id": "b6100001-0000-4000-8000-000000000005",
+          "artifact_type": "assembly_recipe",
+          "schema_version": "technical-master-positive-fixture-1",
+          "content_hash": "152441bc5612e7129ebf5f7f3c9e510c20ddff58724c74d987103c49724ec6b7",
+          "storage_uri": "r2://vector-only-private/durable-pair-v1/operations/b6200001-0000-4000-8000-000000000001/recipe.json",
+          "byte_size": 656,
+          "canonical_payload": {
+            "assembly_recipe_version": "technical-master-positive-fixture-1",
+            "deterministic_fixture_command": "authored literal PCM fixture; independent expected-master index formula; no provider or FFmpeg generation",
+            "fade_policy_version": "none-test-1",
+            "join_gap_policy_version": "zero-gap-test-1",
+            "normalization": {
+              "target_lufs": null,
+              "version": "none-synthetic-test"
+            },
+            "ordered_audio_artifact_hashes": [
+              "426a40e45b815671b2497e213bcfb8a00379be3e6b6ee7e3e44a2e0bedf80993",
+              "defbe0c37c95c3fd737e8ce064b6c6a9b1a592132fd96edcb060ecadfda0e7aa"
+            ],
+            "output_target": {
+              "channels": 1,
+              "container": "wav",
+              "sample_rate_hz": 48000
+            },
+            "static_asset_hashes": [],
+            "trim_policy_version": "none-test-1"
+          },
+          "parent_artifact_id": null,
+          "supersedes_artifact_id": null,
+          "created_at": "2026-10-29T00:00:00.000000Z"
+        },
+        {
+          "artifact_id": "b6100001-0000-4000-8000-000000000004",
+          "artifact_type": "master_assembly_map",
+          "schema_version": "technical-master-positive-fixture-1",
+          "content_hash": "e5c75987c19dbf6d675fe1c810070f7850971b6aedcf7efce6084726e291e42b",
+          "storage_uri": "r2://vector-only-private/durable-pair-v1/operations/b6200001-0000-4000-8000-000000000001/map.json",
+          "byte_size": 1987,
+          "canonical_payload": {
+            "assembly_recipe_hash": "152441bc5612e7129ebf5f7f3c9e510c20ddff58724c74d987103c49724ec6b7",
+            "assembly_recipe_id": "b6100020-0000-4000-8000-000000000001",
+            "master_artifact_id": "b6100001-0000-4000-8000-000000000003",
+            "master_audio_artifact_id": "b6100002-0000-4000-8000-000000000003",
+            "master_audio_hash": "e4b417f05066694b031e8216111863e04aa457fe5d77dea9f9b2d81312e84eb4",
+            "program_block_offsets": [
+              {
+                "end_frame": 1440000,
+                "program_block_id": "b6100010-0000-4000-8000-000000000001",
+                "start_frame": 0
+              },
+              {
+                "end_frame": 2880000,
+                "program_block_id": "b6100010-0000-4000-8000-000000000002",
+                "start_frame": 1440000
+              }
+            ],
+            "sample_rate_hz": 48000,
+            "segments": [
+              {
+                "artifact_id": "b6100001-0000-4000-8000-000000000001",
+                "audio_artifact_id": "b6100002-0000-4000-8000-000000000001",
+                "audio_sha256": "426a40e45b815671b2497e213bcfb8a00379be3e6b6ee7e3e44a2e0bedf80993",
+                "end_frame": 1440000,
+                "join_metadata": {
+                  "gap_frames": 0,
+                  "method": "authored-pcm-fixture"
+                },
+                "kind": "speech",
+                "program_block_id": "b6100010-0000-4000-8000-000000000001",
+                "render_block_id": "b6100011-0000-4000-8000-000000000001",
+                "render_take_id": "b6100012-0000-4000-8000-000000000001",
+                "start_frame": 0,
+                "take_selection_id": "b6100013-0000-4000-8000-000000000001"
+              },
+              {
+                "artifact_id": "b6100001-0000-4000-8000-000000000002",
+                "audio_artifact_id": "b6100002-0000-4000-8000-000000000002",
+                "audio_sha256": "defbe0c37c95c3fd737e8ce064b6c6a9b1a592132fd96edcb060ecadfda0e7aa",
+                "end_frame": 2880000,
+                "join_metadata": {
+                  "gap_frames": 0,
+                  "method": "authored-pcm-fixture"
+                },
+                "kind": "speech",
+                "program_block_id": "b6100010-0000-4000-8000-000000000002",
+                "render_block_id": "b6100011-0000-4000-8000-000000000002",
+                "render_take_id": "b6100012-0000-4000-8000-000000000002",
+                "start_frame": 1440000,
+                "take_selection_id": "b6100013-0000-4000-8000-000000000002"
+              }
+            ],
+            "selected_audio_hashes": [
+              "426a40e45b815671b2497e213bcfb8a00379be3e6b6ee7e3e44a2e0bedf80993",
+              "defbe0c37c95c3fd737e8ce064b6c6a9b1a592132fd96edcb060ecadfda0e7aa"
+            ],
+            "timing_confidence": "exact authored synthetic PCM; no speech or turn timing",
+            "timing_method": "assembly_exact"
+          },
+          "parent_artifact_id": null,
+          "supersedes_artifact_id": null,
+          "created_at": "2026-10-29T00:00:00.000000Z"
+        }
+      ],
+      "audio_artifacts": [
+        {
+          "audio_artifact_id": "b6100002-0000-4000-8000-000000000001",
+          "artifact_id": "b6100001-0000-4000-8000-000000000001",
+          "audio_sha256": "426a40e45b815671b2497e213bcfb8a00379be3e6b6ee7e3e44a2e0bedf80993",
+          "duration_ms": 30000
+        },
+        {
+          "audio_artifact_id": "b6100002-0000-4000-8000-000000000002",
+          "artifact_id": "b6100001-0000-4000-8000-000000000002",
+          "audio_sha256": "defbe0c37c95c3fd737e8ce064b6c6a9b1a592132fd96edcb060ecadfda0e7aa",
+          "duration_ms": 30000
+        },
+        {
+          "audio_artifact_id": "b6100002-0000-4000-8000-000000000003",
+          "artifact_id": "b6100001-0000-4000-8000-000000000003",
+          "audio_sha256": "e4b417f05066694b031e8216111863e04aa457fe5d77dea9f9b2d81312e84eb4",
+          "duration_ms": 60000
+        }
+      ],
+      "assembly_recipes": [
+        {
+          "assembly_recipe_id": "b6100020-0000-4000-8000-000000000001",
+          "artifact_id": "b6100001-0000-4000-8000-000000000005",
+          "version": "technical-master-positive-fixture-1"
+        }
+      ],
+      "master_assembly_maps": [
+        {
+          "master_assembly_map_id": "b6100021-0000-4000-8000-000000000001",
+          "artifact_id": "b6100001-0000-4000-8000-000000000004",
+          "assembly_recipe_id": "b6100020-0000-4000-8000-000000000001",
+          "master_audio_artifact_id": "b6100002-0000-4000-8000-000000000003"
+        }
+      ]
+    }
+  },
+  "request_digest": "873741a553d81dcaa371a011d2128cda59fb165be76a44958b9a7cc3dab95261",
+  "receipt_digest": "91301ec9cce56ab25746e0d8b51cf0f4c26d95d7773773c64bf81f9a5e62e19b",
+  "observation": {
+    "profile": "technical-master-admission/1",
+    "candidate_scope": "synthetic60-positive",
+    "input_fingerprint": "6c3a34c8a16a5e883d34f9016b36c0931daafb67e66a1b7dcf286dbf5fa06fa7",
+    "checks": {
+      "format": "pass",
+      "duration": "pass",
+      "map_inputs": "pass",
+      "decode": "pass",
+      "loudness": "pass",
+      "silence": "pass",
+      "freshness": "pass"
+    },
+    "measurements": {
+      "master_sha256": "e4b417f05066694b031e8216111863e04aa457fe5d77dea9f9b2d81312e84eb4",
+      "master_bytes": "5760044",
+      "master_frames": "2880000",
+      "decoded_pcm_sha256": "a260a98170d7825e0b8d84f5029c2062d3fcde20bc17aacfdd050826bd5c79f5",
+      "decoded_bytes": "5760000",
+      "decoded_frames": "2880000",
+      "integrated_decilufs": "-193",
+      "longest_unexplained_frames": "0",
+      "longest_unexplained_span": null
+    },
+    "authority": "none",
+    "synthetic_only": true,
+    "schema": "durable-pair-assessment-observation/1"
+  },
+  "mutation_vectors": [
+    {
+      "name": "same_operation_changed_created_at",
+      "literal_patch": [
+        {
+          "op": "replace",
+          "path": "/created_at",
+          "value": "2026-10-29T00:00:01.000000Z"
+        }
+      ],
+      "domain": "durable-pair-request-v1",
+      "preimage_bytes": 9477,
+      "sha256": "8c844ee84362026907438325b2bb0a6b3d0689b28e84f6f290bbdd198336fb1f",
+      "reconstruction": "Apply exact replacements to base request then use the declared domain+LF+canonicalJson; no other edits",
+      "expected": "conflict_or_closed_binding_refusal_never_converged"
+    },
+    {
+      "name": "different_operation",
+      "literal_patch": [
+        {
+          "op": "replace",
+          "path": "/operation_id",
+          "value": "b6200001-0000-4000-8000-000000000002"
+        }
+      ],
+      "domain": "durable-pair-request-v1",
+      "preimage_bytes": 9477,
+      "sha256": "5765bf86ce7fe446a50f5728670bafde7ee11259bbb36bfdc2e9f7000155ec75",
+      "reconstruction": "Apply exact replacements to base request then use the declared domain+LF+canonicalJson; no other edits",
+      "expected": "conflict_or_closed_binding_refusal_never_converged"
+    },
+    {
+      "name": "changed_context",
+      "literal_patch": [
+        {
+          "op": "replace",
+          "path": "/context_digest",
+          "value": "0000000000000000000000000000000000000000000000000000000000000000"
+        }
+      ],
+      "domain": "durable-pair-request-v1",
+      "preimage_bytes": 9477,
+      "sha256": "a5355347099821cecb5c7dc190aafae61cd950b368b8e929b8774c9d0280e4cd",
+      "reconstruction": "Apply exact replacements to base request then use the declared domain+LF+canonicalJson; no other edits",
+      "expected": "conflict_or_closed_binding_refusal_never_converged"
+    },
+    {
+      "name": "changed_storage_binding",
+      "literal_patch": [
+        {
+          "op": "replace",
+          "path": "/storage_binding_digest",
+          "value": "0000000000000000000000000000000000000000000000000000000000000000"
+        }
+      ],
+      "domain": "durable-pair-request-v1",
+      "preimage_bytes": 9477,
+      "sha256": "04cec4419e0e071d723ccbac8f4c093cde2c44196ad9647f41856d11ffee6b0e",
+      "reconstruction": "Apply exact replacements to base request then use the declared domain+LF+canonicalJson; no other edits",
+      "expected": "conflict_or_closed_binding_refusal_never_converged"
+    },
+    {
+      "name": "changed_policy",
+      "literal_patch": [
+        {
+          "op": "replace",
+          "path": "/policy_digest",
+          "value": "0000000000000000000000000000000000000000000000000000000000000000"
+        }
+      ],
+      "domain": "durable-pair-request-v1",
+      "preimage_bytes": 9477,
+      "sha256": "f07cdf4e3de1a57bb0c7b68072408c8ab05e31b127f19ab7a8b22f5bfcab897c",
+      "reconstruction": "Apply exact replacements to base request then use the declared domain+LF+canonicalJson; no other edits",
+      "expected": "conflict_or_closed_binding_refusal_never_converged"
+    },
+    {
+      "name": "changed_map_raw_hash",
+      "literal_patch": [
+        {
+          "op": "replace",
+          "path": "/objects/4/raw_sha256",
+          "value": "0000000000000000000000000000000000000000000000000000000000000000"
+        }
+      ],
+      "domain": "durable-pair-request-v1",
+      "preimage_bytes": 9477,
+      "sha256": "1a70a6c2c71f353683761f93bfc48c7a58c8e26d7670968957166de12b9387c6",
+      "reconstruction": "Apply exact replacements to base request then use the declared domain+LF+canonicalJson; no other edits",
+      "expected": "conflict_or_closed_binding_refusal_never_converged"
+    },
+    {
+      "name": "changed_locator",
+      "literal_patch": [
+        {
+          "op": "replace",
+          "path": "/rows/artifacts/0/storage_uri",
+          "value": "r2://vector-only-private/durable-pair-v1/operations/b6200001-0000-4000-8000-000000000001/master.wav"
+        }
+      ],
+      "domain": "durable-pair-request-v1",
+      "preimage_bytes": 9476,
+      "sha256": "6c6150192a1e663ea3c39e70a68178e0c9a530bd801638711b756e8cdcb611b7",
+      "reconstruction": "Apply exact replacements to base request then use the declared domain+LF+canonicalJson; no other edits",
+      "expected": "conflict_or_closed_binding_refusal_never_converged"
+    },
+    {
+      "name": "forged_attempt",
+      "literal_patch": [
+        {
+          "op": "replace",
+          "path": "/attempt_id",
+          "value": "b6200002-0000-4000-8000-000000000001"
+        }
+      ],
+      "domain": "durable-pair-request-v1",
+      "preimage_bytes": 9511,
+      "sha256": "ad887731328837bd59b2d657678bde1ba4e2e9e7506977a66d126fd54a12bf1f",
+      "reconstruction": "Apply exact replacements to base request then use the declared domain+LF+canonicalJson; no other edits",
+      "expected": "conflict_or_closed_binding_refusal_never_converged"
+    }
+  ]
+}

@@ -3,6 +3,7 @@ import { canonicalJson, domainHash } from "../identity/canonical-json.js";
 import { deepFreeze } from "../fixture/rows.js";
 import {
   acquireSubject,
+  assertAcquired,
   type Acquired,
 } from "./technical-master-acquisition.js";
 import { inspectMaster } from "./technical-master-inspection.js";
@@ -29,6 +30,19 @@ import {
 
 const PROFILE = "technical-master-admission/1";
 let inFlight = false;
+const retainedCaptures = new WeakSet<object>();
+export interface RetainedTechnicalMaster {
+  readonly acquired: Acquired;
+  readonly observation: Readonly<Data>;
+  recheck(): Promise<void>;
+  release(): Promise<void>;
+}
+/** Internal writer ownership, never acceptance of a caller-built pass or bytes. */
+export function assertRetainedTechnicalMaster(
+  value: RetainedTechnicalMaster,
+): void {
+  demand(retainedCaptures.has(value), "source_identity_invalid", "source");
+}
 const nonClearance = {
   authoritative_gate_result: false,
   lifecycle_validated: false,
@@ -90,6 +104,48 @@ function settings(): boolean {
 export async function evaluateTechnicalMaster(
   input: unknown,
 ): Promise<TechnicalMasterResult> {
+  const result = await evaluateOwned(input, false);
+  if ("acquired" in result) throw new Error("unexpected retained assessment");
+  return result;
+}
+
+/** Fixed positive-only acquisition for the private durable writer; retains the existing latch until release. */
+export async function retainAssessedSyntheticMaster(
+  acquired: Acquired,
+): Promise<RetainedTechnicalMaster> {
+  assertAcquired(acquired);
+  demand(
+    acquired.subject.scope === "synthetic60-positive",
+    "source_identity_invalid",
+    "source",
+  );
+  const result = await evaluateOwned(
+    {
+      profile: PROFILE,
+      candidate_scope: "synthetic60-positive",
+      purpose: "evaluation",
+      environment: "test",
+    },
+    true,
+    acquired,
+  );
+  if (!("acquired" in result)) {
+    if (result.status === "refused")
+      throw new TechnicalRefusal(
+        result.code,
+        result.phase,
+        result.cleanup === "pending",
+      );
+    throw new TechnicalRefusal("inspection_failed", "inspection");
+  }
+  return result;
+}
+
+async function evaluateOwned(
+  input: unknown,
+  retainCapture: boolean,
+  provided?: Acquired,
+): Promise<TechnicalMasterResult | RetainedTechnicalMaster> {
   let scope: Subject["scope"] = "synthetic60-positive";
   const checks: Record<CheckName, CheckState> = {
     format: "not_run",
@@ -107,6 +163,7 @@ export async function evaluateTechnicalMaster(
   let primary: unknown;
   let cleanupPending = false;
   let measurements: Data | undefined;
+  let retained = false;
   try {
     let invocation: Data;
     try {
@@ -135,7 +192,7 @@ export async function evaluateTechnicalMaster(
     inFlight = true;
     holdsLatch = true;
     phase = "source";
-    acquired = await acquireSubject(scope);
+    acquired = provided ?? (await acquireSubject(scope));
     const subject = acquired.subject;
     checkPolicy(subject);
     phase = "format";
@@ -187,6 +244,7 @@ export async function evaluateTechnicalMaster(
       longest_unexplained_frames: silence.frames,
       longest_unexplained_span: silence.span,
     };
+    retained = retainCapture;
   } catch (error) {
     primary = error;
     cleanupPending = error instanceof TechnicalRefusal && error.cleanupPending;
@@ -201,14 +259,14 @@ export async function evaluateTechnicalMaster(
       checks[phase] = "fail";
     if (phase === "inspection") checks.decode = "fail";
   } finally {
-    if (acquired) {
+    if (acquired && !retained) {
       try {
         await acquired.cleanup();
       } catch {
         cleanupPending = true;
       }
     }
-    if (holdsLatch && !cleanupPending) inFlight = false;
+    if (holdsLatch && !cleanupPending && !retained) inFlight = false;
   }
   const common: ResultBasis = {
     profile: PROFILE,
@@ -242,6 +300,37 @@ export async function evaluateTechnicalMaster(
           : "not_started",
       checks,
     });
+  }
+  if (retained && acquired) {
+    const captured = acquired;
+    let released = false;
+    const lease: RetainedTechnicalMaster = Object.freeze({
+      acquired: captured,
+      observation: deepFreeze({
+        schema: "durable-pair-assessment-observation/1",
+        profile: PROFILE,
+        candidate_scope: scope,
+        input_fingerprint: inputFingerprint,
+        checks,
+        measurements,
+        authority: "none",
+        synthetic_only: true,
+      }),
+      async recheck() {
+        demand(!released && settings(), "unsafe_settings", "freshness");
+        await captured.recheck();
+      },
+      async release() {
+        if (released)
+          throw new TechnicalRefusal("cleanup_pending", "cleanup", true);
+        await captured.cleanup();
+        released = true;
+        retainedCaptures.delete(lease);
+        inFlight = false;
+      },
+    });
+    retainedCaptures.add(lease);
+    return lease;
   }
   return deepFreeze({
     ...common,

@@ -12,7 +12,7 @@ no installation, Docker or media is started. It never touches
 the repository tree. Tests that need a checkout build a
 synthetic one under a temporary directory and patch ci.ROOT / ci.tracked_files only inside mock contexts.
 
-Pinned fail-closed rules: aggregate 81 files / 8,705 tests and all 29 integration files, each selected file exactly once
+Pinned fail-closed rules: aggregate 85 files / 8,759 tests and all 29 integration files, each selected file exactly once
 with no failed/skipped/todo test, a changed tracked-test inventory, a missing or foreign TEST_DATABASE_URL, a database
 that is not PostgreSQL 17 / the_desk_test / superuser, skipped integration files, root dist output accepted only when it
 is the unchanged build output (added, modified, empty, absent, symlinked or pre-existing dist and any tracked drift,
@@ -51,7 +51,7 @@ INTEGRATION = [n for n in SELECTED if n.startswith('test/integration/')]
 URL = 'postgresql://postgres:postgres@localhost:5432/the_desk_test'
 NONCES = {'focused': ('a' * 48, 'b' * 48), 'all': ('c' * 48,)}
 ATTEMPTS = {'prerequisite': 'attempt-p', 'focused': 'attempt-f', 'all': 'attempt-3'}
-PER_FILE = {n: 8468 // 76 + (1 if i < 8468 % 76 else 0) for i, n in enumerate(OLD_SELECTED)}
+PER_FILE = {n: 8469 // 76 + (1 if i < 8469 % 76 else 0) for i, n in enumerate(OLD_SELECTED)}
 PER_FILE.update(ci.FIXTURE_CONNECTED_COUNTS)
 PER_FILE.update(ci.FROZEN_RENDER046_COUNTS)
 
@@ -63,7 +63,7 @@ def file_lines(counts=None, extra=''):
 
 SUMMARY = {
     'focused': ' Test Files  1 passed (1)\n      Tests  2 passed (2)\n',
-    'all': ' Test Files  82 passed (82)\n      Tests  8717 passed (8717)\n',
+    'all': ' Test Files  85 passed (85)\n      Tests  8759 passed (8759)\n',
 }
 
 
@@ -222,7 +222,7 @@ class SummaryAndFileLines(unittest.TestCase):
 
 class AggregateSelection(unittest.TestCase):
     def test_synthetic_inventory_matches_the_fixed_expectations(self):
-        self.assertEqual((len(TESTS), len(SELECTED), len(INTEGRATION)), (83, 82, 29))
+        self.assertEqual((len(TESTS), len(SELECTED), len(INTEGRATION)), (86, 85, 29))
         self.assertEqual(sum(PER_FILE.values()), ci.EXPECTED_ALL_TESTS)
         self.assertNotIn(ci.HARNESS_TEST, SELECTED)
 
@@ -266,10 +266,10 @@ class AggregateSelection(unittest.TestCase):
     def test_count_drift_and_duplicates(self):
         counts = dict(PER_FILE)
         counts[SELECTED[0]] -= 1
-        self.assertTrue(any('sum to 8716' in e for e in self.check(file_lines(counts))[0]))
+        self.assertTrue(any('sum to 8758' in e for e in self.check(file_lines(counts))[0]))
         counts = dict(PER_FILE)
         counts[SELECTED[0]] += 1
-        self.assertTrue(any('sum to 8718' in e for e in self.check(file_lines(counts))[0]))
+        self.assertTrue(any('sum to 8760' in e for e in self.check(file_lines(counts))[0]))
         dup = file_lines() + ' ✓ %s (1 tests) 1ms\n' % SELECTED[0]
         self.assertTrue(any('2 result lines' in e for e in self.check(dup)[0]))
 
@@ -281,22 +281,22 @@ class AggregateSelection(unittest.TestCase):
 
     def test_changed_tracked_inventory_is_hold_not_a_relaxed_count(self):
         grown = sorted(TRACKED + ['test/unit/extra.test.ts'])
-        self.assertTrue(any('inventory is 84' in e for e in self.check(file_lines(), grown)[0]))
+        self.assertTrue(any('inventory is 87' in e for e in self.check(file_lines(), grown)[0]))
         moved = [n for n in TRACKED if n != INTEGRATION[0]] + ['test/unit/moved.test.ts']
         self.assertTrue(any('integration file count 28' in e for e in self.check(file_lines(), sorted(moved))[0]))
         shrunk = [n for n in TRACKED if n != ci.HARNESS_TEST]
         self.assertTrue(self.check(file_lines(), shrunk)[0])
 
     def test_summary_count_mismatch_with_correct_files(self):
-        for wrong in (8716, 8718):
+        for wrong in (8758, 8760):
             with self.subTest(tests=wrong):
                 def change(stage_dir, attempt):
-                    write(stage_dir / 'stdout', file_lines() + ' Test Files  82 passed (82)\n      Tests  %d passed (%d)\n' % (wrong, wrong))
+                    write(stage_dir / 'stdout', file_lines() + ' Test Files  85 passed (85)\n      Tests  %d passed (%d)\n' % (wrong, wrong))
                 self.assertTrue(any('Tests counts' in e for e in evaluate('all', change)))
 
     def test_skipped_summary_with_exit_zero_is_not_accepted(self):
         def change(stage_dir, attempt):
-            write(stage_dir / 'stdout', file_lines() + ' Test Files  82 passed (82)\n      Tests  8631 passed | 86 skipped (8717)\n')
+            write(stage_dir / 'stdout', file_lines() + ' Test Files  85 passed (85)\n      Tests  8673 passed | 86 skipped (8759)\n')
         self.assertTrue(any('Tests counts' in e for e in evaluate('all', change)))
 
 
@@ -1056,14 +1056,661 @@ class ControlsGate(unittest.TestCase):
             return ci.cmd_precheck(stage)
 
 
+def _short_layout_workflow(test, text):
+    """Closed P1 diagnostic shape; preserve all existing normal assertions below."""
+    marker = '# P1 SHORT PHYSICAL CHECKOUT: diagnostic only; layout success gates every later rest step.'
+    present = marker in text
+    test.assertEqual(present, 'id: short-layout' in text)
+    if not present:
+        test.assertNotIn('working-directory: /tmp/d', text)
+        test.assertNotIn('fixture105-hosted-layout.py', text)
+        return text
+    test.assertEqual(hashlib.sha256(text.encode()).hexdigest(), '877e644f5442bdc5d8c10464d7d37add4af27070ceea3b61f8444eec454ed733')
+    test.assertEqual(text.count(marker), 1)
+    test.assertEqual(text.count('id: short-layout'), 1)
+    test.assertEqual(text.count('working-directory: /tmp/d'), 1)
+    test.assertEqual(text.count('working-directory: ${{ github.workspace }}'), 1)
+    rest = text.split('  verify-rest:\n', 1)[1].split('\n  verify:\n', 1)[0]
+    bootstrap = "      - name: Prepare the exclusive complete short physical checkout\n        id: short-layout\n        working-directory: ${{ github.workspace }}\n        timeout-minutes: 6\n        run: /usr/bin/timeout --signal=TERM --kill-after=20s 300s /usr/bin/python3 -I -B test/support/fixture105-hosted-layout.py\n      - name: Retain layout ownership and failed preparation evidence\n        if: ${{ always() && steps.short-layout.outputs.evidence_claimed == 'true' }}\n        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2\n        timeout-minutes: 2\n        with:\n          name: ci-short-layout-rest-${{ github.run_id }}-${{ github.run_attempt }}\n          path: ${{ runner.temp }}/fixture105-layout\n          if-no-files-found: error\n          retention-days: 30\n"
+    test.assertEqual(rest.count(bootstrap), 1)
+    test.assertIn("steps.short-layout.outputs.evidence_claimed == 'true'", bootstrap)
+    test.assertNotIn('continue-on-error', rest)
+    # Even always-run collectors/cleanup/final cannot run from a partial clone.
+    for block in rest.split(bootstrap, 1)[1].split('      - ')[1:]:
+        condition = [line for line in block.splitlines() if line.startswith('        if: ')]
+        test.assertEqual(len(condition), 1)
+        test.assertIn("steps.short-layout.outcome == 'success'", condition[0])
+    test.assertIn("steps.fixture046-runtime.outcome == 'success' || steps.fixture046-runtime.outcome == 'failure'", rest)
+    test.assertLess(rest.index('id: short-layout'), rest.index('npm ci --ignore-scripts'))
+    test.assertLess(rest.index('id: command-postgres'), rest.index('HOLD native unknown-commit diagnostic'))
+    test.assertLess(rest.index('HOLD native unknown-commit diagnostic'), rest.index('run-stage.sh all'))
+    normalized = text.replace('\n' + marker + '\n', '', 1)
+    # Remove exact bootstrap/defaults first, then undo only audited gate insertions.
+    prefix, section = normalized.split('  verify-rest:\n', 1)
+    body, suffix = section.split('\n  verify:\n', 1)
+    for new, old, count in [('    defaults:\n      run:\n        working-directory: /tmp/d\n', '', 1), ("      - name: Prepare the exclusive complete short physical checkout\n        id: short-layout\n        working-directory: ${{ github.workspace }}\n        timeout-minutes: 6\n        run: /usr/bin/timeout --signal=TERM --kill-after=20s 300s /usr/bin/python3 -I -B test/support/fixture105-hosted-layout.py\n      - name: Retain layout ownership and failed preparation evidence\n        if: ${{ always() && steps.short-layout.outputs.evidence_claimed == 'true' }}\n        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2\n        timeout-minutes: 2\n        with:\n          name: ci-short-layout-rest-${{ github.run_id }}-${{ github.run_attempt }}\n          path: ${{ runner.temp }}/fixture105-layout\n          if-no-files-found: error\n          retention-days: 30\n", '', 1), ("        if: ${{ success() && steps.short-layout.outcome == 'success' }}\n", '', 21), ("        if: ${{ steps.short-layout.outcome == 'success' && (false) }} # Native diagnostic: no media preparation.\n", '        if: ${{ false }} # Native diagnostic: no media preparation.\n', 1), ("        if: ${{ steps.short-layout.outcome == 'success' && (always() && steps.init.outcome != 'skipped') }}\n", "        if: ${{ always() && steps.init.outcome != 'skipped' }}\n", 3), ("        if: ${{ steps.short-layout.outcome == 'success' && (always() && steps.collect-controls.outcome == 'success') }}\n", "        if: ${{ always() && steps.collect-controls.outcome == 'success' }}\n", 1), ("        if: ${{ steps.short-layout.outcome == 'success' && (always() && steps.command-postgres.outcome != 'skipped') }}\n", "        if: ${{ always() && steps.command-postgres.outcome != 'skipped' }}\n", 1), ("        if: ${{ always() && steps.short-layout.outcome == 'success' && (steps.fixture046-runtime.outcome == 'success' || steps.fixture046-runtime.outcome == 'failure') }}\n", "        if: ${{ always() && steps.fixture046-runtime.outcome != 'skipped' }}\n", 1), ("        if: ${{ steps.short-layout.outcome == 'success' && (always() && steps.collect-full.outcome == 'success') }}\n", "        if: ${{ always() && steps.collect-full.outcome == 'success' }}\n", 1), ("        if: ${{ steps.short-layout.outcome == 'success' && (always() && steps.gitleaks.outcome != 'skipped') }}\n", "        if: ${{ always() && steps.gitleaks.outcome != 'skipped' }}\n", 1), ("        if: ${{ steps.short-layout.outcome == 'success' && (always() && steps.retain-security.outcome == 'success') }}\n", "        if: ${{ always() && steps.retain-security.outcome == 'success' }}\n", 1)]:
+        test.assertEqual(body.count(new), count)
+        body = body.replace(new, old)
+    normalized = prefix + '  verify-rest:\n' + body + '\n  verify:\n' + suffix
+    test.assertEqual(hashlib.sha256(normalized.encode()).hexdigest(), '2199f8eda462dfb39cde1a79c64f157822d4b9bce6635dd0911b57365a077bc2')
+    return normalized
+
+def _short_layout_controls(test, owner_path):
+    """Definitions and synthetic syscall/process inputs only; never launch Git or a child."""
+    import os
+    import runpy
+    import signal
+    import types
+
+    def realm():
+        loaded = runpy.run_path(str(owner_path), run_name='inert_layout_controls')
+        return loaded['capture'].__globals__
+
+    class Pipe:
+        def __init__(self, fd):
+            self.fd, self.closes = fd, 0
+        def fileno(self):
+            return self.fd
+        def close(self):
+            self.closes += 1
+
+    class Selection:
+        def __init__(self, clock):
+            self.clock, self.keys, self.closed = clock, {}, False
+        def register(self, pipe, _events, name):
+            self.keys[pipe.fd] = types.SimpleNamespace(fileobj=pipe, fd=pipe.fd, data=name)
+        def unregister(self, pipe):
+            del self.keys[pipe.fd]
+        def get_map(self):
+            return self.keys
+        def select(self, wait):
+            self.clock[0] += max(wait, 0.05)
+            return [(key, 1) for key in list(self.keys.values())]
+        def close(self):
+            self.closed = True
+
+    for fault in ('success', 'ignore_term_held_pipe', 'cancel_spawn', 'cancel_capture',
+                  'discovery_failed', 'cap', 'term_error', 'flush_error',
+                  'record_error', 'repeated_signal', 'output_allocation',
+                  'cancel_output_setup', 'pipe_close_error', 'selector_close_error',
+                  'discovery_iterator_error', 'unsettled_pipe'):
+        with test.subTest(layout_capture=fault), tempfile.TemporaryDirectory() as directory:
+            g = realm()
+            evidence = Path(directory) / 'evidence'
+            evidence.mkdir(mode=0o700)
+            g['EVIDENCE'] = evidence
+            g['SOURCE'] = Path(directory)
+            g['STATE']['source'] = g['identity'](Path(directory))
+            g['STATE']['evidence'] = g['identity'](evidence)
+            g['WHOLE_DEADLINE'] = 1000
+            g['GIT_ENV'] = {}
+            g['tmp'] = g['identity'](Path('/tmp'))
+            clock, launches, terms, handles = [0.0], [], [], []
+            selection = Selection(clock)
+            payload = b'x' * (g['CAP'] + 3) if fault == 'cap' else b'owned failure bytes\n'
+            data = {1000001: bytearray(payload), 1000002: bytearray(b'fixed stderr\n')}
+            process = types.SimpleNamespace(pid=900001, returncode=None,
+                stdout=Pipe(1000001), stderr=Pipe(1000002), helper=True, leader_reaped=False)
+            held = fault in ('ignore_term_held_pipe', 'term_error', 'record_error', 'repeated_signal')
+            if fault in ('pipe_close_error', 'selector_close_error', 'unsettled_pipe'):
+                held = True
+            allocated = []
+            def output_open(path, flags, *args, **kwargs):
+                if fault == 'output_allocation' and path == evidence / 'fixed.stderr':
+                    raise OSError('fixed second output allocation')
+                fd = original_open(path, flags, *args, **kwargs)
+                if path in (evidence / 'fixed.stdout', evidence / 'fixed.stderr'):
+                    allocated.append(fd)
+                return fd
+            normal_pipe_close = process.stdout.close
+            def pipe_close():
+                normal_pipe_close()
+                if fault == 'pipe_close_error':
+                    raise OSError('fixed pipe close uncertainty')
+            process.stdout.close = pipe_close
+            normal_selector_close = selection.close
+            def selector_close():
+                normal_selector_close()
+                if fault == 'selector_close_error':
+                    raise OSError('fixed selector close uncertainty')
+            selection.close = selector_close
+            def poll():
+                if process.returncode is not None:
+                    process.leader_reaped = True
+                return process.returncode
+            process.poll = poll
+            def spawn(*_args, **_kwargs):
+                launches.append(True)
+                if fault == 'cancel_spawn':
+                    g['cancel'](signal.SIGTERM, None)
+                return process
+            def kill(_group, number):
+                test.assertEqual(_group, process.pid)
+                terms.append(number)
+                if process.leader_reaped and not process.helper:
+                    raise ProcessLookupError()
+                if fault == 'repeated_signal':
+                    g['cancel'](signal.SIGINT, None)
+                if number == signal.SIGTERM and fault == 'term_error':
+                    raise PermissionError('fixed term fault')
+                if number == signal.SIGKILL or not held:
+                    if not process.leader_reaped:
+                        process.returncode = -number
+            def read(fd, amount):
+                if fd not in data:
+                    return original_read(fd, amount)
+                if fault in ('cancel_capture', 'repeated_signal') and data[fd]:
+                    g['cancel'](signal.SIGTERM, None)
+                if data[fd]:
+                    block = bytes(data[fd][:amount])
+                    del data[fd][:amount]
+                    return block
+                if fault == 'unsettled_pipe':
+                    raise BlockingIOError()
+                if held and process.returncode is None:
+                    raise BlockingIOError()
+                if process.returncode is None:
+                    process.returncode = 0
+                return b''
+            class Proc:
+                def __init__(self, pid, parent):
+                    self.name, self.parent = str(pid), parent
+                def __truediv__(self, _name):
+                    return self
+                def read_text(self):
+                    if fault == 'discovery_failed':
+                        raise PermissionError('fixed discovery fault')
+                    return f'{self.name} (git) S {self.parent} 900001 900001 0 0'
+            def iterdir(path):
+                if path == Path('/proc'):
+                    if fault == 'discovery_iterator_error':
+                        raise PermissionError('fixed proc iterator fault')
+                    return iter(([Proc(900001, 0)] if not process.leader_reaped else []) +
+                                ([Proc(900002, os.getpid())] if process.helper else []))
+                return original_iterdir(path)
+            def waitpid(pid, _flags):
+                test.assertEqual(pid, 900002)  # Direct leader is reaped only by Popen.poll.
+                if process.returncode is not None:
+                    process.helper = False
+                    return pid, 0
+                return 0, 0
+            def fdopen(fd, *args, **kwargs):
+                stream = original_fdopen(fd, *args, **kwargs)
+                handles.append(stream)
+                if fault == 'cancel_output_setup':
+                    g['cancel'](signal.SIGTERM, None)
+                return stream
+            def fsync(fd):
+                if fault == 'flush_error' and any(not f.closed and f.fileno() == fd for f in handles):
+                    raise OSError('fixed flush fault')
+                return original_fsync(fd)
+            record = g['record']
+            def receipt(name, value):
+                if fault == 'record_error' and name == 'fixed.json':
+                    raise OSError('fixed receipt fault')
+                return record(name, value)
+            original_read, original_fdopen, original_open = os.read, os.fdopen, os.open
+            original_fsync, original_iterdir = os.fsync, Path.iterdir
+            with mock.patch.object(g['subprocess'], 'Popen', side_effect=spawn), \
+                 mock.patch.object(g['selectors'], 'DefaultSelector', return_value=selection), \
+                 mock.patch.object(g['time'], 'monotonic', side_effect=lambda: clock[0]), \
+                 mock.patch.object(g['os'], 'read', side_effect=read), \
+                 mock.patch.object(g['os'], 'open', side_effect=output_open), \
+                 mock.patch.object(g['os'], 'set_blocking'), \
+                 mock.patch.object(g['os'], 'killpg', side_effect=kill), \
+                 mock.patch.object(g['os'], 'waitpid', side_effect=waitpid), \
+                 mock.patch.object(g['os'], 'fdopen', side_effect=fdopen), \
+                 mock.patch.object(g['os'], 'fsync', side_effect=fsync), \
+                 mock.patch.object(Path, 'iterdir', iterdir), \
+                 mock.patch.dict(g, {'record': receipt}):
+                if fault == 'success':
+                    # No group/pipe is held; the helper is reaped on the final scan.
+                    value = g['capture']('fixed', ['/usr/bin/git', 'inert-only'], 0.2)
+                    test.assertEqual(value, payload)
+                else:
+                    with test.assertRaises(g['LayoutFailure']):
+                        g['capture']('fixed', ['/usr/bin/git', 'inert-only'], 0.2)
+                launched = fault not in ('output_allocation', 'cancel_output_setup')
+                test.assertEqual(len(launches), int(launched))
+                test.assertTrue(selection.closed)
+                test.assertTrue(all(f.closed for f in handles))
+                test.assertEqual(process.stdout.closes, int(launched))
+                test.assertEqual(process.stderr.closes, int(launched))
+                for fd in allocated:
+                    with test.assertRaises(OSError):
+                        os.fstat(fd)
+                action = g['STATE']['actions'][0]
+                if fault != 'success':
+                    primary = dict(g['STATE']['primary'])
+                    with test.assertRaises(g['LayoutFailure']):
+                        g['capture']('forbidden', ['/usr/bin/git', 'not-launched'], 0.2)
+                    test.assertEqual(g['STATE']['primary'], primary)
+                    test.assertEqual(len(launches), int(launched))
+                if fault in ('cancel_spawn', 'cancel_capture', 'cancel_output_setup', 'repeated_signal'):
+                    test.assertEqual(g['STATE']['primary']['code'], 'owner_cancelled')
+                if fault in ('ignore_term_held_pipe', 'term_error', 'record_error',
+                              'pipe_close_error', 'selector_close_error', 'unsettled_pipe'):
+                    test.assertEqual(g['STATE']['primary']['code'], 'git_deadline')
+                    test.assertIn(signal.SIGKILL, terms)
+                if fault == 'cap':
+                    test.assertFalse(action['streams']['stdout']['complete'])
+                    test.assertTrue(action['streams']['stdout']['truncated'])
+                    test.assertEqual(action['streams']['stdout']['retained_bytes'], g['CAP'])
+                    test.assertEqual(action['streams']['stdout']['observed_bytes'], len(payload))
+                if fault in ('discovery_failed', 'discovery_iterator_error'):
+                    test.assertFalse(action['population']['complete'])
+                    test.assertEqual(action['settlement'], 'pending')
+                    test.assertTrue(process.helper)  # Unresolved BEFORE harness repair.
+                elif fault not in ('cap', 'flush_error', 'output_allocation', 'cancel_output_setup',
+                                    'unsettled_pipe'):
+                    test.assertTrue(all(s['complete'] for s in action['streams'].values()))
+                if fault in ('term_error', 'flush_error', 'record_error', 'repeated_signal',
+                              'pipe_close_error', 'selector_close_error'):
+                    test.assertTrue(g['STATE']['cleanup_errors'])
+                if fault == 'pipe_close_error':
+                    test.assertTrue(any(value is process.stdout for value in g['PENDING_RESOURCES']))
+                if fault == 'selector_close_error':
+                    test.assertTrue(any(value is selection for value in g['PENDING_RESOURCES']))
+                if fault == 'output_allocation':
+                    test.assertEqual(g['STATE']['primary']['code'], 'OSError')
+                if fault == 'unsettled_pipe':
+                    test.assertEqual(action['settlement'], 'pending')
+                    test.assertTrue(action['direct_reaped'])
+                    test.assertFalse(any(value['eof'] or value['complete'] for value in action['streams'].values()))
+                if launched and fault not in ('discovery_failed', 'discovery_iterator_error'):
+                    test.assertEqual(action['additional_reaps'], [{'pid': 900002, 'status': 0}])
+                    test.assertFalse(process.helper)
+                if fault != 'record_error':
+                    test.assertTrue((evidence / 'fixed.json').is_file())
+                # All assertions precede temporary-directory/fake-resource harness repair.
+
+    # Expired whole-owner horizon refuses before output allocation or child launch.
+    g = realm()
+    g['WHOLE_DEADLINE'] = -1
+    with mock.patch.object(g['subprocess'], 'Popen') as forbidden:
+        with test.assertRaises(g['LayoutFailure']):
+            g['capture']('expired', ['/usr/bin/git', 'not-launched'], 1)
+        forbidden.assert_not_called()
+        test.assertEqual(g['STATE']['actions'], [])
+
+    # Actual shape predicates, with synthetic caller-owned files; no chmod/chown outside temp.
+    with tempfile.TemporaryDirectory() as directory:
+        g = realm()
+        root = Path(directory)
+        leaf = root / 'leaf'
+        leaf.write_bytes(b'fixed')
+        leaf.chmod(0o600)
+        g['tracked_snapshot'](root, ['leaf'])
+        os.link(leaf, root / 'hardlink')
+        with test.assertRaises(g['LayoutFailure']):
+            g['stable_read'](leaf, 64)
+        (root / 'hardlink').unlink()
+        leaf.chmod(0o622)
+        with test.assertRaises(g['LayoutFailure']):
+            g['stable_read'](leaf, 64)
+        leaf.chmod(0o600)
+        actual_stat = os.fstat
+        leaf_inode = leaf.stat().st_ino
+        def foreign_owner(fd):
+            info = actual_stat(fd)
+            if info.st_ino == leaf_inode:
+                fields = {name: getattr(info, name) for name in
+                          ('st_dev', 'st_ino', 'st_uid', 'st_gid', 'st_mode', 'st_nlink',
+                           'st_size', 'st_mtime_ns', 'st_ctime_ns')}
+                fields['st_uid'] += 1
+                return types.SimpleNamespace(**fields)
+            return info
+        with mock.patch.object(g['os'], 'fstat', side_effect=foreign_owner):
+            with test.assertRaises(g['LayoutFailure']):
+                g['stable_read'](leaf, 64)
+        with test.assertRaises(g['LayoutFailure']):
+            g['stable_read'](root, 64)
+        (root / 'link').symlink_to(leaf)
+        with test.assertRaises(OSError):
+            g['stable_read'](root / 'link', 64)
+        real_read = os.read
+        changed = [False]
+        def drift(fd, amount):
+            value = real_read(fd, amount)
+            if value and not changed[0]:
+                changed[0] = True
+                leaf.write_bytes(b'changed')
+            return value
+        with mock.patch.object(g['os'], 'read', side_effect=drift):
+            with test.assertRaises(g['LayoutFailure']):
+                g['stable_read'](leaf, 64)
+        test.assertFalse(g['OWNED_FD_PENDING'])
+
+    # First failed close retains the exact owned descriptor without production retry.
+    with tempfile.TemporaryDirectory() as directory:
+        g = realm()
+        leaf = Path(directory) / 'leaf'
+        leaf.write_bytes(b'fixed')
+        primary = OSError('fixed source component close')
+        actual_open, actual_close, actual_fstat = os.open, os.close, os.fstat
+        opened, attempts, pending = [], {}, []
+        def opened_fd(*args, **kwargs):
+            fd = actual_open(*args, **kwargs)
+            opened.append(fd)
+            return fd
+        def close_once(fd):
+            attempts[fd] = attempts.get(fd, 0) + 1
+            if not pending:
+                pending.append(fd)
+                raise primary
+            return actual_close(fd)
+        try:
+            with mock.patch.object(g['os'], 'open', side_effect=opened_fd), \
+                 mock.patch.object(g['os'], 'close', side_effect=close_once):
+                with test.assertRaises(OSError) as refused:
+                    g['stable_read'](leaf, 64)
+                test.assertIs(refused.exception, primary)
+                test.assertEqual(g['OWNED_FD_PENDING'], pending)
+                test.assertEqual(attempts, {fd: 1 for fd in opened})
+                before = len(opened)
+                with test.assertRaises(g['LayoutFailure']):
+                    g['stable_read'](leaf, 64)
+                test.assertEqual(len(opened), before)
+                live = []
+                for fd in opened:
+                    try:
+                        actual_fstat(fd)
+                        live.append(fd)
+                    except OSError:
+                        pass
+                test.assertEqual(live, pending)  # BEFORE harness cleanup.
+        finally:
+            for fd in pending:
+                actual_close(fd)  # Test-owned repair only after all assertions.
+
+    # Independently authored complete generated profile; never a production-map oracle.
+    config_expected = {
+        'core.repositoryformatversion': '0', 'core.filemode': 'true',
+        'core.bare': 'false', 'core.logallrefupdates': 'true',
+        'remote.origin.url': 'https://github.com/mikeddamico/the-desk.git',
+        'remote.origin.fetch': '+refs/heads/*:refs/remotes/origin/*',
+        'remote.origin.tagopt': '--no-tags',
+    }
+    config_cases = [('success', None)]
+    for key in sorted(config_expected):
+        config_cases += [('missing', key), ('wrong', key), ('duplicate', key)]
+    config_cases += [(name, None) for name in (
+        'extra_http', 'extra_credential', 'extra_hook', 'extra_include',
+        'extra_includeif', 'extra_rewrite', 'extra_pushurl', 'extra_remote',
+        'branch_pair', 'capability_symlinks', 'capability_ignorecase',
+        'capability_precompose', 'capability_extension', 'capability_shared',
+        'duplicate_mixed', 'empty_value', 'multiline_value', 'boolean_alias',
+        'url_userinfo', 'url_query', 'url_other', 'fetch_wide', 'tag_wrong',
+        'no_terminal_nul', 'extra_terminal_nul', 'non_utf8', 'empty_names',
+        'wrong_match_record', 'extra_match_record', 'capture_error',
+        'cancel_match', 'bytes_drift', 'config_replaced', 'mode_drift',
+        'git_root_replaced', 'names_drift', 'bounded_read')]
+    for fault, selected in config_cases:
+        with test.subTest(layout_config=fault, key=selected), tempfile.TemporaryDirectory() as directory:
+            g = realm()
+            root = Path(directory)
+            destination, evidence = root / 'd', root / 'evidence'
+            destination.mkdir(mode=0o700); evidence.mkdir(mode=0o700)
+            git = destination / '.git'; git.mkdir(mode=0o700)
+            config = git / 'config'
+            actual = {key: [value] for key, value in config_expected.items()}
+            sentinel = 'DUMMY_UNEXPECTED_CREDENTIAL_7ac52'
+            extras = {'extra_http': 'http.extraheader', 'extra_credential': 'credential.helper',
+                      'extra_hook': 'core.hookspath', 'extra_include': 'include.path',
+                      'extra_includeif': 'includeif.gitdir:/foreign/.path',
+                      'extra_rewrite': 'url.foreign.insteadof', 'extra_pushurl': 'remote.origin.pushurl',
+                      'extra_remote': 'remote.other.url', 'capability_symlinks': 'core.symlinks',
+                      'capability_ignorecase': 'core.ignorecase', 'capability_precompose': 'core.precomposeunicode',
+                      'capability_extension': 'extensions.refstorage', 'capability_shared': 'core.sharedrepository'}
+            if fault == 'missing': del actual[selected]
+            if fault == 'wrong': actual[selected] = [sentinel]
+            if fault == 'duplicate': actual[selected] *= 2
+            if fault in extras: actual[extras[fault]] = [sentinel]
+            if fault == 'branch_pair': actual.update({'branch.main.remote': ['origin'], 'branch.main.merge': ['refs/heads/main']})
+            if fault == 'duplicate_mixed': actual['remote.origin.url'] += ['https://user:' + sentinel + '@example.invalid/']
+            if fault in ('empty_value', 'multiline_value', 'boolean_alias'):
+                actual['core.bare'] = [{'empty_value': '', 'multiline_value': 'false\n' + sentinel, 'boolean_alias': '0'}[fault]]
+            if fault in ('url_userinfo', 'url_query', 'url_other'):
+                actual['remote.origin.url'] = [{'url_userinfo': 'https://user:' + sentinel + '@github.com/mikeddamico/the-desk.git',
+                    'url_query': config_expected['remote.origin.url'] + '?token=' + sentinel,
+                    'url_other': 'https://example.invalid/' + sentinel}[fault]]
+            if fault == 'fetch_wide': actual['remote.origin.fetch'] = ['+refs/*:refs/*']
+            if fault == 'tag_wrong': actual['remote.origin.tagopt'] = ['--tags']
+            config.write_text(json.dumps(actual)); config.chmod(0o600)
+            if fault == 'bounded_read': config.write_bytes(b'x' * 65)
+            g.update({'SOURCE': root, 'DESTINATION': destination, 'EVIDENCE': evidence,
+                      'GIT': ['/usr/bin/git'], 'CAP': 64 if fault == 'bounded_read' else 262144})
+            g['STATE']['source'] = g['identity'](root)
+            g['STATE']['owned_root'] = g['identity'](destination)
+            g['STATE']['evidence'] = g['identity'](evidence)
+            calls, emitted = [], []
+            primary = g['LayoutFailure']('fixed_config_capture_primary')
+            def query(label, argv, seconds):
+                test.assertEqual(seconds, 10)
+                calls.append((label, argv, seconds))
+                if label in ('clone-config-names', 'clone-config-names-after'):
+                    test.assertEqual(argv, ['/usr/bin/git', '-C', str(destination), 'config', 'list',
+                                           '--local', '--no-includes', '--null', '--name-only'])
+                    result = b''.join(key.encode() + b'\0' for key, values in actual.items() for _ in values)
+                    if fault == 'no_terminal_nul': result = result[:-1]
+                    if fault == 'extra_terminal_nul': result += b'\0'
+                    if fault == 'non_utf8': result = b'\xff\0' + result
+                    if fault == 'empty_names': result = b''
+                    if fault == 'names_drift' and label.endswith('-after'): result += b'http.extraheader\0'
+                else:
+                    key = argv[-1]; value = config_expected[key]
+                    index = sorted(config_expected).index(key)
+                    test.assertEqual(label, 'clone-config-match-' + str(index))
+                    test.assertEqual(argv, ['/usr/bin/git', '-C', str(destination), 'config', 'get',
+                        '--local', '--no-includes', '--all', '--fixed-value', '--value=' + value,
+                        '--null', '--show-names', '--name-only', '--', key])
+                    if fault == 'capture_error': raise primary
+                    # Model pinned Git's literal filtering BEFORE names-only formatting.
+                    result = b''.join(key.encode() + b'\0' for observed in actual[key] if observed == value)
+                    emitted.append((result, b''))
+                    if not result: raise primary  # Actual get returns1 for no match; capture refuses.
+                    if fault == 'wrong_match_record': result = b'wrong\0'
+                    if fault == 'extra_match_record': result *= 2
+                    if index == 0:
+                        if fault == 'cancel_match':
+                            g['cancel'](signal.SIGTERM, None); raise primary
+                        if fault == 'bytes_drift': config.write_bytes(config.read_bytes() + b' ')
+                        if fault == 'config_replaced':
+                            body = config.read_bytes(); config.rename(git / 'retained-config'); config.write_bytes(body); config.chmod(0o600)
+                        if fault == 'mode_drift': config.chmod(0o640)
+                        if fault == 'git_root_replaced':
+                            git.rename(destination / 'retained-git'); git.mkdir(mode=0o700); config.write_bytes(b'fixed')
+                emitted.append((result, b''))
+                return result
+            with mock.patch.dict(g, {'capture': query}):
+                if fault == 'success':
+                    g['validate_clone_config'](g['STATE']['owned_root'])
+                    test.assertEqual([row[0] for row in calls], ['clone-config-names'] +
+                        ['clone-config-match-' + str(i) for i in range(7)] + ['clone-config-names-after'])
+                    test.assertTrue(json.loads((evidence / 'clone-config-proof.json').read_bytes())['stable'])
+                else:
+                    with test.assertRaises(g['LayoutFailure']) as refused:
+                        g['validate_clone_config'](g['STATE']['owned_root'])
+                    if fault in ('capture_error', 'cancel_match', 'wrong', 'empty_value', 'multiline_value',
+                                 'boolean_alias', 'url_userinfo', 'url_query', 'url_other', 'fetch_wide', 'tag_wrong'):
+                        test.assertIs(refused.exception, primary)
+                    if fault in extras or fault in ('missing', 'duplicate', 'duplicate_mixed', 'branch_pair',
+                                                   'no_terminal_nul', 'extra_terminal_nul', 'non_utf8', 'empty_names'):
+                        test.assertFalse(any(row[0].startswith('clone-config-match-') for row in calls))
+                    test.assertFalse((evidence / 'clone-config-proof.json').exists())
+                    test.assertNotIn(sentinel, str(refused.exception))
+            test.assertNotIn(sentinel, repr(calls) + repr(emitted) +
+                             ''.join(p.read_text() for p in evidence.iterdir() if p.is_file()))
+            test.assertEqual(g['OWNED_FD_PENDING'], [])
+            test.assertEqual(g['PENDING_RESOURCES'], [])
+
+    for fault in ('success', 'existing', 'symlink', 'source_uid', 'tmp_mode', 'wrong_head', 'wrong_sha',
+                  'wrong_tree', 'partial_clone', 'imported_config', 'alternates', 'replacement',
+                  'source_mode', 'git_pointer', 'root_mode', 'preseed_modules', 'terminal_receipt',
+                  'terminal_cancel', 'tool_drift', 'wrong_git_version', 'source_git_pointer',
+                  'extra_argument', 'source_replacement', 'config_wrong_url',
+                  'config_duplicate', 'config_drift'):
+        with test.subTest(layout_main=fault), tempfile.TemporaryDirectory() as directory:
+            g = realm()
+            root = Path(directory)
+            source, runner, destination = root / 'source', root / 'runner', root / 'd'
+            source.mkdir(); runner.mkdir(); (source / '.git').mkdir()
+            if fault == 'source_git_pointer':
+                (source / '.git').rmdir()
+                (source / '.git').write_text('gitdir: ../foreign\n')
+            (source / 'leaf').write_bytes(b'fixed')
+            (source / 'leaf').chmod(0o600)
+            if fault == 'source_mode': (source / 'leaf').chmod(0o622)
+            g['DESTINATION'], g['SOURCE_FILES'] = destination, 1
+            if fault == 'existing': destination.mkdir()
+            if fault == 'symlink': destination.symlink_to(source)
+            original_identity = g['identity']
+            def identity(path):
+                if path == Path('/tmp'):
+                    return {'path': '/tmp', 'dev': 1, 'ino': 2, 'uid': 0,
+                            'mode': 0o755 if fault == 'tmp_mode' else 0o1777}
+                value = original_identity(path)
+                if fault == 'source_uid' and path == source:
+                    value['uid'] += 1
+                return value
+            calls = []
+            main_config = dict(config_expected)
+            main_sentinel = 'DUMMY_UNEXPECTED_CREDENTIAL_7ac52'
+            if fault == 'config_wrong_url':
+                main_config['remote.origin.url'] = 'https://user:' + main_sentinel + '@example.invalid/'
+            def action(label, _argv, _seconds):
+                calls.append(label)
+                if label == 'git-version': return b'not a version\n' if fault == 'wrong_git_version' else b'git version 2.56.0 synthetic-control\n'
+                if label == 'source-head': return (('c' if fault == 'wrong_head' else 'a') * 40 + '\n').encode()
+                if label in ('source-tree', 'clone-tree'):
+                    return (('c' if fault == 'wrong_tree' and label == 'clone-tree' else 'b') * 40 + '\n').encode()
+                if label in ('source-members', 'clone-members'): return b'leaf\0'
+                if label == 'clone':
+                    if fault == 'partial_clone': raise g['LayoutFailure']('fixed_partial_clone')
+                    if fault == 'git_pointer':
+                        (destination / '.git').write_text('gitdir: ../source/.git\n')
+                    else:
+                        (destination / '.git/objects/info').mkdir(parents=True)
+                    if fault != 'git_pointer':
+                        (destination / '.git/config').write_text(json.dumps(main_config))
+                        (destination / '.git/config').chmod(0o600)
+                    (destination / 'leaf').write_bytes(b'fixed')
+                    (destination / 'leaf').chmod(0o600)
+                    if fault == 'alternates': (destination / '.git/objects/info/alternates').write_text('inert')
+                    if fault == 'replacement':
+                        destination.rename(root / 'retained-old')
+                        destination.mkdir(mode=0o700)
+                    if fault == 'root_mode': destination.chmod(0o755)
+                    if fault == 'preseed_modules': (destination / 'node_modules').symlink_to(root / 'absent')
+                    if fault == 'source_replacement':
+                        source.rename(root / 'retained-source')
+                        source.mkdir(mode=0o700)
+                        (source / '.git').mkdir(mode=0o700)
+                        (source / 'leaf').write_bytes(b'fixed')
+                        (source / 'leaf').chmod(0o600)
+                if label == 'clone-head': return ('a' * 40 + '\n').encode()
+                if label in ('clone-config-names', 'clone-config-names-after'):
+                    result = b'http.extraheader\0' if fault == 'imported_config' else b''.join(key.encode() + b'\0' for key in main_config)
+                    return result + b'remote.origin.url\0' if fault == 'config_duplicate' else result
+                if label.startswith('clone-config-match-'):
+                    key = _argv[-1]
+                    test.assertEqual(_argv[-7:], ['--fixed-value', '--value=' + config_expected[key], '--null', '--show-names', '--name-only', '--', key])
+                    if main_config[key] != config_expected[key]:
+                        raise g['LayoutFailure']('git_action_or_settlement_failed')
+                    if fault == 'config_drift' and label.endswith('-0'):
+                        config = destination / '.git/config'
+                        config.write_bytes(config.read_bytes() + b' ')
+                    return key.encode() + b'\0'
+                return b''
+            output = root / 'github-output'
+            output.write_bytes(b'')
+            output.chmod(0o600)
+            environment = {'GITHUB_OUTPUT': str(output), 'GITHUB_ACTIONS': 'true', 'ImageOS': 'ubuntu24', 'DESK_CI_PARTITION': 'rest',
+                           'GITHUB_REPOSITORY': 'mikeddamico/the-desk',
+                           'GITHUB_SHA': 'invalid' if fault == 'wrong_sha' else 'a' * 40,
+                           'GITHUB_WORKSPACE': str(source), 'RUNNER_TEMP': str(runner)}
+            actual_record = g['record']
+            def main_record(name, value):
+                if fault == 'terminal_receipt' and name == 'terminal.json':
+                    raise OSError('fixed terminal fsync/write failure')
+                result = actual_record(name, value)
+                if fault == 'terminal_cancel' and name == 'terminal.json':
+                    g['cancel'](signal.SIGTERM, None)
+                return result
+            printed = io.StringIO()
+            tool_reads = [0]
+            def synthetic_tools():
+                tool_reads[0] += 1
+                return {'synthetic': 'changed' if fault == 'tool_drift' and tool_reads[0] > 1 else 'fixed; no tool execution'}
+            with mock.patch.dict(os.environ, environment, clear=True), \
+                 mock.patch.object(sys, 'argv', [str(owner_path)] + (['forbidden'] if fault == 'extra_argument' else [])), \
+                 mock.patch.dict(g, {'identity': identity, 'capture': action, 'record': main_record,
+                                     'bootstrap_tools': synthetic_tools}), \
+                 mock.patch.object(g['signal'], 'signal'), \
+                 mock.patch.object(g['ctypes'], 'CDLL', return_value=types.SimpleNamespace(prctl=lambda *_: 0)), \
+                 contextlib.redirect_stdout(printed):
+                test.assertEqual(g['main'](), 0 if fault == 'success' else 1)
+            if fault == 'success':
+                test.assertIsNone(g['STATE']['primary'])
+                test.assertTrue(json.loads((runner / 'fixture105-layout/terminal.json').read_bytes())['ok'])
+                test.assertIn('evidence_claimed=true', output.read_text())
+                continue
+            test.assertIsNotNone(g['STATE']['primary'])
+            if fault in ('config_wrong_url', 'config_duplicate', 'config_drift'):
+                test.assertEqual(g['STATE']['primary']['phase'], 'clone_config_check')
+                test.assertFalse(g['STATE']['prepared'])
+                test.assertFalse((runner / 'fixture105-layout/clone-config-proof.json').exists())
+                if fault == 'config_duplicate':
+                    test.assertFalse(any(label.startswith('clone-config-match-') for label in calls))
+                test.assertNotIn(main_sentinel, printed.getvalue() + repr(calls) +
+                    ''.join(p.read_text() for p in (runner / 'fixture105-layout').iterdir() if p.is_file()))
+                test.assertEqual(g['OWNED_FD_PENDING'], [])
+                test.assertEqual(g['PENDING_RESOURCES'], [])
+            if fault == 'terminal_receipt':
+                test.assertFalse((runner / 'fixture105-layout/terminal.json').exists())
+                test.assertFalse(json.loads(printed.getvalue())['terminal_retained'])
+                test.assertTrue(destination.exists())
+                test.assertEqual((source / 'leaf').read_bytes(), b'fixed')
+                continue
+            if fault == 'terminal_cancel':
+                test.assertTrue((runner / 'fixture105-layout/terminal.json').exists())
+                revoked = json.loads((runner / 'fixture105-layout/terminal-revoked.json').read_bytes())
+                test.assertFalse(revoked['ok'])
+                test.assertEqual(g['STATE']['primary']['code'], 'owner_cancelled')
+                test.assertEqual(json.loads(printed.getvalue())['layout'], 'HELD')
+                test.assertTrue(destination.exists())
+                continue
+            if g['STATE']['evidence'] is None:
+                test.assertEqual(g['STATE']['invocation_classification'], 'refused_before_evidence_claim; no child permitted')
+                test.assertEqual(calls, [])
+            else:
+                terminal = json.loads((runner / 'fixture105-layout/terminal.json').read_bytes())
+                test.assertFalse(terminal['ok'])
+                test.assertEqual(terminal['classification'], 'HELD_partial_or_failed_layout')
+                if fault in ('partial_clone', 'imported_config', 'alternates', 'replacement',
+                              'git_pointer', 'root_mode', 'preseed_modules', 'tool_drift'):
+                    test.assertIsNotNone(terminal['owned_root'])
+                    test.assertTrue(destination.exists())
+                    test.assertEqual((source / 'leaf').read_bytes(), b'fixed')
+                if fault == 'tool_drift':
+                    test.assertFalse(terminal['bootstrap_tools_preserved'])
+                if fault == 'source_replacement':
+                    test.assertFalse(terminal['original_source_root_preserved'])
+                    test.assertEqual((root / 'retained-source/leaf').read_bytes(), b'fixed')
+
+
 class WorkflowShape(unittest.TestCase):
     """Text-level checks of the fixed shape (no YAML library: standard library only)."""
 
     def text(self):
-        return (HERE.parents[1] / '.github' / 'workflows' / 'ci.yml').read_text()
+        raw = (HERE.parents[1] / '.github' / 'workflows' / 'ci.yml').read_text()
+        return _short_layout_workflow(self, raw)
 
     def test_fixed_steps_and_ceilings(self):
         text = self.text()
+        raw = (ci.ROOT / '.github/workflows/ci.yml').read_text()
+        if '# P1 SHORT PHYSICAL CHECKOUT:' in raw:
+            _short_layout_controls(self, ci.ROOT / 'test/support/fixture105-hosted-layout.py')
         for needle in ('timeout-minutes: 190', 'timeout-minutes: 122', 'timeout-minutes: 30', 'name: foundation-ci',
                        'postgres:17', 'run-stage.sh prerequisite', 'run-stage.sh focused', 'run-stage.sh all',
                        'npm audit --audit-level=high', 'gitleaks/gitleaks-action@e0c47f4f8be36e29cdc102c57e68cb5cbf0e8d1e',
@@ -1102,6 +1749,59 @@ class WorkflowShape(unittest.TestCase):
                               "id: upload-security\n        if: ${{ always() && steps.retain-security.outcome == 'success' }}",
                               "id: final\n        if: ${{ always() && steps.init.outcome != 'skipped' }}"):
                     self.assertIn(exact, job)
+        # The representative PostgreSQL proof is now a required precheck of full CI, with failure evidence retained.
+        self.assertNotIn('TEMPORARY DIAGNOSTIC', text)
+        self.assertNotIn('# Diagnostic:', text)
+        self.assertNotIn('HOLD representative PostgreSQL proof', text)
+        native_diagnostic = '# TEMPORARY NATIVE UNKNOWN DIAGNOSTIC: one case; mandatory HOLD forbids full-CI acceptance.' in text
+        if native_diagnostic:
+            self.assertEqual(text.count('if: ${{ false }}'), 3)
+            for exact in ('  verify-writer:\n    if: ${{ false }} # Native diagnostic: no writer partition.',
+                          '  container:\n    if: ${{ false }} # Native diagnostic: no image build.',
+                          'id: fixture046-runtime\n        if: ${{ false }} # Native diagnostic: no media preparation.'):
+                self.assertIn(exact, text)
+        else:
+            self.assertNotIn('if: ${{ false }}', text)
+            self.assertNotIn('Native diagnostic:', text)
+            self.assertNotIn('HOLD native unknown-commit diagnostic', text)
+        rest = text.split('  verify-rest:\n', 1)[1].split('\n  verify:\n', 1)[0]
+        proof = ('      - name: Prove PostgreSQL command snapshots and complete receipt visibility\n'
+                 '        id: command-postgres\n'
+                 '        timeout-minutes: 21\n'
+                 '        run: |\n'
+                 '          /usr/bin/env HOME="$RUNNER_TEMP/ci/home" TMPDIR="$RUNNER_TEMP/ci/tmp" \\\n'
+                 '            /usr/bin/timeout --signal=TERM --kill-after=20s 1200s \\\n'
+                 '            node --import tsx test/support/command-postgres-hosted.ts\n')
+        retention = ('      - name: Retain PostgreSQL command proof, including failed guard cleanup observations\n'
+                     "        if: ${{ always() && steps.command-postgres.outcome != 'skipped' }}\n"
+                     '        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2\n'
+                     '        timeout-minutes: 2\n'
+                     '        with:\n'
+                     '          name: ci-command-postgres-rest-${{ github.run_id }}-${{ github.run_attempt }}\n'
+                     '          path: ${{ runner.temp }}/ci/evidence/command-postgres/retained\n'
+                     '          if-no-files-found: error\n'
+                     '          retention-days: 30\n')
+        if native_diagnostic:
+            proof = proof.replace('Prove PostgreSQL command snapshots and complete receipt visibility', 'Diagnose the fixed native unknown-commit case').replace('command-postgres-hosted.ts\n', 'command-postgres-hosted.ts fixture105-unknown\n')
+            retention = retention.replace('Retain PostgreSQL command proof, including failed guard cleanup observations', 'Retain native unknown-commit diagnostic, including failed cleanup observations').replace('ci-command-postgres-rest-', 'ci-fixture105-unknown-rest-').replace('/ci/evidence/command-postgres/retained', '/ci/evidence/fixture105-unknown/retained')
+            hold = ('      - name: HOLD native unknown-commit diagnostic cannot qualify for full CI\n'
+                    '        timeout-minutes: 1\n'
+                    '        run: |\n'
+                    '          echo "::error::HOLD: one native case only; full CI remains unrun."\n'
+                    '          exit 78\n')
+            self.assertEqual(rest.count(hold), 1)
+            self.assertLess(rest.index(retention), rest.index(hold))
+            self.assertLess(rest.index(hold), rest.index('run-stage.sh all'))
+        self.assertEqual(rest.count(proof), 1)
+        self.assertEqual(rest.count(retention), 1)
+        self.assertEqual(text.count('node --import tsx test/support/command-postgres-hosted.ts'), 1)
+        sequence = ['id: upload-controls', 'id: command-postgres',
+                    "steps.command-postgres.outcome != 'skipped'", 'run-stage.sh all', 'ci.py check all']
+        offsets = [rest.index(value) for value in sequence]
+        self.assertEqual(offsets, sorted(offsets))
+        postgres_wrapper = (ci.ROOT / 'test/support/command-postgres-hosted.ts').read_text()
+        self.assertIn('tests: { passed: 7, total: 7 }', postgres_wrapper)
+        self.assertIn('"command-postgres",', postgres_wrapper)
         wrapper = (HERE / 'run-stage.sh').read_text()
         guard = (ci.ROOT / 'test/support/p33-parity-supervisor.py').read_text()
         for retired in ('diagnostic120', 'DIAGNOSTIC120', 'target-diagnostic', 'EXIT_FAIL'):
@@ -1171,7 +1871,7 @@ class Fixture105Tooling(unittest.TestCase):
             counts.update({'test/unit/connected-fixture105.test.ts': unit, 'test/integration/connected-fixture105.test.ts': native})
             errors = []
             ci.check_all_files(file_lines(counts), TRACKED, errors, {})
-            self.assertEqual(sum(counts.values()), 8717)
+            self.assertEqual(sum(counts.values()), 8759)
             self.assertEqual(sum('connected per-file count drift' in e for e in errors), 2)
 
     def test_frozen_render046_file_and_exact_count_are_required(self):
@@ -1190,7 +1890,7 @@ class Fixture105Tooling(unittest.TestCase):
                     counts[OLD_SELECTED[0]] += pinned - count
                     errors = []
                     ci.check_all_files(file_lines(counts), TRACKED, errors, {})
-                    self.assertEqual(sum(counts.values()), 8717)
+                    self.assertEqual(sum(counts.values()), 8759)
                     self.assertIn('frozen-render046 per-file count drift: ' + name, errors)
 
     def test_fixture_namespace_does_not_match_supervisor_prefix(self):
@@ -1822,7 +2522,7 @@ class Partition155Tests(unittest.TestCase):
                          'repository': 'mikeddamico/the-desk', 'run_id': '123', 'run_attempt': '1', 'source_sha256': 'd' * 64}
         rest = ci.partition_files(self.tracked, 'rest')
         other = [p for p in rest if p not in ci.FIXTURE_CONNECTED_COUNTS and p not in ci.FROZEN_RENDER046_COUNTS]
-        self.counts = {p: 3560 // len(other) + (i < 3560 % len(other)) for i, p in enumerate(other)}
+        self.counts = {p: 3561 // len(other) + (i < 3561 % len(other)) for i, p in enumerate(other)}
         self.counts.update(ci.FIXTURE_CONNECTED_COUNTS)
         self.counts.update(ci.FROZEN_RENDER046_COUNTS)
         self.counts[ci.WRITER_TEST] = 4908
@@ -1847,8 +2547,8 @@ class Partition155Tests(unittest.TestCase):
     def test_exact_pair_and_disjoint_union(self):
         self.assertEqual(self.joint(), [])
         self.assertEqual(set(self.proofs['writer']['files']) & set(self.proofs['rest']['files']), set())
-        self.assertEqual(sum(sum(p['files'].values()) for p in self.proofs.values()), 8717)
-        self.assertEqual(len(ci.partition_files(self.tracked, 'all')), 82)
+        self.assertEqual(sum(sum(p['files'].values()) for p in self.proofs.values()), 8759)
+        self.assertEqual(len(ci.partition_files(self.tracked, 'all')), 85)
 
     def test_missing_unknown_and_legacy_labels(self):
         self.assertEqual(ci.partition_label(), 'all')
@@ -2086,7 +2786,7 @@ class Partition155Tests(unittest.TestCase):
             proof = self.copy(original); proof['identity'][key] = value
             with self.assertRaises(RuntimeError): ci.parse_partition_proof(ci.fixture_bytes(proof).decode().rstrip('\n'))
         for counts in ({'test/' + 'a' * 513 + '.test.ts': 4908}, {'test/../x.test.ts': 4908},
-                       {'test/x%d.test.ts' % n: 1 for n in range(83)}):
+                       {'test/x%d.test.ts' % n: 1 for n in range(86)}):
             proof = self.copy(original); proof['files'] = counts
             with self.assertRaises(RuntimeError): ci.parse_partition_proof(ci.fixture_bytes(proof).decode().rstrip('\n'))
         with self.assertRaises(RuntimeError): ci.parse_partition_proof(json.dumps(original))
@@ -2174,10 +2874,15 @@ class FixtureTargetObserverShapeTests(unittest.TestCase):
         self.assertIsInstance(filters[0], ast.Dict)
         routes = {key.value: value for key, value in zip(filters[0].keys, filters[0].values)
                   if isinstance(key, ast.Constant)}
-        self.assertEqual(set(routes), {'focused', 'p33', 'parity', 'unit', 'integration', 'all', 'writer', 'rest', 'master046', 'technical-master', 'technical-master-pure'})
+        self.assertEqual(set(routes), {'focused', 'p33', 'parity', 'unit', 'integration', 'all', 'writer', 'rest', 'master046', 'technical-master', 'technical-master-pure', 'durable-pair-pure', 'command-postgres', 'fixture105-unknown', 'runtime-observe', 'fixture105-traversal'})
         self.assertIn("    test = 'test/unit/p33-parity-harness.test.ts'", guard_source)
         self.assertEqual(ast.literal_eval(routes['writer']), ['test/unit/writer-fixture-input.test.ts'])
         self.assertEqual(ast.literal_eval(routes['master046']), ['test/unit/frozen-fixture046-master.test.ts'])
+        self.assertEqual(ast.literal_eval(routes['durable-pair-pure']), ['test/unit/durable-pair.test.ts', 'test/unit/durable-pair-transport.test.ts'])
+        self.assertEqual(ast.literal_eval(routes['command-postgres']), ['test/integration/g2-command-connection.test.ts'])
+        self.assertEqual(ast.literal_eval(routes['fixture105-unknown']), ['test/integration/connected-fixture105.test.ts', '--testNamePattern', '^connected fixture105 native ownership holds unknown construction commit without inventing its missing settlement receipt$'])
+        self.assertEqual(ast.literal_eval(routes['runtime-observe']), ['test/runtime-observe.test.ts'])
+        self.assertEqual(ast.literal_eval(routes['fixture105-traversal']), ['test/unit/fixture105-traversal.test.ts'])
         for profile in ('technical-master', 'technical-master-pure'):
             self.assertEqual(ast.literal_eval(routes[profile]), ['test/unit/technical-master-admission.test.ts'])
         profile_choices = [keyword.value for node in ast.walk(guard)
@@ -2188,13 +2893,14 @@ class FixtureTargetObserverShapeTests(unittest.TestCase):
                            for keyword in node.keywords if keyword.arg == 'choices']
         self.assertEqual(len(profile_choices), 1)
         self.assertEqual(ast.literal_eval(profile_choices[0]),
-                         ['prerequisite', 'focused', 'p33', 'parity', 'unit', 'integration', 'all', 'writer', 'rest', 'master046', 'technical-master', 'technical-master-pure'])
+                         ['prerequisite', 'focused', 'p33', 'parity', 'unit', 'integration', 'all', 'writer', 'rest', 'master046', 'technical-master', 'technical-master-pure', 'durable-pair-pure', 'command-postgres', 'fixture105-unknown', 'runtime-observe', 'fixture105-traversal'])
         for profile, expression in (('all', "['--exclude', test]"),
                                     ('rest', "['--exclude', test, '--exclude', 'test/unit/writer-fixture-input.test.ts']")):
             self.assertEqual(ast.dump(routes[profile]), ast.dump(ast.parse(expression, mode='eval').body))
         self.assertNotIn('target-diagnostic', guard_source)
         self.assertEqual(ci.FIXTURE_CONNECTED_COUNTS, {
             'test/unit/connected-fixture105.test.ts': 58,
+            'test/unit/fixture105-traversal.test.ts': 10,
             'test/integration/connected-fixture105.test.ts': 34})
         self.assertEqual(len(ci.FIXTURE_CASE_EXPECTATIONS), 34)
         self.assertEqual(ci.FIXTURE_CASE_EXPECTATIONS[-1], {'case_id': name, 'expected': ['pre_target_failure']})
@@ -2283,9 +2989,36 @@ class FixtureTargetObserverShapeTests(unittest.TestCase):
                         cleanup.index('this.maintenanceRecord = await observeMaintenance('))
         self.assertLess(cleanup.index('this.maintenanceRecord = await observeMaintenance('),
                         cleanup.index('          this.emit();'))
-        self.assertEqual(observer.count('await Reflect.apply('), 1)
-        self.assertIn('rejected(ordinal);\n        throw error;', observer)
-        self.assertIn('observe(ordinal, result);\n      return result;', observer)
+        # The callback-transparent wrapper delegates outside an async boundary. Unknown
+        # overloads stay opaque; only the known driver's Promise result is observed.
+        wrapper = observer[observer.index('  wrap('):observer.index('  /**\n   * Runs')]
+
+        def callback_transparent_shape(candidate):
+            self.assertIn('return function (this: pg.Client, ...args: unknown[]): unknown {', candidate)
+            self.assertNotIn('return async function', candidate)
+            self.assertIn('if (!observedPromiseCall(args))\n        return Reflect.apply(original, this, args);', candidate)
+            self.assertEqual(candidate.count('Reflect.apply(original, this, args)'), 2)
+            self.assertIn('returned = Reflect.apply(original, this, args);', candidate)
+            self.assertLess(candidate.index('returned = Reflect.apply('), candidate.index('return driverPromiseThen('))
+            self.assertIn('} catch (error) {\n        rejected(ordinal);\n        throw error;\n      }', candidate)
+            self.assertIn('(result) => {\n          observe(ordinal, result);\n          return result;\n        },', candidate)
+            self.assertIn('(error) => {\n          rejected(ordinal);\n          throw error;\n        },', candidate)
+
+        callback_transparent_shape(wrapper)
+        fulfillment_prefix = '(result) => {\n          observe(ordinal, result);'
+        self.assertEqual(wrapper.count(fulfillment_prefix), 1)
+        mutations = {
+            'async wrapper': wrapper.replace('return function (this:', 'return async function (this:', 1),
+            'dropped receiver': wrapper.replace('Reflect.apply(original, this, args)', 'Reflect.apply(original, undefined, args)', 1),
+            'dropped arguments': wrapper.replace('Reflect.apply(original, this, args)', 'Reflect.apply(original, this, [])', 1),
+            'callback observation': wrapper.replace('if (!observedPromiseCall(args))\n        return Reflect.apply(original, this, args);', '', 1),
+            'swallowed synchronous error': wrapper.replace('rejected(ordinal);\n        throw error;', 'rejected(ordinal);\n        return undefined;', 1),
+            'omitted fulfillment observation': wrapper.replace(fulfillment_prefix, '(result) => {', 1),
+            'omitted rejection observation': wrapper.replace('(error) => {\n          rejected(ordinal);', '(error) => {', 1),
+        }
+        for name, mutation in mutations.items():
+            with self.subTest(wrapper=name), self.assertRaises(AssertionError):
+                callback_transparent_shape(mutation)
         self.assertIn('this.count === 0 ||', observer)
         self.assertIn('this.vectors.some(\n            (entry) =>\n              entry.vector.outcome === "rejected" ||\n              entry.supplement.status === "inconclusive",\n          ) ||', observer)
         self.assertEqual(observer.count('process.stderr.write'), 3)
@@ -2701,7 +3434,21 @@ class Fixture046ConstructionShape(unittest.TestCase):
         self.assertLess(rest.index('id: fixture046-runtime'), rest.index('ci.py dbprobe'))
         self.assertLess(rest.index('ci.py check all'), rest.index('id: fixture046-cleanup'))
         self.assertLess(rest.index('id: fixture046-cleanup'), rest.index('id: collect-full'))
-        self.assertIn("id: fixture046-cleanup\n        if: ${{ always() && steps.fixture046-runtime.outcome != 'skipped' }}", rest)
+        cleanup_condition = "id: fixture046-cleanup\n        if: ${{ always() && steps.short-layout.outcome == 'success' && (steps.fixture046-runtime.outcome == 'success' || steps.fixture046-runtime.outcome == 'failure') }}"
+
+        def cleanup_shape(candidate):
+            self.assertEqual(candidate.count(cleanup_condition), 1)
+
+        cleanup_shape(rest)
+        mutations = {
+            'missing layout gate': rest.replace(cleanup_condition, cleanup_condition.replace("steps.short-layout.outcome == 'success' && ", ''), 1),
+            'missing always': rest.replace(cleanup_condition, cleanup_condition.replace('always() && ', ''), 1),
+            'missing success outcome': rest.replace(cleanup_condition, cleanup_condition.replace("steps.fixture046-runtime.outcome == 'success' || ", ''), 1),
+            'missing failure outcome': rest.replace(cleanup_condition, cleanup_condition.replace(" || steps.fixture046-runtime.outcome == 'failure'", ''), 1),
+        }
+        for name, mutation in mutations.items():
+            with self.subTest(cleanup=name), self.assertRaises(AssertionError):
+                cleanup_shape(mutation)
         self.assertIn("FIXTURE046_CLEANUP_OUTCOME: ${{ steps.fixture046-cleanup.outcome }}", rest)
         source = (ci.ROOT / 'test/unit/frozen-fixture046-master.test.ts').read_text()
         self.assertEqual(len(re.findall(r'^  it\(', source, re.M)), 16)

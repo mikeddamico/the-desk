@@ -2,12 +2,20 @@
 // The child process has no error listener of its own, so an unhandled client error crashes it (exit != 0). Facts are observed in
 // PostgreSQL (pg_stat_activity, pg_locks, the marker table); every wait is bounded; the child is always killed in `finally`.
 import { spawn } from "node:child_process";
+import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 
 import pg from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { runCommand } from "../../src/runtime/command.js";
+import { canonicalJson, sha256 } from "../../src/identity/canonical-json.js";
+import { PAIR_CATALOG_SQL } from "../../src/runtime/durable-pair-sql.js";
+import {
+  receiptFor,
+  receiptRow,
+  type PairRequest,
+} from "../../src/runtime/durable-pair-contract.js";
 import { TestCluster, type DbEnv } from "../support/db-env.js";
 import { bounded, observe } from "../support/a5-crash.js";
 
@@ -326,6 +334,305 @@ suite("G2 runCommand: a checked-out backend terminated by PostgreSQL", () => {
     expect(await markers(tag)).toEqual(["first", "after_recovery"]); // exactly one "first": never replayed
     expect(await advisoryHeld()).toBe(0);
   }, 120000);
+
+  it("keeps a read-only repeatable snapshot while the complete synthetic receipt graph commits, then reads it on a fresh connection", async () => {
+    // SQL mechanics only: vector locators are deliberately non-executing. This does not claim stored R2 objects or a product gate.
+    const bytes = await readFile(
+      new URL("../../fixtures/durable-pair/vectors.json", import.meta.url),
+    );
+    expect(sha256(bytes)).toBe(
+      "050f593856f113936faeaec974f8dbe3b16c947721f609e531f9e60a0d5b583d",
+    );
+    const vector = JSON.parse(bytes.toString()) as {
+      request: PairRequest;
+      receipt_digest: string;
+      storage_binding: Parameters<typeof receiptRow>[1];
+    };
+    const receipt = receiptFor(vector.request);
+    const storage = vector.storage_binding;
+    const graph = {
+      ...receipt.request.rows,
+      artifacts: [
+        ...receipt.request.rows.artifacts,
+        receiptRow(receipt, storage),
+      ],
+    };
+    expect(graph.artifacts.at(-1)?.content_hash).toBe(vector.receipt_digest);
+    const families = [
+      "artifacts",
+      "audio_artifacts",
+      "assembly_recipes",
+      "master_assembly_maps",
+    ] as const;
+    const ids = {
+      artifacts: "artifact_id",
+      audio_artifacts: "audio_artifact_id",
+      assembly_recipes: "assembly_recipe_id",
+      master_assembly_maps: "master_assembly_map_id",
+    } as const;
+    const columns = {
+      artifacts: [
+        "artifact_id",
+        "artifact_type",
+        "schema_version",
+        "content_hash",
+        "storage_uri",
+        "byte_size",
+        "canonical_payload",
+        "parent_artifact_id",
+        "supersedes_artifact_id",
+        "created_at",
+      ],
+      audio_artifacts: [
+        "audio_artifact_id",
+        "artifact_id",
+        "audio_sha256",
+        "duration_ms",
+      ],
+      assembly_recipes: ["assembly_recipe_id", "artifact_id", "version"],
+      master_assembly_maps: [
+        "master_assembly_map_id",
+        "artifact_id",
+        "assembly_recipe_id",
+        "master_audio_artifact_id",
+      ],
+    } as const;
+    const catalog = await env.runtime.query(PAIR_CATALOG_SQL, [[...families]]);
+    const relationIds = await env.runtime.query(
+      "SELECT 'public.artifacts'::regclass::oid::text AS artifacts,'public.assembly_recipes'::regclass::oid::text AS recipes,'public.audio_artifacts'::regclass::oid::text AS audio,'public.master_assembly_maps'::regclass::oid::text AS maps",
+    );
+    const observed = relationIds.rows[0] as Record<string, unknown> | undefined;
+    expect(
+      (catalog.rows[0] as { facts: { relations: unknown } } | undefined)?.facts
+        .relations,
+    ).toEqual([
+      ["public", "artifacts", observed?.artifacts],
+      ["public", "assembly_recipes", observed?.recipes],
+      ["public", "audio_artifacts", observed?.audio],
+      ["public", "master_assembly_maps", observed?.maps],
+    ]);
+    const names = Object.fromEntries(
+      families.map((family) => [
+        family,
+        graph[family].map((row) => row[ids[family]]),
+      ]),
+    );
+    const counts = async (
+      query: (
+        text: string,
+        values?: unknown[],
+      ) => Promise<{ rows: Record<string, unknown>[] }>,
+    ): Promise<number[]> => {
+      const result: number[] = [];
+      for (const family of families) {
+        const rows = await query(
+          "SELECT count(*)::int AS count FROM public." +
+            family +
+            " WHERE " +
+            ids[family] +
+            "=ANY($1::uuid[])",
+          [names[family]],
+        );
+        result.push(Number(rows.rows[0]?.count));
+      }
+      return result;
+    };
+    let started: (() => void) | undefined;
+    let release: (() => void) | undefined;
+    const snapshotReady = new Promise<void>((resolve) => {
+      started = resolve;
+    });
+    const committed = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let snapshotPid: unknown;
+    const startSnapshot = () =>
+      runCommand(
+        env.runtime,
+        async (tx) => {
+          await tx.query("SET LOCAL statement_timeout = '10s'");
+          await tx.query("SET LOCAL lock_timeout = '2s'");
+          const identity = await tx.query(
+            "SELECT pg_backend_pid() AS pid,current_setting('transaction_isolation') AS level,current_setting('transaction_read_only') AS read_only,current_setting('server_version_num') AS version",
+          );
+          expect(identity.rows[0]).toMatchObject({
+            level: "repeatable read",
+            read_only: "on",
+          });
+          expect(String(identity.rows[0]?.version)).toMatch(/^17[0-9]{4}$/u);
+          snapshotPid = identity.rows[0]?.pid;
+          expect(
+            await counts((text, values) => tx.query(text, values)),
+          ).toEqual([0, 0, 0, 0]);
+          started?.();
+          await bounded(
+            committed,
+            15000,
+            "writer completion releases snapshot",
+          );
+          expect(
+            await counts((text, values) => tx.query(text, values)),
+          ).toEqual([0, 0, 0, 0]);
+          const forbidden = await tx.attempt(
+            "INSERT INTO public.artifacts (artifact_id,artifact_type,schema_version,content_hash) VALUES ($1,'readonly-probe','test', $2)",
+            [receipt.request.operation_id, "0".repeat(64)],
+          );
+          expect(forbidden.ok).toBe(false);
+          if (!forbidden.ok) expect(forbidden.error.code).toBe("25006");
+          return { kind: "converged", record: null };
+        },
+        undefined,
+        "repeatable_read_read_only",
+      ).then(
+        (outcome) => ({ outcome }),
+        (error: unknown) => ({ error }),
+      );
+    const fresh = new pg.Pool({
+      connectionString: env.runtimeUrl,
+      options: "-c role=desk_runtime",
+      max: 1,
+    });
+    let reader: ReturnType<typeof startSnapshot> | undefined;
+    let primary: unknown;
+    try {
+      reader = startSnapshot();
+      await bounded(
+        Promise.race([
+          snapshotReady,
+          reader.then((result) => {
+            if ("error" in result) throw result.error;
+            throw new Error("snapshot ended before its readiness gate");
+          }),
+        ]),
+        15000,
+        "snapshot established before writer",
+      );
+      const written = await runCommand(env.runtime, async (tx) => {
+        await tx.query("SET LOCAL statement_timeout = '10s'");
+        await tx.query("SET LOCAL lock_timeout = '2s'");
+        const state = await tx.query(
+          "SELECT pg_backend_pid() AS pid,current_setting('transaction_isolation') AS level",
+        );
+        expect(state.rows[0]?.level).toBe("read committed");
+        expect(state.rows[0]?.pid).not.toBe(snapshotPid);
+        for (const family of families)
+          for (const row of graph[family]) {
+            // The receipt is last, after every family FK exists, just as in the durable owner.
+            if (
+              family === "artifacts" &&
+              row.artifact_id === receipt.request.operation_id
+            )
+              continue;
+            const keys = columns[family];
+            await tx.query(
+              "INSERT INTO public." +
+                family +
+                " (" +
+                keys.join(",") +
+                ") VALUES (" +
+                keys.map((_, index) => "$" + String(index + 1)).join(",") +
+                ")",
+              keys.map((key) => row[key]),
+            );
+          }
+        const last = graph.artifacts.at(-1);
+        if (!last) throw new Error("missing receipt row");
+        await tx.query(
+          "INSERT INTO public.artifacts (" +
+            columns.artifacts.join(",") +
+            ") VALUES (" +
+            columns.artifacts
+              .map((_, index) => "$" + String(index + 1))
+              .join(",") +
+            ")",
+          columns.artifacts.map((key) => last[key]),
+        );
+        expect(await counts(env.owner.query.bind(env.owner))).toEqual([
+          0, 0, 0, 0,
+        ]);
+        return { kind: "created", record: null };
+      });
+      expect(written.kind).toBe("created");
+      release?.();
+      const snapshot = await bounded(reader, 15000, "snapshot reader settled");
+      if ("error" in snapshot) throw snapshot.error;
+      expect(snapshot.outcome.kind).toBe("converged");
+      const readback = await runCommand(
+        fresh,
+        async (tx) => {
+          await tx.query("SET LOCAL statement_timeout = '10s'");
+          const identity = await tx.query("SELECT pg_backend_pid() AS pid");
+          expect(identity.rows[0]?.pid).not.toBe(snapshotPid);
+          expect(
+            await counts((text, values) => tx.query(text, values)),
+          ).toEqual([6, 3, 1, 1]);
+          for (const family of families) {
+            const projected =
+              family === "artifacts"
+                ? `to_jsonb(a) || jsonb_build_object('created_at',to_char(a.created_at AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.US"Z"'))`
+                : "to_jsonb(a)";
+            const actual = await tx.query(
+              "SELECT " +
+                projected +
+                " AS row FROM public." +
+                family +
+                " a WHERE " +
+                ids[family] +
+                "=ANY($1::uuid[]) ORDER BY " +
+                ids[family],
+              [names[family]],
+            );
+            const expected = [...graph[family]].sort((a, b) => {
+              const left = String(a[ids[family]]),
+                right = String(b[ids[family]]);
+              return left < right ? -1 : left > right ? 1 : 0;
+            });
+            expect(canonicalJson(actual.rows.map((row) => row.row))).toBe(
+              canonicalJson(expected),
+            );
+          }
+          return { kind: "converged", record: null };
+        },
+        undefined,
+        "repeatable_read_read_only",
+      );
+      expect(readback.kind).toBe("converged");
+    } catch (error) {
+      primary = error;
+    } finally {
+      release?.();
+      if (reader) {
+        try {
+          const settled = await bounded(
+            reader,
+            15000,
+            "snapshot final settlement",
+          );
+          if ("error" in settled) {
+            if (primary === undefined) primary = settled.error;
+            else if (primary !== settled.error)
+              secondaryCleanupFailures.push(
+                "snapshot reader: " + String(settled.error),
+              );
+          }
+        } catch (error) {
+          if (primary === undefined) primary = error;
+          else
+            secondaryCleanupFailures.push("snapshot reader: " + String(error));
+        }
+      }
+      try {
+        await bounded(fresh.end(), 10000, "fresh receipt reader pool.end");
+      } catch (error) {
+        if (primary === undefined) primary = error;
+        else
+          secondaryCleanupFailures.push("fresh reader pool: " + String(error));
+      }
+    }
+    if (primary instanceof Error) throw primary;
+    if (primary !== undefined)
+      throw new Error("snapshot test failed", { cause: primary });
+  }, 60000);
 
   it("healthy reuse: the scoped listener does not accumulate on a real pooled client", async () => {
     const pool = new pg.Pool({

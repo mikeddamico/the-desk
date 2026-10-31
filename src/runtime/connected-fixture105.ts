@@ -110,8 +110,39 @@ function fixtureAbsolute(path: string): void {
     throw new Error("fixture_root_path");
 }
 /** Open every ancestor by descriptor; never follow an ancestor or leaf symlink. */
-function fixtureOpen(path: string, directory: boolean): number {
+function fixtureOpen(
+  path: string,
+  directory: boolean,
+  graphOwner?: {
+    open: (path: string, flags: number) => number;
+    close: (fd: number) => void;
+  },
+): number {
   fixtureAbsolute(path);
+  if (graphOwner) {
+    // The ledger owns each fresh component chain, including partial acquisition/close failures.
+    let owned = graphOwner.open(
+      "/",
+      fixtureFs.constants.O_RDONLY |
+        fixtureFs.constants.O_DIRECTORY |
+        fixtureFs.constants.O_NOFOLLOW,
+    );
+    const parts = path.split("/").filter(Boolean);
+    for (const [index, part] of parts.entries()) {
+      const next = graphOwner.open(
+        `/proc/self/fd/${String(owned)}/${part}`,
+        fixtureFs.constants.O_RDONLY |
+          fixtureFs.constants.O_NOFOLLOW |
+          fixtureFs.constants.O_NONBLOCK |
+          (index < parts.length - 1 || directory
+            ? fixtureFs.constants.O_DIRECTORY
+            : 0),
+      );
+      graphOwner.close(owned);
+      owned = next;
+    }
+    return owned;
+  }
   let fd = fixtureFs.openSync(
     "/",
     fixtureFs.constants.O_RDONLY |
@@ -206,14 +237,104 @@ function fixtureSame(a: unknown, b: unknown): void {
   if (fixtureStable(a) !== fixtureStable(b))
     throw new Error("fixture_root_changed");
 }
+// A close failure cannot be repaired by reusing a descriptor number in another graph.
+let fixtureGraphCleanupPoison = false;
+const fixtureGraphRetainedCloses: {
+  fd: number;
+  ordinal: number;
+  dev: bigint | undefined;
+  ino: bigint | undefined;
+}[] = [];
 function fixtureGraph(
   base: string,
   kind: "source" | "tools",
 ): FixtureRootObject {
-  const result: FixtureRootObject = {};
+  if (fixtureGraphCleanupPoison) throw new Error("fixture_inventory_changed");
+  const held = new Map<
+    number,
+    { ordinal: number; dev?: bigint; ino?: bigint }
+  >();
+  let ordinal = 0;
   let visited = 0;
+  const result: FixtureRootObject = {};
+  const owner = {
+    open(path: string, flags: number): number {
+      const fd = fixtureFs.openSync(path, flags);
+      held.set(fd, { ordinal: ++ordinal });
+      return fd;
+    },
+    close(fd: number): void {
+      const identity = held.get(fd);
+      if (!identity) throw new Error("fixture_inventory_changed");
+      held.delete(fd); // A failed close may already have recycled the descriptor number.
+      try {
+        fixtureFs.closeSync(fd);
+      } catch (error) {
+        fixtureGraphCleanupPoison = true;
+        fixtureGraphRetainedCloses.push({
+          fd,
+          ordinal: identity.ordinal,
+          dev: identity.dev,
+          ino: identity.ino,
+        });
+        throw error;
+      }
+    },
+  };
+  function observe(fd: number, value: fixtureFs.Stats): void {
+    const identity = held.get(fd);
+    if (!identity) throw new Error("fixture_inventory_changed");
+    if (Number.isSafeInteger(value.dev)) identity.dev = BigInt(value.dev);
+    if (Number.isSafeInteger(value.ino)) identity.ino = BigInt(value.ino);
+  }
+  function use<T>(fd: number, work: () => T): T {
+    let failed = false;
+    let primary: unknown;
+    let value: T | undefined;
+    try {
+      value = work();
+    } catch (error) {
+      failed = true;
+      primary = error;
+    }
+    try {
+      owner.close(fd);
+    } catch (error) {
+      if (!failed) {
+        failed = true;
+        primary = error;
+      }
+    }
+    if (failed) throw primary;
+    return value as T;
+  }
+  function read(path: string): Buffer {
+    const fd = fixtureOpen(path, false, owner);
+    return use(fd, () => {
+      const before = fixtureFs.fstatSync(fd);
+      observe(fd, before);
+      if (
+        !before.isFile() ||
+        before.nlink !== 1 ||
+        before.uid !== process.getuid?.() ||
+        before.size > 64 * 1024 * 1024
+      )
+        throw new Error("fixture_root_leaf");
+      const bytes = fixtureFs.readFileSync(fd);
+      const after = fixtureFs.fstatSync(fd);
+      if (
+        bytes.length !== before.size ||
+        before.dev !== after.dev ||
+        before.ino !== after.ino ||
+        before.mtimeMs !== after.mtimeMs ||
+        before.ctimeMs !== after.ctimeMs
+      )
+        throw new Error("fixture_root_changed");
+      return bytes;
+    });
+  }
   function visit(path: string, relative: string): void {
-    // Each prior visit can add at most one own key; preserve the exact bound.
+    // Preserve the original node/key bound and independent absolute acquisition window.
     if (visited++ > 20000 && Object.keys(result).length > 20000)
       throw new Error("fixture_inventory_bound");
     const info = fixtureFs.lstatSync(path);
@@ -227,9 +348,10 @@ function fixtureGraph(
       return;
     }
     if (info.isDirectory()) {
-      const fd = fixtureOpen(path, true);
-      try {
+      const fd = fixtureOpen(path, true, owner);
+      use(fd, () => {
         const actual = fixtureFs.fstatSync(fd);
+        observe(fd, actual);
         if (actual.ino !== info.ino || actual.dev !== info.dev)
           throw new Error("fixture_inventory_changed");
         result[relative] = { type: "directory", mode: info.mode & 0o777 };
@@ -246,13 +368,11 @@ function fixtureGraph(
             continue;
           visit(`${path}/${name}`, relative ? `${relative}/${name}` : name);
         }
-      } finally {
-        fixtureFs.closeSync(fd);
-      }
+      });
       return;
     }
     if (!info.isFile()) throw new Error("fixture_inventory_special");
-    const bytes = fixtureRead(path, 64 * 1024 * 1024, false);
+    const bytes = read(path);
     result[relative] = {
       type: "file",
       mode: info.mode & 0o777,
@@ -260,7 +380,25 @@ function fixtureGraph(
       sha256: fixtureRawHash(bytes),
     };
   }
-  visit(base, "");
+  let failed = false;
+  let primary: unknown;
+  try {
+    visit(base, "");
+  } catch (error) {
+    failed = true;
+    primary = error;
+  }
+  for (const fd of [...held.keys()].reverse()) {
+    try {
+      owner.close(fd);
+    } catch (error) {
+      if (!failed) {
+        failed = true;
+        primary = error;
+      }
+    }
+  }
+  if (failed) throw primary;
   return result;
 }
 function fixtureTempObservation(
@@ -316,6 +454,7 @@ function fixtureExecutionRoot(checkout: string): {
   marker: FixtureRootObject;
   temp: FixtureRootObject;
 } {
+  if (fixtureGraphCleanupPoison) throw new Error("fixture_inventory_changed");
   const raw = process.env.DESK_FIXTURE105_BINDING;
   if (raw === undefined || Buffer.byteLength(raw) > 8192)
     throw new Error("fixture_runner_binding_missing");
@@ -787,6 +926,7 @@ function readRelease(): {
   binding: ReleaseBinding;
   observation: Readonly<{ root_sha256: string; temp: FixtureRootObject }>;
 } {
+  if (fixtureGraphCleanupPoison) throw new Error("fixture_inventory_changed");
   // Fresh full checks bracket this synchronous read only. Nothing is reused across
   // a guard call or await; this is not authentication against hostile same-user code.
   const before = fixtureExecutionRoot(fixtureCheckout);
