@@ -669,6 +669,76 @@ class EvaluationProvenance(unittest.TestCase):
             self.assertEqual(self.owner.SECONDARY[1]['phase'],'runtime_retention')
 
     def test_24_canonical_budgets_and_no_future_authority(self):
+        # Exercise the actual init producer and strict reader together with
+        # synthetic role/probe/identity/snapshot inputs; serialization,
+        # exclusive bounded writing, physical reading and parsing remain real.
+        for role,filename in (('build','build-init.json'),('evaluation','partition-init.json')):
+            baseline=None
+            for mode in ('normal','exclusive','at-bound','over-bound','nonfinite'):
+                with self.subTest(init_role=role,mode=mode),tempfile.TemporaryDirectory() as directory:
+                    runner=Path(directory);base=runner/role/'ci';ev=base/'evidence'
+                    for path in (base/'tmp',base/'home',ev/'producer/metadata'):
+                        path.mkdir(mode=0o700,parents=True)
+                    identity=dict(self.common,repository='model/é')
+                    if mode in ('at-bound','over-bound'):
+                        identity['repository']+='x'*(65536-len(baseline)+(mode=='over-bound'))
+                    if mode=='nonfinite':identity['repository']=float('nan')
+                    target=ev/filename
+                    if mode=='exclusive':self.owner.write(target,b'original\n',65536)
+                    prefix='BUILD' if role=='build' else 'EVAL'
+                    self.owner.write(ev/'producer/metadata'/(prefix+'-INSTALL.json'),b'{}\n')
+                    def probe(command):
+                        executable=Path(command[0]).name
+                        return 0,{'node':ci.NODE_VERSION,'npm':ci.NPM_VERSION,
+                            'timeout':'timeout (GNU coreutils) model','unzip':'UnZip model','git':''}[executable]
+                    output=io.StringIO()
+                    with contextlib.ExitStack() as patches:
+                        patches.enter_context(mock.patch.dict(os.environ,{'RUNNER_TEMP':str(runner),'DESK_CI_ROLE_TEMP':str(base.parent)}))
+                        patches.enter_context(mock.patch.object(ci,'ROOT',runner))
+                        patches.enter_context(mock.patch.object(ci,'ci_dir',return_value=base))
+                        patches.enter_context(mock.patch.object(self.owner,'role_base',return_value=base))
+                        patches.enter_context(mock.patch.object(ci,'partition_label',return_value='rest'))
+                        patches.enter_context(mock.patch.object(ci.shutil,'which',side_effect=lambda name:'/model/'+name))
+                        patches.enter_context(mock.patch.object(ci,'probe',side_effect=probe))
+                        patches.enter_context(mock.patch.object(ci,'load_event',return_value={}))
+                        patches.enter_context(mock.patch.object(ci,'collect_git',return_value={}))
+                        patches.enter_context(mock.patch.object(ci,'check_identity',return_value=([],{})))
+                        patches.enter_context(mock.patch.object(ci,'tracked_files',return_value=['test/model.ts']))
+                        patches.enter_context(mock.patch.object(ci,'take_snapshot',return_value={'members':{'test/model.ts':{}}}))
+                        patches.enter_context(mock.patch.object(ci,'snapshot_errors',return_value=[]))
+                        patches.enter_context(mock.patch.object(ci,'partition_identity',return_value=identity))
+                        patches.enter_context(mock.patch.object(ci,'partition_files',return_value=['test/model.ts']))
+                        patches.enter_context(mock.patch.object(self.owner,'policy',return_value=self.policies))
+                        patches.enter_context(mock.patch.object(ci.subprocess,'run',side_effect=AssertionError('no init probe subprocess')))
+                        patches.enter_context(contextlib.redirect_stdout(output))
+                        result=ci.cmd_init(role)
+                    accepted=mode in ('normal','at-bound')
+                    self.assertEqual(result,0 if accepted else 1)
+                    terminal=json.loads(output.getvalue());binding=json.loads((ev/'bind-pre.json').read_bytes())
+                    expected_errors=[] if accepted else ['snapshot failed: '+{'exclusive':'FileExistsError',
+                        'over-bound':'RuntimeError','nonfinite':'ValueError'}[mode]]
+                    self.assertEqual(terminal['init'],accepted);self.assertEqual(terminal['errors'],expected_errors)
+                    self.assertEqual(binding['ok'],accepted);self.assertEqual(binding['errors'],expected_errors)
+                    if not accepted:
+                        if mode=='exclusive':self.assertEqual(target.read_bytes(),b'original\n')
+                        else:self.assertFalse(target.exists())
+                        continue
+                    raw=self.owner.read(target,65536);value=self.owner.parse(raw,65536)
+                    self.assertEqual(value['role'],role);self.assertEqual(value['identity'],identity)
+                    self.assertEqual(value['schema'],'ci-build-init/1' if role=='build' else 'ci-partition-init/2')
+                    self.assertEqual(raw,self.owner.canonical(value))
+                    self.assertEqual(stat.S_IMODE(target.stat().st_mode),0o600)
+                    if mode=='at-bound':self.assertEqual(len(raw),65536)
+                    else:
+                        baseline=raw
+                        self.assertIn('é'.encode(),raw)
+                        with self.assertRaisesRegex(RuntimeError,'^installation_noncanonical$'):
+                            self.owner.parse((json.dumps(value,indent=2,sort_keys=True)+'\n').encode(),65536)
+                        with self.assertRaisesRegex(RuntimeError,'^installation_duplicate_key$'):
+                            self.owner.parse(b'{"role":"build","role":"evaluation"}\n',65536)
+                        with self.assertRaisesRegex(RuntimeError,'^installation_record_bound$'):
+                            self.owner.parse(raw, len(raw)-1)
+
         # Real routing predicates with synthetic paths; no producer admission.
         with tempfile.TemporaryDirectory() as directory:
             runner=Path(directory)/'runner';runner.mkdir(mode=0o700)

@@ -1579,10 +1579,10 @@ def cmd_init(role):
         metadata = ev / 'producer/metadata'
         if role == 'build':
             value = {'schema': 'ci-build-init/1', 'identity': identity2, 'role': 'build', 'source_pre': owner.raw_pin(ev / 'snapshot-pre.json', SNAPSHOT_LIMIT), 'installation': owner.raw_pin(metadata / 'BUILD-INSTALL.json')}
-            write_json_x(ev / 'build-init.json', value)
+            owner.write(ev / 'build-init.json', owner.canonical(value), 65536)
         else:
             value = {'schema': 'ci-partition-init/2', 'partition': partition, 'identity': identity2, 'role': 'evaluation', 'selection': partition_files(sorted(snap['members']), partition), 'counts': list(PARTITION_COUNTS[partition]), 'source_pre': owner.raw_pin(ev / 'snapshot-pre.json', SNAPSHOT_LIMIT), 'installation': owner.raw_pin(metadata / 'EVAL-INSTALL.json')}
-            write_json_x(ev / 'partition-init.json', value)
+            owner.write(ev / 'partition-init.json', owner.canonical(value), 65536)
     except Exception as error:
         bind['errors'].append('snapshot failed: %s' % type(error).__name__)
     bind['ok'] = not bind['errors']
