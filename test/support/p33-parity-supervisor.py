@@ -991,7 +991,10 @@ class StageOwner:
         self.errors = []; self.pending = []; self.actions = []
         self.identity = stat(os.getpid())
         self.parent = {'pid':os.getppid(),'start':stat(os.getppid())['start']}
-        self.parent_fd = stage_parent(self.parent,signal.SIGTERM)
+        # PDEATHSIG follows the creating thread, not the parent process. Clear
+        # any inherited hook (including bootstrap SIGKILL across exec); outer
+        # ownership uses pidfd/PPID/start checks. Genuine TERM stays sticky.
+        self.parent_fd = stage_parent(self.parent,0)
         self.directory = None; self.base = None; self.root_identity = None
 
     def barrier(self):

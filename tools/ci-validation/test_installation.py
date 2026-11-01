@@ -1077,6 +1077,13 @@ class EvaluationProvenance(unittest.TestCase):
                 else:ns['quarantine'].assert_not_called()
                 if cut in ('deadline','close-deadline'):self.assertIn('final-deadline',o.errors)
                 if cut in ('cancel','parent-loss','parent-error'):self.assertTrue(o.cancelled)
+        # Outer ownership deliberately clears inherited parent-thread signals;
+        # process identity/liveness remains mandatory and bootstrap stays KILL.
+        with mock.patch.object(os,'getppid',return_value=44), \
+             mock.patch.dict(ns,stat=lambda pid:{'pid':pid,'start':88},stage_parent=mock.Mock(return_value=999)):
+            actual=cls('prerequisite',False,100)
+            ns['stage_parent'].assert_called_once_with({'pid':44,'start':88},0)
+            self.assertEqual(actual.parent_fd,999);self.assertEqual(actual.deadline,250)
         # Parent registration fails closed across death/reuse/pidfd readiness.
         for cut in ('success','reparent','recycle','exited','close'):
             close_fault=OSError('close') if cut=='close' else None
@@ -1106,6 +1113,7 @@ class EvaluationProvenance(unittest.TestCase):
                 else:
                     with self.assertRaises((RuntimeError,OSError)):subject['stage_child'](args)
                     execute.assert_not_called()
+                ns['stage_parent'].assert_called_once_with({'pid':44,'start':88},signal.SIGKILL)
                 close.assert_called_once_with(998);link.close.assert_called_once()
         # PPID closure includes GNU-timeout-like and P33-like separate sessions
         # plus a subreaper-adopted orphan. Enumeration alone grants no signal.
