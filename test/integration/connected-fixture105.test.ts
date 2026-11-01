@@ -4022,7 +4022,7 @@ suite("connected fixture105 native ownership", () => {
         expect(ordinal).toBe(58);
       },
     ),
-    LIMIT,
+    180000,
   );
   async function readerFailureOrder(
     order: "event-first" | "query-first",

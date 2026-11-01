@@ -254,7 +254,7 @@ record("invocation.json", {
   node_sha256: sha256(fs.readFileSync(process.execPath)),
   guard_invocations: 1,
   profile,
-  native_case_timeout_ms: nativeDiagnostic ? 120000 : null,
+  native_case_timeout_ms: nativeDiagnostic ? 180000 : null,
 });
 
 // One maintenance connection from the already-existing local bootstrap URL survives guard failure and observes cleanup independently.

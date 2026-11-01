@@ -3341,6 +3341,33 @@ class FixtureTargetObserverShapeTests(unittest.TestCase):
     def test_observer_is_first_invocation_only_bounded_and_restores_before_output(self):
         native = (ci.ROOT / 'test/integration/connected-fixture105.test.ts').read_text()
         self.assertIn('const LIMIT = 120000;', native)
+        selected = 'holds unknown construction commit without inventing its missing settlement receipt'
+        hosted = (ci.ROOT / 'test/support/command-postgres-hosted.ts').read_text()
+        def check_case_budgets(source, metadata):
+            self.assertEqual(re.findall(r'^const LIMIT = .*;$', source, re.M), ['const LIMIT = 120000;'])
+            blocks = source.split('\n  it(')[1:]
+            self.assertEqual(len(blocks), 34)
+            selected_count = 0
+            for block in blocks:
+                title = re.match(r'\n    "([^"\n]+)",', block)
+                self.assertIsNotNone(title)
+                chosen = title.group(1) == selected
+                selected_count += int(chosen)
+                endings = re.findall(r'\n    ([A-Z_]+|[0-9]+),\n  \);', block)
+                self.assertEqual(endings, ['180000' if chosen else 'LIMIT'])
+            self.assertEqual(selected_count, 1)
+            self.assertEqual(re.findall(r'native_case_timeout_ms: ([^\n]+)', metadata),
+                             ['nativeDiagnostic ? 180000 : null,'])
+        check_case_budgets(native, hosted)
+        for mutated, metadata in (
+            (native.replace('const LIMIT = 120000;', 'const LIMIT = 180000;'), hosted),
+            (native.replace('\n    LIMIT,\n  );', '\n    180000,\n  );', 1), hosted),
+            (native.replace('\n    180000,\n  );', '\n    LIMIT,\n  );'), hosted),
+            (native, hosted.replace('nativeDiagnostic ? 180000 : null', 'nativeDiagnostic ? 120000 : null')),
+            (native, hosted.replace('nativeDiagnostic ? 180000 : null', 'nativeDiagnostic ? 180000 : 180000')),
+        ):
+            with self.assertRaises(AssertionError):
+                check_case_budgets(mutated, metadata)
         self.assertNotIn('native117', native)
         self.assertEqual(native.count('await new TargetObserver(\n          env.name,\n          "acquisition_cut",\n          maintenanceOwner(),\n        ).around(firstInvocation);'), 1)
         self.assertIn('const TARGET_OBSERVER_CAP = 64;', native)

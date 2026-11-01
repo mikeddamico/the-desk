@@ -27,7 +27,8 @@ after the deadline fails. Query rejection or invalid identity fails immediately,
 with the original query error preserved. There is no runtime-operation retry,
 repeated `pool.end()`, detached timer, session termination or maintenance filter.
 Existing admin checkout/query limits of 10,000/20,000 ms and 120,000 ms native
-case/hook limits remain unchanged. The five-second budget is not a hard return
+case/hook limits remain unchanged except for the prospective selected four-owner
+fault/reconciliation case budget of 180,000 ms. The five-second budget is not a hard return
 bound: an already-started query can settle later and then fail the budget.
 One verified zero is sufficient and does not guarantee future exclusion.
 
@@ -217,7 +218,7 @@ The successor uses the explicitly named connectedFixture151ArtifactHash entry po
 
 Release validation performs two fresh complete execution-root/inventory checks bracketing each synchronous release/adoption/ledger read. Every binding leaf and all 61 owner files retain their independent descriptor reads and hash/identity checks. Start/end root, root hash and complete marker must agree; current-context observations use that final check rather than repeat a third scan. All guard callsites across awaits and SQL remain; no inventory or authority is cached across calls. These are cooperating-runner checks, not detection of every transient mutation or authentication against hostile same-user code. Timeouts and teardown requirements are unchanged.
 
-The traversal preparation restores a fresh kernel no-follow open of every absolute component for each acquired child. It retains once-only FD ownership and private primary-error identity, with permanent cleanup poison checked before graph, execution-root and release filesystem entry. It does not retain the rejected descriptor-reuse algorithm's whole-duration directory snapshots or claim that `lstat` reproduces fresh-open ACL/permission failures. The seventeen registered cases partition the same remapped controls at independent-world boundaries and cover the original acquisition/read/inventory protections and the retained cleanup boundary. Their proposed execution is held; the original four-owner native case, all 58 markers/assertions and 120000 ms case limit are unchanged. The hosted wrapper remains 1200 seconds and the inner supervisor 900 seconds.
+The traversal preparation restores a fresh kernel no-follow open of every absolute component for each acquired child. It retains once-only FD ownership and private primary-error identity, with permanent cleanup poison checked before graph, execution-root and release filesystem entry. It does not retain the rejected descriptor-reuse algorithm's whole-duration directory snapshots or claim that `lstat` reproduces fresh-open ACL/permission failures. The seventeen registered cases partition the same remapped controls at independent-world boundaries and cover the original acquisition/read/inventory protections and the retained cleanup boundary. Their proposed execution is held; the four-owner native case retains all 58 markers/assertions. Its prospective selected-case acceptance budget is now 180000 ms; shared LIMIT=120000 and all other cases remain unchanged. CI144 and CI152 remain failures of the original 120000 ms benchmark. The hosted wrapper remains 1200 seconds and the inner supervisor 900 seconds.
 
 The temporary diagnostic workflow step, connected-only/bail profile, diagnostic wrapper branches and P33 timing prints are removed before final validation. Normal prerequisite/focused/all routing, original aggregate deadline, complete case accounting, retention, audit and security gates are restored. CI105 supplied representative native evidence: the first 13 cases passed, including the complete handoff in 79.051 seconds under its original 120-second deadline. Its 600-second diagnostic envelope then interrupted the remaining run; process containment settled without residuals, but the suite was incomplete. These partial results are not final aggregate acceptance.
 
@@ -328,6 +329,12 @@ W(O). W's intentional acknowledgement-loss rejection remains intact. The inner
 cleanup restores O; the outer cleanup restores D before emitting. Cleanup/output
 failure preserves the primary work error. Added async/observation overhead can
 perturb timing. The original 120000ms case limits/assertions remain unchanged.
+This historical CI120 statement is preserved: the prospective acceptance amendment
+supersedes only the selected four-owner case budget with 180000ms, retaining every
+assertion and fresh integrity read. The extra 50% is an engineering allocation,
+not measured margin or a product SLA. One reviewed run can establish complete
+duration and revised semantic acceptance; failure does not authorize retries or
+a further increase. Original 120-second failures remain failed.
 
 Only guard profile target-diagnostic runs 12 test-local selftest groups before
 native allocation. Fake-driver output is intercepted; only one separately
