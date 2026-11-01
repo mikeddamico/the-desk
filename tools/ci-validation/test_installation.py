@@ -9,6 +9,8 @@ The receipt-control cut runs two finite Bash children containing only builtins;
 it does not execute the wrapper, its context/mask setup or a follow-on child.
 """
 import copy
+import ast
+import io
 import json
 import os
 import stat
@@ -21,6 +23,7 @@ from unittest import mock
 HERE=Path(__file__).resolve().parent
 sys.path.insert(0,str(HERE))
 import ci
+REAL_CI_DIR = ci.ci_dir
 from test_ci import fixture_world
 import installation_model
 import types
@@ -222,7 +225,7 @@ class EvaluationProvenance(unittest.TestCase):
 
     def test_19_private_model_refused_at_real_admission(self):
         # Read the valid model partition, but restore production fixed-role admission.
-        with mock.patch.dict(os.environ,{'RUNNER_TEMP':str(self.base.parent),'DESK_CI_PARTITION':'rest'}), \
+        with mock.patch.dict(os.environ,{'RUNNER_TEMP':str(self.base.parent.parent),'DESK_CI_ROLE_TEMP':str(self.base.parent),'DESK_CI_PARTITION':'rest'}), \
              mock.patch.object(self.owner,'BUILD',Path('/tmp/d')),mock.patch.object(self.owner,'EVAL',Path('/tmp/e')), \
              mock.patch.object(ci,'ROOT',self.checkout):
             with mock.patch.object(self.owner,'graph',wraps=self.owner.graph) as graphs, \
@@ -666,6 +669,85 @@ class EvaluationProvenance(unittest.TestCase):
             self.assertEqual(self.owner.SECONDARY[1]['phase'],'runtime_retention')
 
     def test_24_canonical_budgets_and_no_future_authority(self):
+        # Real routing predicates with synthetic paths; no producer admission.
+        with tempfile.TemporaryDirectory() as directory:
+            runner=Path(directory)/'runner';runner.mkdir(mode=0o700)
+            (runner/'build').mkdir(mode=0o700)
+            alias=Path(directory)/'alias';alias.symlink_to(runner,target_is_directory=True)
+            role_alias=runner/'other';role_alias.mkdir(mode=0o700)
+            with mock.patch.object(self.owner,'BUILD',Path('/tmp/d')),mock.patch.object(self.owner,'EVAL',Path('/tmp/e')):
+                for current,root in (('build',Path('/tmp/d')),('evaluation',Path('/tmp/e'))):
+                    env={'RUNNER_TEMP':str(runner),'DESK_CI_ROLE_TEMP':str(runner/current)}
+                    with mock.patch.dict(os.environ,env),mock.patch.object(ci,'ROOT',root):
+                        for requested in ('build','evaluation'):
+                            self.assertEqual(self.owner.role_base(ci,requested),runner/requested/'ci')
+                        self.assertEqual(REAL_CI_DIR(),runner/current/'ci')
+                        self.assertFalse((runner/'evaluation').exists())  # Sibling lookup is not creation.
+                    for name,value in (('RUNNER_TEMP',None),('RUNNER_TEMP','relative'),('RUNNER_TEMP',str(alias)),
+                        ('RUNNER_TEMP',str(runner)+'/.'),('RUNNER_TEMP',str(runner)+'//'),
+                        ('DESK_CI_ROLE_TEMP',None),('DESK_CI_ROLE_TEMP','relative'),
+                        ('DESK_CI_ROLE_TEMP',str(alias/current)),('DESK_CI_ROLE_TEMP',str(runner/current)+'/.'),
+                        ('DESK_CI_ROLE_TEMP',str(runner/current)+'//'),('DESK_CI_ROLE_TEMP',str(runner/current/current)),
+                        ('DESK_CI_ROLE_TEMP',str(runner/('evaluation' if current=='build' else 'build'))),
+                        ('DESK_CI_ROLE_TEMP',str(Path(directory)/current))):
+                        with self.subTest(role=current,field=name,value=value),mock.patch.dict(os.environ,env),mock.patch.object(ci,'ROOT',root):
+                            if value is None:os.environ.pop(name,None)
+                            else:os.environ[name]=value
+                            with self.assertRaises(RuntimeError):REAL_CI_DIR()
+                            with self.assertRaises(RuntimeError):self.owner.role_base(ci,current)
+                with mock.patch.dict(os.environ,{'RUNNER_TEMP':str(runner),'DESK_CI_ROLE_TEMP':str(runner/'build')}):
+                    with mock.patch.object(ci,'ROOT',Path(directory)):
+                        with self.assertRaisesRegex(RuntimeError,'installation_role_temp'):REAL_CI_DIR()
+                    with mock.patch.object(ci,'ROOT',Path('/tmp/d')):
+                        with self.assertRaisesRegex(RuntimeError,'installation_role'):self.owner.role_base(ci,'other')
+                (runner/'evaluation').symlink_to(role_alias,target_is_directory=True)
+                with mock.patch.dict(os.environ,{'RUNNER_TEMP':str(runner),'DESK_CI_ROLE_TEMP':str(runner/'evaluation')}),mock.patch.object(ci,'ROOT',Path('/tmp/e')):
+                    with self.assertRaisesRegex(RuntimeError,'installation_role_temp'):REAL_CI_DIR()
+                (runner/'evaluation').unlink()
+
+            # Explicit role execution checks both siblings. The original-cwd
+            # collector has no role selector and can retain poisoned evidence.
+            for role in ('build','evaluation'):
+                poison=runner/role/'ci/evidence/producer/POISON.json';poison.parent.mkdir(parents=True,exist_ok=True)
+                poison.write_bytes(b'{}\n')
+                with mock.patch.dict(os.environ,{'RUNNER_TEMP':str(runner),'DESK_CI_ROLE_TEMP':str(runner/'build')}),mock.patch.object(ci,'ci_dir',side_effect=AssertionError('recursive route')),mock.patch.object(self.owner,'role_base',side_effect=AssertionError('recursive route')):
+                    with self.assertRaisesRegex(RuntimeError,'installation_persisted_cleanup_pending'):self.owner.entry()
+                    os.environ.pop('DESK_CI_ROLE_TEMP')
+                    self.owner.entry()
+                poison.unlink()
+
+            # The actual sanitized child environment expression carries both
+            # roots; evaluating this dict starts no process or installation.
+            tree=ast.parse((ci.ROOT/'tools/ci-validation/installation.py').read_text())
+            capture=next(n for n in tree.body if isinstance(n,ast.FunctionDef) and n.name=='owned_capture')
+            expression=next(n.value for n in capture.body if isinstance(n,ast.Assign) and any(isinstance(t,ast.Name) and t.id=='env' for t in n.targets))
+            for role in ('build','evaluation'):
+                base=runner/role/'ci'
+                with mock.patch.dict(os.environ,{'RUNNER_TEMP':str(runner),'DESK_CI_ROLE_TEMP':str(base.parent)}):
+                    child=eval(compile(ast.Expression(expression),'<owned-child-env-control>','eval'),{'os':os,'str':str,'base':base})
+                self.assertEqual(child['RUNNER_TEMP'],str(runner));self.assertEqual(child['DESK_CI_ROLE_TEMP'],str(base.parent))
+                self.assertEqual(child['HOME'],str(base/'home'));self.assertEqual(child['TMPDIR'],str(base/'tmp'))
+
+            # Original-cwd final keeps the runner base and exactly restores an
+            # absent, empty, or present role selector, including refusal paths.
+            original=Path(directory)/'source'
+            ctx=types.SimpleNamespace(ROOT=original)
+            for prior in (None,'',str(runner/'build')):
+                for failure in (False,True):
+                    seen=[]
+                    def outer(_ctx,checkpoint):
+                        seen.append((checkpoint,_ctx.ROOT,os.environ['RUNNER_TEMP'],os.environ['DESK_CI_ROLE_TEMP']))
+                        if failure:raise RuntimeError('controlled-final-refusal')
+                    with mock.patch.dict(os.environ,{'RUNNER_TEMP':str(runner),'GITHUB_WORKSPACE':str(original)}),mock.patch.object(self.owner,'outer',side_effect=outer),contextlib.redirect_stdout(io.StringIO()):
+                        if prior is None:os.environ.pop('DESK_CI_ROLE_TEMP',None)
+                        else:os.environ['DESK_CI_ROLE_TEMP']=prior
+                        self.assertEqual(self.owner.diagnostic_final(ctx),78)
+                        self.assertEqual(os.environ['RUNNER_TEMP'],str(runner))
+                        self.assertEqual(os.environ.get('DESK_CI_ROLE_TEMP'),prior)
+                        self.assertEqual('DESK_CI_ROLE_TEMP' in os.environ,prior is not None)
+                    self.assertEqual(ctx.ROOT,original)
+                    self.assertEqual(seen,[('EF',self.owner.EVAL,str(runner),str(runner/'evaluation'))]*(1 if failure else 2))
+
         # Terminal-only BUILD diagnostics: synthetic cuts, no producer child or
         # actual signal-handler installation. Keep the existing result contract.
         import signal
@@ -938,6 +1020,7 @@ class EvaluationProvenance(unittest.TestCase):
             def inspect_retained(current):
                 original={str(relative):path.read_bytes() for path,relative,_ in self.owner.partial_specs(current) if os.path.lexists(path)}
                 with mock.patch.object(ci,'ROOT',workspace),mock.patch.dict(os.environ,{'GITHUB_WORKSPACE':str(workspace),'RUNNER_TEMP':str(current)}):
+                    os.environ.pop('DESK_CI_ROLE_TEMP',None)  # Original-cwd collector, including poisoned roles.
                     self.assertEqual(self.owner.retain_partial(ci),0)
                 target=current/'producer-failure';index=json.loads((target/'INDEX.json').read_bytes())
                 self.assertTrue(index['complete_present_population']);self.assertEqual(index['problems'],[])
@@ -967,6 +1050,10 @@ class EvaluationProvenance(unittest.TestCase):
             self.assertEqual(tail['representation']['kind'],'blob')
             self.assertIn(b'late-failure',(later/'producer-failure'/tail['representation']['path']).read_bytes())
         wrapper=(ci.ROOT/'tools/ci-validation/run-stage.sh').read_text()
+        role_ci_line='CI_DIR="$DESK_CI_ROLE_TEMP/ci"'
+        self.assertEqual(wrapper.count(role_ci_line),1)
+        self.assertNotIn('CI_DIR="$RUNNER_TEMP/ci"',wrapper)
+        self.assertIn('RUNNER_TEMP="$RUNNER_TEMP" DESK_CI_ROLE_TEMP="$DESK_CI_ROLE_TEMP" DESK_CI_PARTITION="$DESK_CI_PARTITION"',wrapper)
         prefix="    printf '{\"schema\":\"ci-stage-envelope/1\""
         receipt_lines=[line for line in wrapper.splitlines() if line.startswith(prefix)]
         expected_receipt='    printf \'{"schema":"ci-stage-envelope/1","operation":"%s","observed_umask":"%s","effective_umask":"%s","restriction_only":true}\\n\' "$STAGE" "$OBSERVED_MASK" "$EFFECTIVE_MASK" || exit 79'
@@ -978,6 +1065,9 @@ class EvaluationProvenance(unittest.TestCase):
                 'STAGE=producer-build; OBSERVED_MASK=0022; EFFECTIVE_MASK=0077',
                 'printf() { if [ "$EMISSION_EXIT" -ne 0 ]; then return "$EMISSION_EXIT"; fi; builtin printf "$@"; }',
                 expected_receipt,
+                'RUNNER_TEMP=/fixed/runner; DESK_CI_ROLE_TEMP=/fixed/runner/evaluation',
+                role_ci_line,
+                'builtin printf "ROLE_PATHS %s %s %s\\n" "$RUNNER_TEMP" "$DESK_CI_ROLE_TEMP" "$CI_DIR"',
                 'builtin printf "FOLLOW_ON_CHILD_BOUNDARY_REACHED\\n"',
             ])
             result=subprocess.run(['/bin/bash','--noprofile','--norc','-c',script],
@@ -988,6 +1078,7 @@ class EvaluationProvenance(unittest.TestCase):
             self.assertEqual(result.returncode,0 if emission_exit==0 else 79)
             if emission_exit==0:
                 self.assertIn(b'FOLLOW_ON_CHILD_BOUNDARY_REACHED\n',result.stdout)
+                self.assertIn(b'ROLE_PATHS /fixed/runner /fixed/runner/evaluation /fixed/runner/evaluation/ci\n',result.stdout)
                 self.assertEqual(json.loads(result.stdout.splitlines()[0]),{'schema':'ci-stage-envelope/1','operation':'producer-build','observed_umask':'0022','effective_umask':'0077','restriction_only':True})
             else:
                 self.assertEqual(result.stdout,b'')

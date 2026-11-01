@@ -184,7 +184,7 @@ def build_full(tmp, stages=ci.STAGES):
 
 def collect(tmp, scope, env=None):
     # Historical retention controls isolate the new seam; Fixture105Tooling exercises it directly.
-    with mock.patch.object(ci, 'fixture_collect', return_value=None), mock.patch.dict(os.environ, {'RUNNER_TEMP': tmp, **(env or {})}), contextlib.redirect_stdout(io.StringIO()):
+    with mock.patch.object(ci, 'fixture_collect', return_value=None), mock.patch.object(ci, 'ci_dir', return_value=Path(tmp)/'ci'), mock.patch.dict(os.environ, {'RUNNER_TEMP': tmp, 'DESK_CI_ROLE_TEMP': str(Path(tmp)/'evaluation'), **(env or {})}), contextlib.redirect_stdout(io.StringIO()):
         ci.cmd_collect(scope)
     return json.loads((Path(tmp) / 'ci' / ('upload-' + scope) / 'final.json').read_text())
 
@@ -194,8 +194,8 @@ OK_OUTCOMES = {'CONTROLS_UPLOAD_OUTCOME': 'success', 'UPLOAD_OUTCOME': 'success'
 
 
 def final_code(tmp, **outcomes):
-    env = {'RUNNER_TEMP': tmp, **{**OK_OUTCOMES, **outcomes}}
-    with mock.patch.dict(os.environ, env), contextlib.redirect_stdout(io.StringIO()):
+    env = {'RUNNER_TEMP': tmp, 'DESK_CI_ROLE_TEMP': str(Path(tmp)/'evaluation'), **{**OK_OUTCOMES, **outcomes}}
+    with mock.patch.dict(os.environ, env), mock.patch.object(ci, 'ci_dir', return_value=Path(tmp)/'ci'), contextlib.redirect_stdout(io.StringIO()):
         return ci.cmd_final()
 
 
@@ -317,7 +317,8 @@ class DatabaseBinding(unittest.TestCase):
             (Path(tmp) / 'ci' / 'evidence').mkdir(parents=True)
             env = {k: v for k, v in os.environ.items() if k != 'TEST_DATABASE_URL'}
             env['RUNNER_TEMP'] = tmp
-            with mock.patch.dict(os.environ, env, clear=True), contextlib.redirect_stdout(io.StringIO()):
+            env['DESK_CI_ROLE_TEMP'] = str(Path(tmp)/'evaluation')
+            with mock.patch.dict(os.environ, env, clear=True), mock.patch.object(ci, 'ci_dir', return_value=Path(tmp)/'ci'), contextlib.redirect_stdout(io.StringIO()):
                 with mock.patch.object(ci.subprocess, 'run', side_effect=AssertionError('no probe expected')):
                     code = ci.cmd_dbprobe()
             self.assertEqual(code, 1)
@@ -332,9 +333,9 @@ class DatabaseBinding(unittest.TestCase):
         """cmd_dbprobe with subprocess.run and shutil.which mocked: Node is never launched."""
         with tempfile.TemporaryDirectory() as tmp:
             (Path(tmp) / 'ci' / 'evidence').mkdir(parents=True)
-            env = {'RUNNER_TEMP': tmp, 'TEST_DATABASE_URL': URL, 'PATH': '/usr/bin:/bin'}
+            env = {'RUNNER_TEMP': tmp, 'DESK_CI_ROLE_TEMP': str(Path(tmp)/'evaluation'), 'TEST_DATABASE_URL': URL, 'PATH': '/usr/bin:/bin'}
             run = mock.Mock(return_value=result, side_effect=side_effect)
-            with mock.patch.dict(os.environ, env, clear=True), mock.patch.object(ci.shutil, 'which', return_value='/usr/bin/node'), \
+            with mock.patch.dict(os.environ, env, clear=True), mock.patch.object(ci, 'ci_dir', return_value=Path(tmp)/'ci'), mock.patch.object(ci.shutil, 'which', return_value='/usr/bin/node'), \
                     mock.patch.object(ci.subprocess, 'run', run), contextlib.redirect_stdout(io.StringIO()):
                 code = ci.cmd_dbprobe()
             text = (Path(tmp) / 'ci' / 'evidence' / 'db-probe.json').read_text()
@@ -700,8 +701,8 @@ class StageGateCommands(unittest.TestCase):
         return root, runner, ev
 
     def run_cmd(self, root, runner, fn, *args):
-        env = {'RUNNER_TEMP': str(runner)}
-        with mock.patch.dict(os.environ, env), mock.patch.object(ci, 'ROOT', root), \
+        env = {'RUNNER_TEMP': str(runner), 'DESK_CI_ROLE_TEMP': str(runner/'evaluation')}
+        with mock.patch.dict(os.environ, env), mock.patch.object(ci, 'ci_dir', return_value=Path(runner)/'ci'), mock.patch.object(ci, 'ROOT', root), \
                 mock.patch.object(ci, 'tracked_files', lambda: list(TRACKED)), mock.patch.object(ci, 'fixture_capture_stage', return_value={'complete': True}), contextlib.redirect_stdout(io.StringIO()):
             return fn(*args)
 
@@ -761,8 +762,8 @@ class StageGateCommands(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root, runner, ev = self.world(tmp)
             self.stage(ev, runner, 'all', [])
-            env = {'RUNNER_TEMP': str(runner)}
-            with mock.patch.dict(os.environ, env), mock.patch.object(ci, 'ROOT', root), \
+            env = {'RUNNER_TEMP': str(runner), 'DESK_CI_ROLE_TEMP': str(runner/'evaluation')}
+            with mock.patch.dict(os.environ, env), mock.patch.object(ci, 'ci_dir', return_value=Path(runner)/'ci'), mock.patch.object(ci, 'ROOT', root), \
                     mock.patch.object(ci, 'tracked_files', lambda: TRACKED[:-1]), contextlib.redirect_stdout(io.StringIO()):
                 self.assertEqual(ci.cmd_check('all'), 1)
 
@@ -801,7 +802,7 @@ class RawRetention(unittest.TestCase):
                 for value in ('failure', 'skipped', 'cancelled', ''):
                     with self.subTest(name=name, value=value):
                         self.assertEqual(final_code(tmp, **{name: value}), 1)
-            with mock.patch.dict(os.environ, {'RUNNER_TEMP': tmp}), contextlib.redirect_stdout(io.StringIO()):
+            with mock.patch.dict(os.environ, {'RUNNER_TEMP': tmp, 'DESK_CI_ROLE_TEMP': str(Path(tmp)/'evaluation')}), mock.patch.object(ci, 'ci_dir', return_value=Path(tmp)/'ci'), contextlib.redirect_stdout(io.StringIO()):
                 for name in ci.FINAL_OUTCOMES:
                     os.environ.pop(name, None)
                 self.assertEqual(ci.cmd_final(), 1)
@@ -961,7 +962,7 @@ class ControlsGate(unittest.TestCase):
         return ev, runtime
 
     def precheck_all(self, tmp):
-        with mock.patch.dict(os.environ, {'RUNNER_TEMP': tmp}), contextlib.redirect_stdout(io.StringIO()):
+        with mock.patch.dict(os.environ, {'RUNNER_TEMP': tmp, 'DESK_CI_ROLE_TEMP': str(Path(tmp)/'evaluation')}), mock.patch.object(ci, 'ci_dir', return_value=Path(tmp)/'ci'), contextlib.redirect_stdout(io.StringIO()):
             return ci.cmd_precheck('all')
 
     def final_path(self, tmp):
@@ -1059,7 +1060,7 @@ class ControlsGate(unittest.TestCase):
             self.assertEqual(self.precheck_stage(tmp, 'focused'), 0)
 
     def precheck_stage(self, tmp, stage):
-        with mock.patch.dict(os.environ, {'RUNNER_TEMP': tmp}), contextlib.redirect_stdout(io.StringIO()):
+        with mock.patch.dict(os.environ, {'RUNNER_TEMP': tmp, 'DESK_CI_ROLE_TEMP': str(Path(tmp)/'evaluation')}), mock.patch.object(ci, 'ci_dir', return_value=Path(tmp)/'ci'), contextlib.redirect_stdout(io.StringIO()):
             return ci.cmd_precheck(stage)
 
 
@@ -1071,6 +1072,8 @@ def _evaluation_workflow(test, text):
     test.assertNotIn('continue-on-error',text)
     test.assertNotIn('workflow_dispatch',text)
     test.assertNotIn('matrix:',text)
+    test.assertNotRegex(text,r'(?m)^\s+RUNNER_TEMP:')
+    test.assertEqual(text.count('          DESK_CI_ROLE_TEMP:'),34)
     writer=text.split('  verify-writer:\n',1)[1].split('\n  verify-rest:',1)[0]
     rest=text.split('  verify-rest:\n',1)[1].split('\n  verify:',1)[0]
     test.assertIn("    if: ${{ false }} # Representative-first route; no writer run.",writer)
@@ -1109,6 +1112,13 @@ def _evaluation_workflow(test, text):
             test.assertIn("if: ${{ success() && steps."+gate+".outcome == 'success' }}",steps[name])
             test.assertIn('working-directory: '+cwd,steps[name])
         for block in job.split('      - ')[1:]:
+            routed=[line.strip() for line in block.splitlines() if line.startswith('          DESK_CI_ROLE_TEMP:')]
+            if 'working-directory: /tmp/d' in block:
+                test.assertEqual(routed,['DESK_CI_ROLE_TEMP: ${{ runner.temp }}/build'])
+            elif 'working-directory: /tmp/e' in block:
+                test.assertEqual(routed,['DESK_CI_ROLE_TEMP: ${{ runner.temp }}/evaluation'])
+            else:
+                test.assertEqual(routed,[])
             if 'working-directory: /tmp/e' in block and not any('id: '+name+'\n' in block for name in ('eval-init','init')):
                 conditions=[line.strip() for line in block.splitlines() if line.startswith('        if:')]
                 test.assertEqual(len(conditions),1)
@@ -1149,6 +1159,8 @@ def _evaluation_workflow(test, text):
         if label=='rest':
             native=steps['command-postgres']
             assert_held(native)
+            test.assertIn('HOME="$DESK_CI_ROLE_TEMP/ci/home" TMPDIR="$DESK_CI_ROLE_TEMP/ci/tmp"',native)
+            test.assertNotIn('HOME="$RUNNER_TEMP',native)
             traversal=steps['traversal-proof']
             test.assertIn("success() && steps.init.outcome == 'success' && steps.semantic-identities.outcome == 'success'",traversal)
             test.assertIn('working-directory: /tmp/e',traversal)
@@ -1749,7 +1761,8 @@ def _short_layout_controls(test, owner_path):
             environment = {'GITHUB_OUTPUT': str(output), 'GITHUB_ACTIONS': 'true', 'ImageOS': 'ubuntu24', 'DESK_CI_PARTITION': 'rest',
                            'GITHUB_REPOSITORY': 'mikeddamico/the-desk',
                            'GITHUB_SHA': 'invalid' if fault == 'wrong_sha' else 'a' * 40,
-                           'GITHUB_WORKSPACE': str(source), 'RUNNER_TEMP': str(runner)}
+                           'GITHUB_WORKSPACE': str(source), 'RUNNER_TEMP': str(runner),
+                           'DESK_CI_ROLE_TEMP': str(runner/'unrelated-role-input')}
             role_evidence=runner/('evaluation' if fault=='evaluation_success' else 'build')/'fixture105-layout'
             actual_record = g['record']
             def main_record(name, value):
@@ -1832,8 +1845,20 @@ class WorkflowShape(unittest.TestCase):
         text = self.text()
         raw = (ci.ROOT / '.github/workflows/ci.yml').read_text()
         if '# REPRESENTATIVE FIRST:' in raw:
+            native=(ci.ROOT/'test/support/command-postgres-hosted.ts').read_text()
+            for fragment in ('const runnerTemporary = process.env.RUNNER_TEMP;',
+                             'const temporary = process.env.DESK_CI_ROLE_TEMP;',
+                             'resolve(runnerTemporary) !== runnerTemporary',
+                             'fs.realpathSync(runnerTemporary) !== runnerTemporary',
+                             'temporary !== join(runnerTemporary, "evaluation")',
+                             'fs.realpathSync(temporary) !== temporary', 'root !== "/tmp/e"'):
+                self.assertIn(fragment,native)
+                self.assertLess(native.index(fragment),native.index('fs.mkdirSync(stage'))
+            self.assertEqual(native.count('RUNNER_TEMP: runnerTemporary,'),2)
+            self.assertEqual(native.count('DESK_CI_ROLE_TEMP: temporary,'),2)
+            self.assertNotIn('RUNNER_TEMP: temporary,',native)
             _evaluation_workflow(self,raw)
-            self.assertEqual(hashlib.sha256(raw.encode()).hexdigest(),'dd257f0091c0a3366dd2c605d655ab845f04895ff9a29f92e6d173f4c4723aaa')
+            self.assertEqual(hashlib.sha256(raw.encode()).hexdigest(),'daefc111b3b7c01bd17b2f3fb3b4d67c0c713cca63ee961e6e03199f6fb3326d')
             held_media='if: ${{ false }} # Representative-first route; no media preparation.'
             self.assertEqual(raw.count(held_media),1)
             for condition in ('if: ${{ false }}','if: \t${{\tfalse\t}}\t# held media'):
@@ -1849,6 +1874,10 @@ class WorkflowShape(unittest.TestCase):
             # Mutants alter one governed boundary; the original positive shape is
             # checked above and every old normal-workflow assertion remains below.
             for before,after in (
+                ('DESK_CI_ROLE_TEMP: ${{ runner.temp }}/build','RUNNER_TEMP: ${{ runner.temp }}/build'),
+                ('DESK_CI_ROLE_TEMP: ${{ runner.temp }}/evaluation','DESK_CI_ROLE_TEMP: ${{ runner.temp }}/build'),
+                ('DESK_CI_ROLE_TEMP: ${{ runner.temp }}/build','DESK_CI_ROLE_TEMP: ${{ runner.temp }}/build/build'),
+                ('HOME="$DESK_CI_ROLE_TEMP/ci/home"','HOME="$RUNNER_TEMP/ci/home"'),
                 ("success() && steps.build-layout.outcome == 'success'","success()"),
                 ("success() && steps.eval-layout.outcome == 'success'","success()"),
                 ("success() && steps.eval-init.outcome == 'success'","success()"),
@@ -2472,7 +2501,7 @@ class Fixture105Tooling(unittest.TestCase):
             cache.write_bytes(ci.fixture_bytes({'version': '4.1.12', 'results': [[':test/unit/unit00.test.ts', {'duration': 1, 'failed': False}]]}))
             previous = os.umask(0o022)
             try:
-                with mock.patch.object(ci, 'ROOT', checkout), mock.patch.object(ci, 'tracked_files', return_value=TRACKED), mock.patch.dict(os.environ, {'RUNNER_TEMP': str(base.parent), **OK_OUTCOMES}), contextlib.redirect_stdout(io.StringIO()):
+                with mock.patch.object(ci, 'ROOT', checkout), mock.patch.object(ci, 'tracked_files', return_value=TRACKED), mock.patch.dict(os.environ, {'RUNNER_TEMP': str(base.parent.parent), 'DESK_CI_ROLE_TEMP': str(base.parent), **OK_OUTCOMES}), contextlib.redirect_stdout(io.StringIO()):
                     for stage in ci.STAGES:
                         add_stage(ev, runtime, stage)
                         verdict_path = ev / ('verdict-' + stage + '.json')
@@ -3512,6 +3541,30 @@ class Fixture046ConstructionShape(unittest.TestCase):
         self.assertEqual(sum(package['size'] for package in lock['packages']), 133898884)
         self.assertEqual(lock['executables']['/usr/bin/ffmpeg'], '0dafc1360bb07743f76abeb1e4ae16b0aaa1331e9041a0e8d6a8524111dc0cbb')
         self.assertEqual(lock['executables']['/usr/bin/ffprobe'], '0e598fe6d247bfe63757f5c839dc145a166b3f876f2875ca88a306a5b8ec5a58')
+        supply=self._supply_module()
+        with tempfile.TemporaryDirectory() as directory:
+            runner=Path(directory)/'runner';runtime=Path(directory)/'runtime'
+            runtime.mkdir(mode=0o700);receipt=b'{"synthetic_registration":true}\n'
+            (runtime/'receipt.json').write_bytes(receipt)
+            ev=runner/'evaluation/ci/evidence';ev.mkdir(parents=True,mode=0o700)
+            target=ev/'fixture046-runtime.json'
+            env={'RUNNER_TEMP':str(runner),'DESK_CI_ROLE_TEMP':str(runner/'evaluation')}
+            with mock.patch.object(supply,'ROOT',runtime),mock.patch.object(supply,'__file__','/tmp/e/test/support/fixture046-ffmpeg-supply.py'),mock.patch.dict(os.environ,env):
+                supply.export_registration()
+                self.assertEqual(target.read_bytes(),receipt)
+                self.assertFalse((runner/'ci/evidence/fixture046-runtime.json').exists())
+                target.unlink()
+                for field,value in (('RUNNER_TEMP','relative'),('RUNNER_TEMP',str(runner)+'/.'),
+                    ('DESK_CI_ROLE_TEMP',None),('DESK_CI_ROLE_TEMP',str(runner/'build')),
+                    ('DESK_CI_ROLE_TEMP',str(runner/'evaluation/evaluation'))):
+                    with self.subTest(registration=field,value=value),mock.patch.dict(os.environ,env):
+                        if value is None:os.environ.pop(field,None)
+                        else:os.environ[field]=value
+                        with self.assertRaises(RuntimeError):supply.export_registration()
+                        self.assertFalse(target.exists())
+                with mock.patch.object(supply,'__file__',str(runtime/'test/support/fixture046-ffmpeg-supply.py')):
+                    with self.assertRaises(RuntimeError):supply.export_registration()
+                    self.assertFalse(target.exists())
 
         supply = self._supply_module()
         # A command timeout preserves its original object and durably records

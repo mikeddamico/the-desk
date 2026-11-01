@@ -151,15 +151,15 @@ def make(ci, checkout, *, ledger_base, logical=False):
     add('PROVENANCE.json',{'schema':'ci-evaluation-provenance/1','source':common,'profile_policy_sha256':l,'quality_policy_sha256':q_hash,
         'evaluation_profile':pinned(records['EVAL-PROFILE.json']),'evaluation_installation':pinned(records['EVAL-INSTALL.json']),
         'quality':quality_pin,'transfer':transfer,'dist_graph':dist_pin})
-    return {'records':records,'identity':common,'policies':(p,q,l,q_hash),'build':build,'evaluation':checkout,
+    return {'records':records,'identity':common,'policies':(p,q,l,q_hash),'build':build,'evaluation':checkout,'ledger_base':Path(ledger_base),
             'logical':logical,'synthetic_model_only':True,'usable_admission_capability':False}
 
 
 @contextmanager
 def roles(ci, model):
-    """Test-local resource injection; production has no alternate role selector."""
+    """Synthetic ledger seam; real role routing is tested separately, never bypassed in production."""
     owner=ci.installation_owner()
-    with mock.patch.object(owner,'BUILD',model['build']),mock.patch.object(owner,'EVAL',model['evaluation']), mock.patch.object(owner,'POISON',[]), mock.patch.object(owner,'LEASES',{}), mock.patch.object(owner,'CANCELLED',None),mock.patch.object(owner,'SECONDARY',[]),mock.patch.object(owner,'PENDING_OBJECTS',[]):
+    with mock.patch.object(owner,'BUILD',model['build']),mock.patch.object(owner,'EVAL',model['evaluation']), mock.patch.object(owner,'POISON',[]), mock.patch.object(owner,'LEASES',{}), mock.patch.object(owner,'CANCELLED',None),mock.patch.object(owner,'SECONDARY',[]),mock.patch.object(owner,'PENDING_OBJECTS',[]),mock.patch.object(ci,'ci_dir',return_value=model['ledger_base']),mock.patch.dict(os.environ,{'RUNNER_TEMP':str(model['ledger_base'].parent.parent),'DESK_CI_ROLE_TEMP':str(model['ledger_base'].parent)}):
         yield model
 
 

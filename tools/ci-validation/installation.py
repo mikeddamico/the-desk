@@ -49,8 +49,12 @@ def entry():
     need(CANCELLED is None,'cancelled')
     need(not POISON,'cleanup_pending')
     temp = os.environ.get('RUNNER_TEMP')
-    if temp and Path(temp).name in ('build', 'evaluation'):
-        parent = Path(temp).parent
+    role_temp = os.environ.get('DESK_CI_ROLE_TEMP')
+    # Original-cwd retention has no role selector and must retain poisoned roles.
+    if temp and role_temp is not None:
+        parent = Path(temp)
+        need(parent.is_absolute() and str(parent) == temp and parent.resolve() == parent, 'runner_temp')
+        need(role_temp in (str(parent / 'build'), str(parent / 'evaluation')), 'role_temp')
         need(not any(os.path.lexists(parent / role / 'ci/evidence/producer/POISON.json') for role in ('build', 'evaluation')), 'persisted_cleanup_pending')
 
 
@@ -584,14 +588,17 @@ def dist(ctx, root):
 def role_base(ctx, role):
     """Fixed same-job ledgers; no arbitrary role/path or caller JSON routing."""
     need(role in ('build', 'evaluation'), 'role')
-    temporary = Path(os.environ['RUNNER_TEMP'])
-    need(temporary.is_absolute() and temporary.resolve() == temporary, 'runner_temp')
+    original = os.environ.get('RUNNER_TEMP')
+    need(type(original) is str and bool(original), 'runner_temp')
+    runner = Path(original)
+    need(runner.is_absolute() and str(runner) == original and runner.resolve() == runner, 'runner_temp')
     # Each role has a disjoint subtree selected by workflow; evaluation must not
     # inherit a BUILD cwd or module cache.
-    expected = temporary.parent / ('build' if role == 'build' else 'evaluation') / 'ci'
     current = 'build' if ctx.ROOT == BUILD else 'evaluation' if ctx.ROOT == EVAL else None
-    need(current is not None and temporary.name == current, 'role_temp')
-    return expected
+    temporary = os.environ.get('DESK_CI_ROLE_TEMP')
+    need(current is not None and type(temporary) is str and
+         temporary == str(runner / current) and Path(temporary).resolve() == Path(temporary), 'role_temp')
+    return runner / role / 'ci'
 
 
 def raw_pin(path, maximum=8388608):
@@ -782,7 +789,8 @@ def owned_capture(ctx, role, raw_directory, argv, seconds, expected_source):
     capture_directory.mkdir(mode=0o700)
     state['evidence'] = module['identity'](capture_directory)
     env = {'PATH': os.environ['PATH'], 'HOME': str(base / 'home'), 'TMPDIR': str(base / 'tmp'),
-           'RUNNER_TEMP': str(base.parent), 'LANG': 'C.UTF-8', 'LC_ALL': 'C.UTF-8', 'TZ': 'UTC',
+           'RUNNER_TEMP': os.environ['RUNNER_TEMP'], 'DESK_CI_ROLE_TEMP': str(base.parent),
+           'LANG': 'C.UTF-8', 'LC_ALL': 'C.UTF-8', 'TZ': 'UTC',
            'NODE_DISABLE_COMPILE_CACHE': '1', 'TSX_DISABLE_CACHE': '1', 'DESK_ENV': 'test',
            'PROVIDERS_ENABLED': 'false', 'GENERATION_KILL_SWITCH': 'true', 'NPM_CONFIG_USERCONFIG': str(base / 'home/user.npmrc'),
            'NPM_CONFIG_GLOBALCONFIG': str(base / 'home/global.npmrc'), 'NPM_CONFIG_CACHE': str(base/'tmp/npm-cache'),
@@ -1824,6 +1832,7 @@ def diagnostic_final(ctx):
     original = ctx.ROOT
     need(original == Path(os.environ['GITHUB_WORKSPACE']), 'original_final_owner')
     role_temp = Path(os.environ['RUNNER_TEMP']) / 'evaluation'
+    prior_role_temp = os.environ.get('DESK_CI_ROLE_TEMP')
     producer_upload = os.environ.get('PRODUCER_UPLOAD_OUTCOME')
     reasons = ['one selected native case; full validation remains held']
     if producer_upload != 'success':
@@ -1832,7 +1841,7 @@ def diagnostic_final(ctx):
         # Use the authenticated original definitions with a closed evaluation path;
         # never import or execute definitions from a partial clone.
         ctx.ROOT = EVAL
-        os.environ['RUNNER_TEMP'] = str(role_temp)
+        os.environ['DESK_CI_ROLE_TEMP'] = str(role_temp)
         outer(ctx, 'EF')
         for name in ('NATIVE_OUTCOME', 'NATIVE_UPLOAD_OUTCOME', 'CONTROLS_UPLOAD_OUTCOME', 'UPLOAD_OUTCOME'):
             if os.environ.get(name) != 'success':
@@ -1842,7 +1851,10 @@ def diagnostic_final(ctx):
         reasons.append('final provenance refused: ' + type(error).__name__)
     finally:
         ctx.ROOT = original
-        os.environ['RUNNER_TEMP'] = str(role_temp.parent)
+        if prior_role_temp is None:
+            os.environ.pop('DESK_CI_ROLE_TEMP', None)
+        else:
+            os.environ['DESK_CI_ROLE_TEMP'] = prior_role_temp
     print(json.dumps({'schema': 'ci-representative-hold/1', 'final': 'HOLD', 'native_or_full_acceptance': False, 'reasons': reasons}))
     return 78
 

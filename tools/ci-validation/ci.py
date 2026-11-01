@@ -90,10 +90,8 @@ def installation_owner():
 
 
 def ci_dir():
-    temp = os.environ.get('RUNNER_TEMP')
-    if not temp or not os.path.isabs(temp):
-        raise RuntimeError('RUNNER_TEMP must be an absolute path')
-    return Path(temp) / 'ci'
+    owner = installation_owner()
+    return owner.role_base(sys.modules[__name__], 'build' if ROOT == owner.BUILD else 'evaluation')
 
 
 def redact(data, extra=()):

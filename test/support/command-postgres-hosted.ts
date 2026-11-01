@@ -8,7 +8,8 @@ import pg from "pg";
 import { sha256, canonicalJson } from "../../src/identity/canonical-json.js";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
-const temporary = process.env.RUNNER_TEMP;
+const runnerTemporary = process.env.RUNNER_TEMP;
+const temporary = process.env.DESK_CI_ROLE_TEMP;
 const nativeDiagnostic =
   process.argv.length === 3 && process.argv[2] === "fixture105-unknown";
 const profile = nativeDiagnostic ? "fixture105-unknown" : "command-postgres";
@@ -18,7 +19,13 @@ if (
   process.env.GITHUB_ACTIONS !== "true" ||
   process.env.ImageOS !== "ubuntu24" ||
   process.env.DESK_CI_PARTITION !== "rest" ||
-  !temporary?.startsWith("/")
+  !temporary?.startsWith("/") ||
+  !runnerTemporary?.startsWith("/") ||
+  resolve(runnerTemporary) !== runnerTemporary ||
+  fs.realpathSync(runnerTemporary) !== runnerTemporary ||
+  temporary !== join(runnerTemporary, "evaluation") ||
+  fs.realpathSync(temporary) !== temporary ||
+  root !== "/tmp/e"
 )
   throw new Error("hosted_rest_fixture_required");
 const base = join(temporary, "ci");
@@ -212,7 +219,8 @@ const environment = {
   PATH: dirname(process.execPath) + ":/usr/bin:/bin",
   HOME: join(base, "home"),
   TMPDIR: join(base, "tmp"),
-  RUNNER_TEMP: temporary,
+  RUNNER_TEMP: runnerTemporary,
+  DESK_CI_ROLE_TEMP: temporary,
   ...(process.env.RUNNER_TRACKING_ID
     ? { RUNNER_TRACKING_ID: process.env.RUNNER_TRACKING_ID }
     : {}),
@@ -373,7 +381,8 @@ try {
     cwd: root,
     env: {
       ...environment,
-      RUNNER_TEMP: temporary,
+      RUNNER_TEMP: runnerTemporary,
+      DESK_CI_ROLE_TEMP: temporary,
       DESK_CI_PARTITION: "rest",
       GITHUB_SHA: process.env.GITHUB_SHA,
       GITHUB_REPOSITORY: process.env.GITHUB_REPOSITORY,

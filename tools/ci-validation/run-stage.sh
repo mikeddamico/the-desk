@@ -82,9 +82,10 @@ CAP_BYTES=67108864     # 64 MiB; verified below against the kernel's own byte-de
 
 HERE=$(cd "$(dirname "$0")" && pwd -P) || exit 70
 ROOT=$(cd "$HERE/../.." && pwd -P) || exit 70
-[ -n "${RUNNER_TEMP:-}" ] || { echo "RUNNER_TEMP is required" >&2; exit 70; }
+[ -n "${RUNNER_TEMP:-}" ] && [ -n "${DESK_CI_ROLE_TEMP:-}" ] || { echo "runner and role temp are required" >&2; exit 70; }
 case "$RUNNER_TEMP" in /*) ;; *) echo "RUNNER_TEMP must be absolute" >&2; exit 70 ;; esac
-CI_DIR="$RUNNER_TEMP/ci"
+case "$DESK_CI_ROLE_TEMP" in /*) ;; *) echo "DESK_CI_ROLE_TEMP must be absolute" >&2; exit 70 ;; esac
+CI_DIR="$DESK_CI_ROLE_TEMP/ci"
 STAGE_DIR="$CI_DIR/evidence/$STAGE"
 NODE_EXE=$(command -v node) || { echo "node is not on PATH" >&2; exit 70; }
 NODE_BIN=$(dirname "$NODE_EXE")
@@ -158,7 +159,7 @@ if [ "$PROFILE" = rest ]; then DB_FEED=$TEST_DATABASE_URL; else DB_FEED=""; fi
 printf '%s\n' "$DB_FEED" | /usr/bin/env -i \
   PATH="$NODE_BIN:/usr/bin:/bin" HOME="$CI_DIR/home" TMPDIR="$CI_DIR/tmp" \
   LANG=C.UTF-8 LC_ALL=C.UTF-8 TZ=UTC CI=true DESK_FIXTURE105_BINDING="$FIXTURE_BINDING" \
-  RUNNER_TEMP="$RUNNER_TEMP" DESK_CI_PARTITION="$DESK_CI_PARTITION" \
+  RUNNER_TEMP="$RUNNER_TEMP" DESK_CI_ROLE_TEMP="$DESK_CI_ROLE_TEMP" DESK_CI_PARTITION="$DESK_CI_PARTITION" \
   GITHUB_SHA="$GITHUB_SHA" GITHUB_REPOSITORY="$GITHUB_REPOSITORY" \
   GITHUB_RUN_ID="$GITHUB_RUN_ID" GITHUB_RUN_ATTEMPT="$GITHUB_RUN_ATTEMPT" \
   "${RUNNER_ID_ARG[@]+"${RUNNER_ID_ARG[@]}"}" \

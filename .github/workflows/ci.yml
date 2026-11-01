@@ -64,7 +64,7 @@ jobs:
         working-directory: /tmp/d
         timeout-minutes: 41
         env:
-          RUNNER_TEMP: ${{ runner.temp }}/build
+          DESK_CI_ROLE_TEMP: ${{ runner.temp }}/build
         run: |
           /bin/bash tools/ci-validation/run-stage.sh producer-build
       - name: Prepare the exclusive complete EVAL clone
@@ -90,7 +90,7 @@ jobs:
         working-directory: /tmp/e
         timeout-minutes: 16
         env:
-          RUNNER_TEMP: ${{ runner.temp }}/evaluation
+          DESK_CI_ROLE_TEMP: ${{ runner.temp }}/evaluation
         run: |
           /bin/bash tools/ci-validation/run-stage.sh evaluation-init
       - name: Transfer complete verified dist and seal the evaluation provenance
@@ -99,7 +99,7 @@ jobs:
         working-directory: /tmp/e
         timeout-minutes: 6
         env:
-          RUNNER_TEMP: ${{ runner.temp }}/evaluation
+          DESK_CI_ROLE_TEMP: ${{ runner.temp }}/evaluation
         run: |
           /bin/bash tools/ci-validation/run-stage.sh bind-build
       - name: Verify all six frozen semantic identities in the genuine EVAL installation
@@ -108,14 +108,14 @@ jobs:
         working-directory: /tmp/e
         timeout-minutes: 2
         env:
-          RUNNER_TEMP: ${{ runner.temp }}/evaluation
+          DESK_CI_ROLE_TEMP: ${{ runner.temp }}/evaluation
         run: /usr/bin/python3 -I -B tools/ci-validation/ci.py identity-witness
       - name: Probe the disposable database read-only
         if: ${{ success() && steps.init.outcome == 'success' }}
         working-directory: /tmp/e
         timeout-minutes: 1
         env:
-          RUNNER_TEMP: ${{ runner.temp }}/evaluation
+          DESK_CI_ROLE_TEMP: ${{ runner.temp }}/evaluation
         run: |
           /usr/bin/python3 -I -B tools/ci-validation/ci.py dbprobe
       - name: Guard P33 prerequisite
@@ -123,7 +123,7 @@ jobs:
         working-directory: /tmp/e
         timeout-minutes: 1
         env:
-          RUNNER_TEMP: ${{ runner.temp }}/evaluation
+          DESK_CI_ROLE_TEMP: ${{ runner.temp }}/evaluation
         run: |
           /bin/bash tools/ci-validation/run-stage.sh prerequisite
       - name: Validate P33 prerequisite
@@ -131,7 +131,7 @@ jobs:
         working-directory: /tmp/e
         timeout-minutes: 1
         env:
-          RUNNER_TEMP: ${{ runner.temp }}/evaluation
+          DESK_CI_ROLE_TEMP: ${{ runner.temp }}/evaluation
         run: |
           /usr/bin/python3 -I -B tools/ci-validation/ci.py check prerequisite
       - name: Guard P33 focused
@@ -139,7 +139,7 @@ jobs:
         working-directory: /tmp/e
         timeout-minutes: 3
         env:
-          RUNNER_TEMP: ${{ runner.temp }}/evaluation
+          DESK_CI_ROLE_TEMP: ${{ runner.temp }}/evaluation
         run: |
           /bin/bash tools/ci-validation/run-stage.sh focused
       - name: Validate P33 focused
@@ -147,7 +147,7 @@ jobs:
         working-directory: /tmp/e
         timeout-minutes: 1
         env:
-          RUNNER_TEMP: ${{ runner.temp }}/evaluation
+          DESK_CI_ROLE_TEMP: ${{ runner.temp }}/evaluation
         run: |
           /usr/bin/python3 -I -B tools/ci-validation/ci.py check focused
       - name: Collect controls evidence
@@ -156,7 +156,7 @@ jobs:
         working-directory: /tmp/e
         timeout-minutes: 2
         env:
-          RUNNER_TEMP: ${{ runner.temp }}/evaluation
+          DESK_CI_ROLE_TEMP: ${{ runner.temp }}/evaluation
         run: |
           /usr/bin/python3 -I -B tools/ci-validation/ci.py collect --scope controls
       - name: Retain controls evidence
@@ -174,7 +174,7 @@ jobs:
         working-directory: /tmp/e
         timeout-minutes: 122
         env:
-          RUNNER_TEMP: ${{ runner.temp }}/evaluation
+          DESK_CI_ROLE_TEMP: ${{ runner.temp }}/evaluation
         run: |
           /bin/bash tools/ci-validation/run-stage.sh all
       - name: Validate aggregate counts coverage and source (held)
@@ -182,7 +182,7 @@ jobs:
         working-directory: /tmp/e
         timeout-minutes: 2
         env:
-          RUNNER_TEMP: ${{ runner.temp }}/evaluation
+          DESK_CI_ROLE_TEMP: ${{ runner.temp }}/evaluation
         run: |
           /usr/bin/python3 -I -B tools/ci-validation/ci.py check all
       - name: Collect full evidence
@@ -191,7 +191,7 @@ jobs:
         working-directory: /tmp/e
         timeout-minutes: 3
         env:
-          RUNNER_TEMP: ${{ runner.temp }}/evaluation
+          DESK_CI_ROLE_TEMP: ${{ runner.temp }}/evaluation
         run: |
           /usr/bin/python3 -I -B tools/ci-validation/ci.py collect --scope full
       - name: Retain full evidence
@@ -227,7 +227,7 @@ jobs:
         working-directory: /tmp/d
         timeout-minutes: 5
         env:
-          RUNNER_TEMP: ${{ runner.temp }}/build
+          DESK_CI_ROLE_TEMP: ${{ runner.temp }}/build
         run: |
           npm audit --audit-level=high
       - id: gitleaks
@@ -243,7 +243,7 @@ jobs:
         working-directory: /tmp/e
         timeout-minutes: 1
         env:
-          RUNNER_TEMP: ${{ runner.temp }}/evaluation
+          DESK_CI_ROLE_TEMP: ${{ runner.temp }}/evaluation
           GITLEAKS_OUTCOME: ${{ steps.gitleaks.outcome }}
         run: |
           /usr/bin/python3 -I -B tools/ci-validation/ci.py retain-security
@@ -328,7 +328,7 @@ jobs:
         working-directory: /tmp/d
         timeout-minutes: 41
         env:
-          RUNNER_TEMP: ${{ runner.temp }}/build
+          DESK_CI_ROLE_TEMP: ${{ runner.temp }}/build
         run: |
           /bin/bash tools/ci-validation/run-stage.sh producer-build
       - name: Prepare the exclusive complete EVAL clone
@@ -354,7 +354,7 @@ jobs:
         working-directory: /tmp/e
         timeout-minutes: 16
         env:
-          RUNNER_TEMP: ${{ runner.temp }}/evaluation
+          DESK_CI_ROLE_TEMP: ${{ runner.temp }}/evaluation
         run: |
           /bin/bash tools/ci-validation/run-stage.sh evaluation-init
       - name: Transfer complete verified dist and seal the evaluation provenance
@@ -363,7 +363,7 @@ jobs:
         working-directory: /tmp/e
         timeout-minutes: 6
         env:
-          RUNNER_TEMP: ${{ runner.temp }}/evaluation
+          DESK_CI_ROLE_TEMP: ${{ runner.temp }}/evaluation
         run: |
           /bin/bash tools/ci-validation/run-stage.sh bind-build
       - name: Reconstruct the fixed synthetic fixture FFmpeg runtime (held)
@@ -372,7 +372,7 @@ jobs:
         working-directory: /tmp/e
         timeout-minutes: 16
         env:
-          RUNNER_TEMP: ${{ runner.temp }}/evaluation
+          DESK_CI_ROLE_TEMP: ${{ runner.temp }}/evaluation
         run: /usr/bin/timeout --signal=TERM --kill-after=20s 900s /usr/bin/python3 -I -B test/support/fixture046-ffmpeg-supply.py prepare
       - name: Verify all six frozen semantic identities in the genuine EVAL installation
         id: semantic-identities
@@ -380,7 +380,7 @@ jobs:
         working-directory: /tmp/e
         timeout-minutes: 2
         env:
-          RUNNER_TEMP: ${{ runner.temp }}/evaluation
+          DESK_CI_ROLE_TEMP: ${{ runner.temp }}/evaluation
         run: /usr/bin/python3 -I -B tools/ci-validation/ci.py identity-witness
       - name: Prove traversal10 Node12 and callback20 after genuine seal
         id: traversal-proof
@@ -388,7 +388,7 @@ jobs:
         working-directory: /tmp/e
         timeout-minutes: 21
         env:
-          RUNNER_TEMP: ${{ runner.temp }}/evaluation
+          DESK_CI_ROLE_TEMP: ${{ runner.temp }}/evaluation
         run: |
           /usr/bin/timeout --signal=TERM --kill-after=20s 1200s /usr/bin/python3 -I -B tools/ci-validation/ci.py traversal-proof
       - name: Retain traversal proof including failed capture and loader evidence
@@ -410,7 +410,7 @@ jobs:
         working-directory: /tmp/e
         timeout-minutes: 1
         env:
-          RUNNER_TEMP: ${{ runner.temp }}/evaluation
+          DESK_CI_ROLE_TEMP: ${{ runner.temp }}/evaluation
         run: |
           /usr/bin/python3 -I -B tools/ci-validation/ci.py dbprobe
       - name: Guard P33 prerequisite
@@ -418,7 +418,7 @@ jobs:
         working-directory: /tmp/e
         timeout-minutes: 1
         env:
-          RUNNER_TEMP: ${{ runner.temp }}/evaluation
+          DESK_CI_ROLE_TEMP: ${{ runner.temp }}/evaluation
         run: |
           /bin/bash tools/ci-validation/run-stage.sh prerequisite
       - name: Validate P33 prerequisite
@@ -426,7 +426,7 @@ jobs:
         working-directory: /tmp/e
         timeout-minutes: 1
         env:
-          RUNNER_TEMP: ${{ runner.temp }}/evaluation
+          DESK_CI_ROLE_TEMP: ${{ runner.temp }}/evaluation
         run: |
           /usr/bin/python3 -I -B tools/ci-validation/ci.py check prerequisite
       - name: Guard P33 focused
@@ -434,7 +434,7 @@ jobs:
         working-directory: /tmp/e
         timeout-minutes: 3
         env:
-          RUNNER_TEMP: ${{ runner.temp }}/evaluation
+          DESK_CI_ROLE_TEMP: ${{ runner.temp }}/evaluation
         run: |
           /bin/bash tools/ci-validation/run-stage.sh focused
       - name: Validate P33 focused
@@ -442,7 +442,7 @@ jobs:
         working-directory: /tmp/e
         timeout-minutes: 1
         env:
-          RUNNER_TEMP: ${{ runner.temp }}/evaluation
+          DESK_CI_ROLE_TEMP: ${{ runner.temp }}/evaluation
         run: |
           /usr/bin/python3 -I -B tools/ci-validation/ci.py check focused
       - name: Collect controls evidence
@@ -451,7 +451,7 @@ jobs:
         working-directory: /tmp/e
         timeout-minutes: 2
         env:
-          RUNNER_TEMP: ${{ runner.temp }}/evaluation
+          DESK_CI_ROLE_TEMP: ${{ runner.temp }}/evaluation
         run: |
           /usr/bin/python3 -I -B tools/ci-validation/ci.py collect --scope controls
       - name: Retain controls evidence
@@ -470,9 +470,9 @@ jobs:
         working-directory: /tmp/e
         timeout-minutes: 21
         env:
-          RUNNER_TEMP: ${{ runner.temp }}/evaluation
+          DESK_CI_ROLE_TEMP: ${{ runner.temp }}/evaluation
         run: |
-          /usr/bin/env HOME="$RUNNER_TEMP/ci/home" TMPDIR="$RUNNER_TEMP/ci/tmp" \
+          /usr/bin/env HOME="$DESK_CI_ROLE_TEMP/ci/home" TMPDIR="$DESK_CI_ROLE_TEMP/ci/tmp" \
             /usr/bin/timeout --signal=TERM --kill-after=20s 1200s \
             node --import tsx test/support/command-postgres-hosted.ts fixture105-unknown
       - name: Retain native diagnostic including failed cleanup observations
@@ -490,7 +490,7 @@ jobs:
         working-directory: /tmp/e
         timeout-minutes: 122
         env:
-          RUNNER_TEMP: ${{ runner.temp }}/evaluation
+          DESK_CI_ROLE_TEMP: ${{ runner.temp }}/evaluation
         run: |
           /bin/bash tools/ci-validation/run-stage.sh all
       - name: Validate aggregate counts coverage and source (held)
@@ -498,7 +498,7 @@ jobs:
         working-directory: /tmp/e
         timeout-minutes: 2
         env:
-          RUNNER_TEMP: ${{ runner.temp }}/evaluation
+          DESK_CI_ROLE_TEMP: ${{ runner.temp }}/evaluation
         run: |
           /usr/bin/python3 -I -B tools/ci-validation/ci.py check all
       - name: Settle owned fixture runtime before full retention
@@ -507,7 +507,7 @@ jobs:
         working-directory: /tmp/e
         timeout-minutes: 2
         env:
-          RUNNER_TEMP: ${{ runner.temp }}/evaluation
+          DESK_CI_ROLE_TEMP: ${{ runner.temp }}/evaluation
         run: /usr/bin/python3 -I -B test/support/fixture046-ffmpeg-supply.py cleanup
       - name: Collect full evidence
         id: collect-full
@@ -515,7 +515,7 @@ jobs:
         working-directory: /tmp/e
         timeout-minutes: 3
         env:
-          RUNNER_TEMP: ${{ runner.temp }}/evaluation
+          DESK_CI_ROLE_TEMP: ${{ runner.temp }}/evaluation
           FIXTURE046_CLEANUP_OUTCOME: ${{ steps.fixture046-cleanup.outcome }}
         run: |
           /usr/bin/python3 -I -B tools/ci-validation/ci.py collect --scope full
@@ -552,7 +552,7 @@ jobs:
         working-directory: /tmp/d
         timeout-minutes: 5
         env:
-          RUNNER_TEMP: ${{ runner.temp }}/build
+          DESK_CI_ROLE_TEMP: ${{ runner.temp }}/build
         run: |
           npm audit --audit-level=high
       - id: gitleaks
@@ -568,7 +568,7 @@ jobs:
         working-directory: /tmp/e
         timeout-minutes: 1
         env:
-          RUNNER_TEMP: ${{ runner.temp }}/evaluation
+          DESK_CI_ROLE_TEMP: ${{ runner.temp }}/evaluation
           GITLEAKS_OUTCOME: ${{ steps.gitleaks.outcome }}
         run: |
           /usr/bin/python3 -I -B tools/ci-validation/ci.py retain-security
