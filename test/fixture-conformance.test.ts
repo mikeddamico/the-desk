@@ -29,11 +29,36 @@ describe("Frozen Fixture v0.4.6 through the production loader", () => {
     expect(Object.keys(vectors).sort()).toEqual(
       Object.keys(stageDomains).sort(),
     );
-    for (const [stage, vector] of Object.entries(vectors)) {
-      expect(vector.domain).toBe(stageDomains[stage as StageName]);
-      expect(fingerprint(stage as StageName, vector.input_projection)).toBe(
-        vector.fingerprint,
-      );
+    const before = Object.fromEntries(
+      Object.entries(vectors).map(([stage, vector]) => [
+        stage,
+        fingerprint(stage as StageName, vector.input_projection),
+      ]),
+    );
+    for (const role of ["desk-full-build/1", "desk-evaluation-runtime/1"]) {
+      // Installation provenance is deliberately outside all six semantic projections.
+      const provenance = {
+        profile: role,
+        root: role === "desk-full-build/1" ? "/tmp/d" : "/tmp/e",
+      };
+      expect(Object.keys(provenance).sort()).toEqual(["profile", "root"]);
+      for (const [stage, vector] of Object.entries(vectors)) {
+        expect(vector.domain).toBe(stageDomains[stage as StageName]);
+        expect(fingerprint(stage as StageName, vector.input_projection)).toBe(
+          vector.fingerprint,
+        );
+      }
+      for (const [stage, vector] of Object.entries(vectors)) {
+        expect(fingerprint(stage as StageName, vector.input_projection)).toBe(
+          before[stage],
+        );
+        expect(() =>
+          fingerprint(stage as StageName, {
+            ...vector.input_projection,
+            execution_provenance: provenance,
+          }),
+        ).toThrow();
+      }
     }
   });
 

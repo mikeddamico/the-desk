@@ -15,7 +15,10 @@ import {
   connectedFixture105ResourceIdentity,
 } from "../../src/runtime/connected-fixture151-data.js";
 import ts from "typescript";
-import { canonicalTimestamp } from "../../src/identity/canonical-json.js";
+import {
+  canonicalJson,
+  canonicalTimestamp,
+} from "../../src/identity/canonical-json.js";
 
 // Reuse the existing closed extraction seam: declarations only, no native module imports or DB setup.
 async function nativeCallbackSelftest(): Promise<void> {
@@ -103,6 +106,11 @@ async function nativeCallbackSelftest(): Promise<void> {
   }
 }
 
+function requiredValue<T>(value: T | undefined): T {
+  if (value === undefined) throw new Error("private fixture value missing");
+  return value;
+}
+
 type Graph = (
   base: string,
   kind: "source" | "tools",
@@ -166,6 +174,7 @@ interface World {
   unexpectedCloses: number[];
   opened: (fd: number, name: string) => void;
   facade: typeof fs;
+  aliases: Record<string, string>;
   hook: Hook;
   graph: Graph;
   realm: () => Graph;
@@ -205,6 +214,7 @@ function world(work: (world: World) => void): void {
     unexpectedCloses,
     opened,
     facade: fs,
+    aliases: {},
     hook: (_name, _args, next) => next(),
     graph: () => ({}),
     realm: () => () => ({}),
@@ -215,6 +225,23 @@ function world(work: (world: World) => void): void {
       if (typeof original !== "function") return original;
       return (...args: unknown[]): unknown => {
         const label = String(name);
+        if (typeof args[0] === "string") {
+          const supplied = args[0];
+          const proc = /^\/proc\/self\/fd\/(\d+)\/(.+)$/u.exec(supplied);
+          const absolute =
+            proc && held.has(Number(proc[1]))
+              ? path.join(
+                  requiredValue(held.get(Number(proc[1]))),
+                  requiredValue(proc[2]),
+                )
+              : supplied;
+          for (const [logical, physical] of Object.entries(current.aliases)) {
+            if (absolute === logical || absolute.startsWith(logical + "/")) {
+              args[0] = physical + absolute.slice(logical.length);
+              break;
+            }
+          }
+        }
         if (calls.length < 4096) calls.push({ name: label, args });
         if (label === "closeSync" && typeof args[0] === "number") {
           const entry = active.get(args[0]);
@@ -344,9 +371,18 @@ function boundRelease(w: World): {
   root: () => unknown;
   bindingRoot: string;
   witness: string;
+  relation: (raw: Record<string, Buffer>) => unknown;
+  rebind: (value: unknown) => void;
+  identity: (path: string, privateMode: boolean) => unknown;
+  read: (path: string, limit: number, privateMode: boolean) => unknown;
+  cleanupState: () => {
+    poison: boolean;
+    retained: { fd: number; ordinal: number }[];
+    owned: [number, number][];
+  };
 } {
   const checkout = path.join(w.root, "release-checkout");
-  const ciBase = path.join(w.root, "release-ci");
+  const ciBase = path.join(w.root, "evaluation", "ci");
   const prepared = spawnSync(
     "/usr/bin/python3",
     [
@@ -354,18 +390,17 @@ function boundRelease(w: World): {
       "-B",
       "-c",
       [
-        "import json,os,pathlib,runpy,shutil,stat,sys",
+        "import json,os,pathlib,runpy,shutil,stat,sys,types,importlib.util",
         "actual=pathlib.Path.cwd();checkout=pathlib.Path(sys.argv[1]);base=pathlib.Path(sys.argv[2])",
-        "ci=runpy.run_path(str(actual/'tools/ci-validation/ci.py'),run_name='release_binding_owner')",
-        "checkout.mkdir(mode=0o700);base.mkdir(mode=0o700)",
+        "spec=importlib.util.spec_from_file_location('release_binding_model',actual/'tools/ci-validation/ci.py');ci=importlib.util.module_from_spec(spec);sys.modules[spec.name]=ci;spec.loader.exec_module(ci)",
+        "ms=importlib.util.spec_from_file_location('installation_model',actual/'tools/ci-validation/installation_model.py');model=importlib.util.module_from_spec(ms);ms.loader.exec_module(model)",
+        "checkout.mkdir(mode=0o700);base.mkdir(mode=0o700,parents=True)",
         "for name in ('tmp','evidence','home'):(base/name).mkdir(mode=0o700)",
-        "names=set(ci['FIXTURE_OWNER_PATHS'])|{'fixtures/connected-fixture151/'+name for name in ci['FIXTURE_RESOURCE_NAMES']}",
-        "for name in sorted(names):\n p=checkout/name;p.parent.mkdir(mode=0o700,parents=True,exist_ok=True);shutil.copyfile(actual/name,p);p.chmod(stat.S_IMODE((actual/name).stat().st_mode))",
-        "(checkout/'node_modules').mkdir(mode=0o700)",
-        "tool=checkout/'node_modules/inert-tooling-witness.js';tool.write_text('// inert tooling bytes; never executed\\n');tool.chmod(0o600)",
+        "names=set(ci.FIXTURE_OWNER_PATHS)|{'fixtures/connected-fixture151/'+name for name in ci.FIXTURE_RESOURCE_NAMES}",
+        "for name in sorted(names):\n p=checkout/name;p.parent.mkdir(mode=0o700,parents=True,exist_ok=True);shutil.copyfile(actual/name,p);p.chmod(0o600)",
         "witness=checkout/'graph-only-bound-witness.txt';witness.write_text('original bound graph bytes');witness.chmod(0o600)",
-        "binding=ci['fixture_prepare'](base,checkout)",
-        "print(json.dumps(binding,separators=(',',':')))",
+        "binding,record=model.bind(ci,base,checkout,logical=True)",
+        "print(json.dumps({'binding':binding,'identity':record['identity'],'synthetic_model_only':True}))",
       ].join("\n"),
       checkout,
       ciBase,
@@ -384,7 +419,19 @@ function boundRelease(w: World): {
   );
   expect(prepared.status).toBe(0);
   expect(prepared.stderr.length).toBe(0);
-  const binding: unknown = JSON.parse(prepared.stdout.toString());
+  const model: unknown = JSON.parse(prepared.stdout.toString());
+  if (
+    typeof model !== "object" ||
+    model === null ||
+    Reflect.get(model, "synthetic_model_only") !== true
+  )
+    throw new Error("explicit model required");
+  const binding: unknown = Reflect.get(model, "binding");
+  const modeledIdentity: unknown = Reflect.get(model, "identity");
+  if (typeof modeledIdentity !== "object" || modeledIdentity === null)
+    throw new Error("model identity required");
+  w.aliases["/tmp/e"] = checkout;
+  w.aliases["/tmp/d"] = checkout + "-build-model";
   if (
     typeof binding !== "object" ||
     binding === null ||
@@ -399,12 +446,14 @@ function boundRelease(w: World): {
     "fixtureJson",
     "fixtureAbsolute",
     "fixtureOpen",
+    "fixtureClose",
     "fixtureIdentity",
     "fixtureRead",
     "fixtureStable",
     "fixtureSame",
     "fixtureGraph",
     "fixtureTempObservation",
+    "fixtureExecutionProvenance",
     "fixtureExecutionRoot",
     "obj",
     "objects",
@@ -419,6 +468,8 @@ function boundRelease(w: World): {
     "EFFECTS",
     "RELEASE_ID",
     "fixtureCheckout",
+    "fixtureBoundaryOwned",
+    "fixtureBoundaryOrdinal",
     "fixtureGraphCleanupPoison",
     "fixtureGraphRetainedCloses",
   ]);
@@ -462,7 +513,7 @@ function boundRelease(w: World): {
       ...canonicalFunctions,
       ...statements.map((node) => node.getText(parsed)),
     ].join("\n") +
-      "\n({release:readRelease,graph:fixtureGraph,root:()=>fixtureExecutionRoot(fixtureCheckout)});",
+      "\n({release:readRelease,graph:fixtureGraph,root:()=>fixtureExecutionRoot(fixtureCheckout),relation:(raw)=>fixtureExecutionProvenance(fixtureCheckout,raw,fixtureGraph(fixtureCheckout,'source'),fixtureGraph(fixtureCheckout+'/node_modules','tools')),rebind:(value)=>{process.env.DESK_FIXTURE105_BINDING=JSON.stringify(value);},identity:fixtureIdentity,read:fixtureRead,cleanupState:()=>({poison:fixtureGraphCleanupPoison,retained:fixtureGraphRetainedCloses.map((row)=>({fd:row.fd,ordinal:row.ordinal})),owned:[...fixtureBoundaryOwned]})});",
     {
       compilerOptions: {
         target: ts.ScriptTarget.ES2024,
@@ -496,6 +547,10 @@ function boundRelease(w: World): {
     "constants",
   ])
     aliases[name] = Reflect.get(w.facade, name);
+  const modeledField = (name: string): unknown => {
+    const value: unknown = Reflect.get(modeledIdentity, name);
+    return value;
+  };
   const release: unknown = runInNewContext(
     releaseCode,
     {
@@ -510,6 +565,11 @@ function boundRelease(w: World): {
           PROVIDERS_ENABLED: "false",
           GENERATION_KILL_SWITCH: "true",
           DESK_FIXTURE105_BINDING: JSON.stringify(binding),
+          DESK_CI_PARTITION: "rest",
+          GITHUB_REPOSITORY: modeledField("repository"),
+          GITHUB_SHA: modeledField("checkout"),
+          GITHUB_RUN_ID: modeledField("run_id"),
+          GITHUB_RUN_ATTEMPT: modeledField("run_attempt"),
         },
         getuid: () => process.getuid?.(),
       },
@@ -518,7 +578,7 @@ function boundRelease(w: World): {
       TextDecoder,
       fileURLToPath,
       __fixtureModuleUrl: pathToFileURL(
-        path.join(checkout, "src/runtime/connected-fixture105.ts"),
+        "/tmp/e/src/runtime/connected-fixture105.ts",
       ).href,
       createHash: crypto.createHash,
       ConnectedFixture105Refusal,
@@ -530,21 +590,308 @@ function boundRelease(w: World): {
   if (
     typeof release !== "object" ||
     release === null ||
-    ["release", "graph", "root"].some(
-      (name) => typeof Reflect.get(release, name) !== "function",
-    )
+    [
+      "release",
+      "graph",
+      "root",
+      "relation",
+      "rebind",
+      "identity",
+      "read",
+      "cleanupState",
+    ].some((name) => typeof Reflect.get(release, name) !== "function")
   )
     throw new Error("private release extraction failed");
   const functions = release as {
     release: () => unknown;
     graph: Graph;
     root: () => unknown;
+    relation: (raw: Record<string, Buffer>) => unknown;
+    rebind: (value: unknown) => void;
+    identity: (path: string, privateMode: boolean) => unknown;
+    read: (path: string, limit: number, privateMode: boolean) => unknown;
+    cleanupState: () => {
+      poison: boolean;
+      retained: { fd: number; ordinal: number }[];
+      owned: [number, number][];
+    };
   };
   return {
     ...functions,
     bindingRoot,
     witness: path.join(checkout, "graph-only-bound-witness.txt"),
   };
+}
+
+function modeledObject(value: unknown): Record<string, unknown> {
+  if (typeof value !== "object" || value === null || Array.isArray(value))
+    throw new Error("model record required");
+  return value as Record<string, unknown>;
+}
+function modeledRows(value: unknown): Record<string, unknown>[] {
+  if (!Array.isArray(value)) throw new Error("model rows required");
+  return (value as unknown[]).map(modeledObject);
+}
+function modeledBytes(value: unknown): Buffer {
+  return Buffer.from(canonicalJson(value) + "\n");
+}
+function modeledPin(raw: Buffer): { bytes: number; sha256: string } {
+  return {
+    bytes: raw.length,
+    sha256: crypto.createHash("sha256").update(raw).digest("hex"),
+  };
+}
+function repinModeledMetadata(
+  input: Record<string, Buffer>,
+): Record<string, Buffer> {
+  const raw = { ...input };
+  const update = (name: string, fields: Record<string, string>): void => {
+    const value: unknown = JSON.parse(requiredValue(raw[name]).toString());
+    const row = modeledObject(value);
+    for (const [key, target] of Object.entries(fields))
+      row[key] = modeledPin(requiredValue(raw[target]));
+    raw[name] = modeledBytes(row);
+  };
+  for (const prefix of ["BUILD", "EVAL"]) {
+    update(prefix + "-PROFILE.json", {
+      closure: prefix + "-CLOSURE.json",
+      optional_absences: prefix + "-OPTIONAL-ABSENCES.json",
+    });
+    update(prefix + "-INSTALL.json", {
+      profile: prefix + "-PROFILE.json",
+      source_graph:
+        prefix === "BUILD"
+          ? "BUILD-SOURCE-INVENTORY.json"
+          : "SOURCE-INVENTORY.json",
+      tools_graph:
+        prefix === "BUILD"
+          ? "BUILD-TOOLS-INVENTORY.json"
+          : "TOOLS-INVENTORY.json",
+      package_metadata: prefix + "-PACKAGE-METADATA.json",
+      hidden_lock: prefix + "-HIDDEN-LOCK.json",
+      invocation: prefix + "-INSTALL-INVOCATION.json",
+      settlement: prefix + "-INSTALL-SETTLEMENT.json",
+    });
+  }
+  const quality = modeledObject(
+    JSON.parse(requiredValue(raw["QUALITY.json"]).toString()) as unknown,
+  );
+  for (const gate of modeledRows(quality.gates)) {
+    for (const key of ["source_before", "source_after"])
+      gate[key] = modeledPin(requiredValue(raw["BUILD-SOURCE-INVENTORY.json"]));
+    for (const key of ["tools_before", "tools_after"])
+      gate[key] = modeledPin(requiredValue(raw["BUILD-TOOLS-INVENTORY.json"]));
+  }
+  raw["QUALITY.json"] = modeledBytes(quality);
+  update("QUALITY.json", {
+    build_profile: "BUILD-PROFILE.json",
+    build_installation: "BUILD-INSTALL.json",
+    dist_graph: "DIST-INVENTORY.json",
+    settlement: "QUALITY-SETTLEMENT.json",
+  });
+  update("COPY-RESULT.json", {
+    source_before: "DIST-INVENTORY.json",
+    source_after: "DIST-INVENTORY.json",
+    destination_graph: "DIST-INVENTORY.json",
+  });
+  update("TRANSFER.json", {
+    quality: "QUALITY.json",
+    build_installation: "BUILD-INSTALL.json",
+    evaluation_installation: "EVAL-INSTALL.json",
+    dist_graph: "DIST-INVENTORY.json",
+    copy_result: "COPY-RESULT.json",
+    settlement: "TRANSFER-SETTLEMENT.json",
+  });
+  update("PROVENANCE.json", {
+    evaluation_profile: "EVAL-PROFILE.json",
+    evaluation_installation: "EVAL-INSTALL.json",
+    quality: "QUALITY.json",
+    transfer: "TRANSFER.json",
+    dist_graph: "DIST-INVENTORY.json",
+  });
+  const adoption = modeledObject(
+    JSON.parse(requiredValue(raw["ADOPTION.json"]).toString()) as unknown,
+  );
+  adoption.execution_provenance_bytes = requiredValue(
+    raw["PROVENANCE.json"],
+  ).length;
+  adoption.execution_provenance_sha256 = modeledPin(
+    requiredValue(raw["PROVENANCE.json"]),
+  ).sha256;
+  raw["ADOPTION.json"] = modeledBytes(adoption);
+  return raw;
+}
+function nodeRelationControls(w: World): void {
+  const bound = boundRelease(w),
+    directory = path.join(bound.bindingRoot, "bindings");
+  const original: Record<string, Buffer> = {};
+  for (const name of fs.readdirSync(directory))
+    original[name] = fs.readFileSync(path.join(directory, name));
+  const partition = path.join(
+      path.dirname(path.dirname(bound.bindingRoot)),
+      "evidence/partition.json",
+    ),
+    before = fs.readFileSync(partition);
+  const invoke = (raw: Record<string, Buffer>): unknown => {
+    const wire = modeledObject(JSON.parse(before.toString()) as unknown),
+      execution = modeledObject(wire.execution),
+      summary = modeledObject(execution.summary);
+    execution.provenance = modeledPin(requiredValue(raw["PROVENANCE.json"]));
+    for (const [key, name] of Object.entries({
+      build_installation: "BUILD-INSTALL.json",
+      evaluation_installation: "EVAL-INSTALL.json",
+      quality: "QUALITY.json",
+      transfer: "TRANSFER.json",
+      dist: "DIST-INVENTORY.json",
+    }))
+      summary[key] = modeledPin(requiredValue(raw[name]));
+    fs.writeFileSync(partition, modeledBytes(wire));
+    return bound.relation(raw);
+  };
+  const cases: [
+    string,
+    string,
+    (row: Record<string, unknown>) => void,
+    string,
+  ][] = [
+    [
+      "exit_type",
+      "BUILD-INSTALL-INVOCATION.json",
+      (v) => {
+        v.exit = false;
+      },
+      "invocation",
+    ],
+    [
+      "pending",
+      "EVAL-INSTALL-SETTLEMENT.json",
+      (v) => {
+        v.owned_pending = ["held"];
+      },
+      "unsettled",
+    ],
+    [
+      "copy_count",
+      "COPY-RESULT.json",
+      (v) => {
+        v.files = Number(v.files) + 1;
+      },
+      "copy_counts",
+    ],
+    [
+      "absence",
+      "EVAL-OPTIONAL-ABSENCES.json",
+      (v) => {
+        const rows = modeledRows(v.rows);
+        rows.pop();
+        v.rows = rows;
+      },
+      "absence_population",
+    ],
+    [
+      "owner_positive",
+      "COPY-RESULT.json",
+      (v) => {
+        v.owner_raw = { bytes: 0, sha256: "a".repeat(64) };
+      },
+      "physical_pin",
+    ],
+    [
+      "quality_inode",
+      "QUALITY.json",
+      (v) => {
+        const d = modeledObject(v.build_root);
+        d.ino = Number(d.ino) + 1;
+      },
+      "quality_root_identity",
+    ],
+    [
+      "transfer_inode",
+      "TRANSFER.json",
+      (v) => {
+        const d = modeledObject(v.consumer_root);
+        d.ino = Number(d.ino) + 1;
+      },
+      "transfer_root_identity",
+    ],
+    [
+      "install_inode",
+      "EVAL-INSTALL.json",
+      (v) => {
+        const d = modeledObject(v.modules);
+        d.ino = Number(d.ino) + 1;
+      },
+      "physical_evaluation_identity",
+    ],
+    [
+      "contradictory_argv",
+      "EVAL-INSTALL-INVOCATION.json",
+      (v) => {
+        if (!Array.isArray(v.argv)) throw new Error("model argv");
+        v.argv = [...(v.argv as unknown[]), "--ignore-scripts=false"];
+      },
+      "invocation_policy",
+    ],
+    [
+      "stream_type",
+      "EVAL-INSTALL-INVOCATION.json",
+      (v) => {
+        v.stdout = { bytes: false, sha256: "a".repeat(64) };
+      },
+      "physical_pin",
+    ],
+  ];
+  try {
+    const positive = { ...original };
+    const value = modeledObject(
+      JSON.parse(
+        requiredValue(positive["EVAL-INSTALL-INVOCATION.json"]).toString(),
+      ) as unknown,
+    );
+    value.stdout = modeledPin(Buffer.alloc(0));
+    value.stderr = modeledPin(Buffer.alloc(0));
+    positive["EVAL-INSTALL-INVOCATION.json"] = modeledBytes(value);
+    expect(invoke(repinModeledMetadata(positive))).toHaveProperty("provenance");
+    for (const [name, file, mutate, check] of cases) {
+      const raw = { ...original },
+        row = modeledObject(
+          JSON.parse(requiredValue(raw[file]).toString()) as unknown,
+        );
+      mutate(row);
+      raw[file] = modeledBytes(row);
+      expect(
+        failure(() => invoke(repinModeledMetadata(raw))),
+        name,
+      ).toMatchObject({
+        message: "fixture_execution_provenance_invalid",
+        check,
+      });
+      expect(w.held.size, name).toBe(0);
+    }
+  } finally {
+    fs.writeFileSync(partition, before);
+  }
+  const rootFile = path.join(bound.bindingRoot, "ROOT.json"),
+    rootBefore = fs.readFileSync(rootFile),
+    marker = modeledObject(JSON.parse(rootBefore.toString()) as unknown);
+  const binding = {
+    root: bound.bindingRoot,
+    root_sha256: modeledPin(rootBefore).sha256,
+  };
+  try {
+    marker.schema = "fixture105-execution-root/1";
+    const changed = modeledBytes(marker);
+    fs.writeFileSync(rootFile, changed);
+    bound.rebind({ ...binding, root_sha256: modeledPin(changed).sha256 });
+    expect(failure(bound.root)).toMatchObject({
+      message: "fixture_root_profile",
+    });
+    expect(w.held.size).toBe(0);
+  } finally {
+    fs.writeFileSync(rootFile, rootBefore);
+    bound.rebind(binding);
+  }
+  process.stdout.write("FIXTURE105_NODE_RELATIONS 12/12\n");
 }
 
 /** One fixed synthetic overflow subject; no physical filesystem traversal is needed for the node/key ceiling. */
@@ -1223,8 +1570,164 @@ describe("fixture105 fresh component traversal", () => {
         ownership(w, uncertain);
       }
     });
+    for (const cut of [
+      "root_component_close",
+      "release_component_close",
+      "release_read_primary",
+    ] as const)
+      world((w) => {
+        const bound = boundRelease(w),
+          primary = new Error(cut),
+          close = new Error("uncertain metadata close");
+        let read = false,
+          injected = false;
+        w.hook = (name, _args, next) => {
+          if (cut === "release_read_primary" && name === "readFileSync") {
+            read = true;
+            throw primary;
+          }
+          if (
+            name === "closeSync" &&
+            !injected &&
+            (cut !== "release_read_primary" || read)
+          ) {
+            injected = true;
+            throw cut === "release_read_primary" ? close : primary;
+          }
+          return next();
+        };
+        expect(
+          failure(cut === "root_component_close" ? bound.root : bound.release),
+        ).toBe(primary);
+        expect(injected).toBe(true);
+        const uncertain = new Set(
+          w.acquisitions.filter((entry) => !entry.settled),
+        );
+        expect(uncertain.size).toBe(1);
+        ownership(w, uncertain);
+        for (const invoke of [bound.root, bound.release]) {
+          const calls = w.calls.length,
+            acquired = w.acquisitions.length;
+          expect(failure(invoke)).toMatchObject({
+            message: "fixture_inventory_changed",
+          });
+          expect(w.calls.length).toBe(calls);
+          expect(w.acquisitions.length).toBe(acquired);
+          ownership(w, uncertain);
+        }
+      });
   });
   it("V9 runs genuine release root comparisons across an internal cut and a subsequent call", () => {
+    // Target only the acquired FINAL descriptor: fixtureOpen's component closes
+    // have already settled before either helper performs its first fstatSync.
+    for (const helper of ["identity", "read"] as const)
+      for (const cut of [
+        "undefined_body_close_error",
+        "successful_body_undefined_close",
+      ] as const)
+        world((w) => {
+          const bound = boundRelease(w),
+            target = helper === "identity" ? w.base : w.leaf,
+            secondaryClose = new Error("final descriptor close error");
+          const acquired: { value: Acquisition | undefined } = {
+            value: undefined,
+          };
+          const undefinedFailure = (): unknown => undefined;
+          let finalStats = 0,
+            finalReads = 0,
+            closeCuts = 0;
+          w.hook = (name, args, next) => {
+            if (name === "fstatSync" && targetFd(w, args[0], target)) {
+              if (typeof args[0] !== "number")
+                throw new Error("final descriptor required");
+              const entry = requiredValue(w.active.get(args[0]));
+              acquired.value ??= entry;
+              expect(entry).toBe(acquired.value);
+              finalStats++;
+              if (cut === "undefined_body_close_error")
+                throw undefinedFailure();
+            }
+            if (name === "readFileSync" && targetFd(w, args[0], target))
+              finalReads++;
+            if (
+              name === "closeSync" &&
+              acquired.value !== undefined &&
+              args[0] === acquired.value.fd
+            ) {
+              closeCuts++;
+              if (cut === "undefined_body_close_error") throw secondaryClose;
+              throw undefinedFailure();
+            }
+            return next();
+          };
+          let caught = false,
+            value: unknown;
+          try {
+            if (helper === "identity") bound.identity(target, true);
+            else bound.read(target, 262144, true);
+          } catch (error) {
+            caught = true;
+            value = error;
+          }
+          expect(caught).toBe(true);
+          expect(value).toBeUndefined();
+          expect(value).not.toBe(secondaryClose);
+          expect(closeCuts).toBe(1);
+          expect(finalStats).toBe(
+            cut === "undefined_body_close_error" || helper === "identity"
+              ? 1
+              : 2,
+          );
+          expect(finalReads).toBe(
+            cut === "successful_body_undefined_close" && helper === "read"
+              ? 1
+              : 0,
+          );
+          const final = requiredValue(acquired.value);
+          expect(final.path).toBe(target);
+          expect(
+            w.acquisitions.filter((entry) => entry.path === target),
+          ).toHaveLength(1);
+          expect(w.unexpectedCloses).toEqual([]);
+          for (const entry of w.acquisitions) {
+            expect(entry.closeAttempts).toBe(1);
+            expect(entry.settled).toBe(entry !== final);
+          }
+          expect([...w.active.values()]).toEqual([final]);
+          expect([...w.held.keys()]).toEqual([final.fd]);
+          const state = bound.cleanupState();
+          expect(state.poison).toBe(true);
+          expect(state.owned).toHaveLength(0);
+          expect(state.retained).toHaveLength(1);
+          const retained = requiredValue(state.retained[0]);
+          expect(retained.fd).toBe(final.fd);
+          expect(retained.ordinal).toBe(final.ordinal);
+          for (const invoke of [
+            () => bound.identity(w.base, true),
+            () => bound.read(w.leaf, 262144, true),
+            bound.root,
+            bound.release,
+            () => bound.graph(w.base, "source"),
+          ]) {
+            const calls = w.calls.length,
+              opens = w.acquisitions.length;
+            expect(failure(invoke)).toMatchObject({
+              message: "fixture_inventory_changed",
+            });
+            expect(w.calls.length).toBe(calls);
+            expect(w.acquisitions.length).toBe(opens);
+            expect(final.closeAttempts).toBe(1);
+            expect(w.active.get(final.fd)).toBe(final);
+            expect(w.held.get(final.fd)).toBe(target);
+          }
+          // All ownership/poison assertions precede world()'s harness repair.
+          const after = bound.cleanupState();
+          expect(after.poison).toBe(true);
+          expect(after.owned).toHaveLength(0);
+          expect(after.retained).toHaveLength(1);
+          expect(requiredValue(after.retained[0]).fd).toBe(final.fd);
+          expect(requiredValue(after.retained[0]).ordinal).toBe(final.ordinal);
+        });
     world((w) => {
       const before = w.graph(w.base, "source");
       fs.writeFileSync(w.leaf, "different governed bytes");
@@ -1303,6 +1806,7 @@ describe("fixture105 fresh component traversal", () => {
         expect(w.held.size).toBe(0);
         expect(w.unexpectedCloses).toEqual([]);
       });
+    world(nodeRelationControls);
     // The actual await/context mutation witness remains in the unchanged native suite;
     // this group exercises synchronous release filesystem cuts, not an across-await filesystem claim.
   });

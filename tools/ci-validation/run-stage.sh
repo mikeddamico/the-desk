@@ -18,13 +18,52 @@
 # starts (the guard's stdin is /dev/null). Every other stage runs without it.
 set -u
 set -C   # noclobber: every capture file below is created exclusively; an existing file is an error
-umask 077
 
 if [ "$#" -ne 1 ]; then
   echo "usage: run-stage.sh <prerequisite|focused|all>" >&2
   exit 64
 fi
 STAGE=$1
+case "$STAGE" in
+  producer-build|evaluation-init|bind-build)
+    case "${DESK_CI_PARTITION:-}" in writer|rest) ;; *) exit 64 ;; esac
+    [ "${GITHUB_ACTIONS:-}" = true ] && [ "${ImageOS:-}" = ubuntu24 ] || exit 70
+    [ "$STAGE" != producer-build ] || [ "$PWD" = /tmp/d ] || exit 70
+    [ "$STAGE" = producer-build ] || [ "$PWD" = /tmp/e ] || exit 70
+    read_stage_umask() {
+      local key value rest fields=0
+      READ_STAGE_MASK=
+      while read -r key value rest; do
+        if [ "$key" = Umask: ]; then
+          [ -z "$rest" ] || return 1
+          fields=$((fields + 1))
+          READ_STAGE_MASK=$value
+        fi
+      done </proc/self/status || return 1
+      [ "$fields" -eq 1 ]
+    }
+    read_stage_umask || exit 70
+    OBSERVED_MASK=$READ_STAGE_MASK
+    case "$OBSERVED_MASK" in 0[0-7][0-7][0-7]) ;; *) exit 70 ;; esac
+    OBSERVED_BITS=$((8#$OBSERVED_MASK))
+    # Adding mask bits is restrictive; removing any old bit is forbidden.
+    [ $((OBSERVED_BITS & ~8#0077)) -eq 0 ] || exit 70
+    umask 077 || exit 70
+    read_stage_umask || exit 70
+    EFFECTIVE_MASK=$READ_STAGE_MASK
+    [ "$EFFECTIVE_MASK" = 0077 ] || exit 70
+    export DESK_CI_ENVELOPE_OPERATION="$STAGE"
+    export DESK_CI_ENVELOPE_OBSERVED_UMASK="$OBSERVED_MASK"
+    export DESK_CI_ENVELOPE_EFFECTIVE_UMASK="$EFFECTIVE_MASK"
+    printf '{"schema":"ci-stage-envelope/1","operation":"%s","observed_umask":"%s","effective_umask":"%s","restriction_only":true}\n' "$STAGE" "$OBSERVED_MASK" "$EFFECTIVE_MASK" || exit 79
+    ulimit -c 0 || exit 79
+    ulimit -f 65536 || exit 79
+    case "$STAGE" in producer-build) ROLE_LIMIT=2400 ;; evaluation-init) ROLE_LIMIT=900 ;; bind-build) ROLE_LIMIT=300 ;; esac
+    /usr/bin/env -u TEST_DATABASE_URL -u NODE_PATH -u NODE_OPTIONS /usr/bin/timeout --signal=TERM --kill-after=20s "${ROLE_LIMIT}s" /usr/bin/python3 -I -B tools/ci-validation/ci.py "$STAGE"
+    exit $?
+    ;;
+esac
+umask 077 # Existing legacy stage envelope only; new producer routes returned above.
 case "$STAGE" in
   prerequisite) CEILING=30 ;;
   focused) CEILING=120 ;;
@@ -119,6 +158,9 @@ if [ "$PROFILE" = rest ]; then DB_FEED=$TEST_DATABASE_URL; else DB_FEED=""; fi
 printf '%s\n' "$DB_FEED" | /usr/bin/env -i \
   PATH="$NODE_BIN:/usr/bin:/bin" HOME="$CI_DIR/home" TMPDIR="$CI_DIR/tmp" \
   LANG=C.UTF-8 LC_ALL=C.UTF-8 TZ=UTC CI=true DESK_FIXTURE105_BINDING="$FIXTURE_BINDING" \
+  RUNNER_TEMP="$RUNNER_TEMP" DESK_CI_PARTITION="$DESK_CI_PARTITION" \
+  GITHUB_SHA="$GITHUB_SHA" GITHUB_REPOSITORY="$GITHUB_REPOSITORY" \
+  GITHUB_RUN_ID="$GITHUB_RUN_ID" GITHUB_RUN_ATTEMPT="$GITHUB_RUN_ATTEMPT" \
   "${RUNNER_ID_ARG[@]+"${RUNNER_ID_ARG[@]}"}" \
   /bin/bash -c "$CHILD" _ "$PROFILE" "$CEILING" \
   > "$STAGE_DIR/stdout" 2> "$STAGE_DIR/stderr"

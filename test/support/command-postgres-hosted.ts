@@ -55,6 +55,8 @@ const sourceCheck = String.raw`
 import contextlib,io,json,os,runpy,sys
 from pathlib import Path
 c=runpy.run_path('tools/ci-validation/ci.py',run_name='command_postgres_source_check')
+import types
+owner_module=types.ModuleType('command_postgres_source_check');owner_module.__dict__.update(c);sys.modules['command_postgres_source_check']=owner_module
 base=c['ci_dir']();ev=base/'evidence';summary_evidence={}
 if sys.argv[2] not in ('command-postgres','fixture105-unknown'):raise RuntimeError('fixed profile required')
 stage=ev/sys.argv[2]
@@ -79,7 +81,7 @@ if sys.argv[1]=='after':
     except Exception as error:
       summary_evidence['native_case_complete']=False
       summary_evidence['native_journal_error']=type(error).__name__
-partition=c['check_partition_binding']()
+partition=c['installation_owner']().outer(owner_module, 'E0' if sys.argv[1]=='before' else 'E1')
 if partition['partition']!='rest':raise RuntimeError('rest binding required')
 pre=c['load_pre'](ev);build=c['load_json'](ev/'bind-build.json')
 if build.get('ok') is not True or not c['verdict_ok'](ev/'db-probe.json'):raise RuntimeError('build/database binding required')
@@ -369,7 +371,15 @@ try {
   if (primary !== undefined) throw new Error("observer_failed_before_launch");
   child = spawn("/usr/bin/timeout", command, {
     cwd: root,
-    env: environment,
+    env: {
+      ...environment,
+      RUNNER_TEMP: temporary,
+      DESK_CI_PARTITION: "rest",
+      GITHUB_SHA: process.env.GITHUB_SHA,
+      GITHUB_REPOSITORY: process.env.GITHUB_REPOSITORY,
+      GITHUB_RUN_ID: process.env.GITHUB_RUN_ID,
+      GITHUB_RUN_ATTEMPT: process.env.GITHUB_RUN_ATTEMPT,
+    },
     stdio: ["ignore", "pipe", "pipe"],
     detached: true,
   });

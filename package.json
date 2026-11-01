@@ -32,21 +32,21 @@
     "@smithy/node-http-handler": "4.14.0",
     "@smithy/signature-v4": "5.7.5",
     "@smithy/types": "4.19.0",
+    "@types/node": "24.5.2",
+    "@types/pg": "8.15.5",
     "pg": "8.16.3",
     "pino": "9.9.5",
+    "tsx": "4.20.5",
+    "typescript": "5.9.2",
+    "vitest": "4.1.12",
     "zod": "4.6.6"
   },
   "devDependencies": {
     "@eslint/js": "10.0.1",
-    "@types/node": "24.5.2",
-    "@types/pg": "8.15.5",
     "eslint": "10.11.0",
     "eslint-config-prettier": "10.1.8",
     "prettier": "3.6.2",
-    "tsx": "4.20.5",
-    "typescript": "5.9.2",
-    "typescript-eslint": "8.70.1",
-    "vitest": "4.1.12"
+    "typescript-eslint": "8.70.1"
   },
   "packageManager": "npm@11.19.0"
 }

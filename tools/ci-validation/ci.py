@@ -1,17 +1,16 @@
 #!/usr/bin/python3
 """Fixed capture/validation tool for the foundation-ci workflow (stages: prerequisite, focused, all).
 
-Standard library only. It never starts the P33 guard, Vitest, a database client other than the fixed read-only probe
-below, or any native extraction. No arbitrary command, path, profile or stage input is accepted. Fixed subcommands handle
-workspace initialization, build/fixture/partition binding, database probing, stage prechecks and verdict checks,
-scoped evidence collection, security retention, and per-partition/joint final verdicts (see main()).
-precheck for stage `all` additionally requires a complete controls-scope collection record (controls_problems), so a
-failed controls retention stops the run before the aggregate is created; partial artifacts are still collected and uploaded.
+Standard library control plane. The closed producer commands use the existing owned
+capture to run ordinary pinned npm and five quality commands; runtime/SQL/media
+commands remain behind genuine /2 admission. No caller chooses a profile or command.
 
-Evidence lives outside the checkout under $RUNNER_TEMP/ci; every record is created exclusively. The checkout is
-bound by a runtime snapshot of every git-tracked file (bytes + sha256), taken before anything runs, re-taken after the
-build and after every stage, and compared byte-for-byte. Only a root `dist/` directory produced by `npm run build`
-is allowed in addition to the tracked files (see take_snapshot); `.git` and `node_modules` are not hashed.
+BUILD and EVAL use independent ordinary installations. BUILD's complete source,
+installed graph, quality results and dist are freshly checked at named outer
+checkpoints. Every runtime root/release check reads all sealed producer metadata
+and the complete current EVAL source/tools graphs. Source-only bind-build.ok or
+dist is never a capability. Definitions imported by pure tests provide no CLI
+admission bypass. Actual /2 initialization, transfer and seal are exclusive.
 
 Retention limits (deliberately stricter than execution): run-stage.sh lets a stage write up to 64 MiB per file, but
 collect() retains at most COPY_LIMIT = 8 MiB of each stdout/stderr and JSON_LIMIT of each JSON record. A larger file
@@ -75,6 +74,19 @@ SETTLEMENT_KEYS = ('settled', 'directReaped', 'noChildren', 'complete', 'reaped'
 GUARD_KEYS = SETTLEMENT_KEYS + ('fatal', 'containedRejection')
 CASE_KEYS = SETTLEMENT_KEYS + ('protocol', 'nonce', 'mode', 'outcome', 'reason', 'controls', 'childStarted')
 REAPED_KEYS = {'pid', 'raw', 'exit'}
+
+
+_INSTALLATION_OWNER = None
+
+def installation_owner():
+    global _INSTALLATION_OWNER
+    if _INSTALLATION_OWNER is None:
+        import importlib.util
+        spec = importlib.util.spec_from_file_location('desk_ci_installation', HERE / 'installation.py')
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        _INSTALLATION_OWNER = module
+    return _INSTALLATION_OWNER
 
 
 def ci_dir():
@@ -661,35 +673,42 @@ def partition_files(tracked, partition):
 
 
 def partition_identity(identity, members):
-    return {'checkout': identity['checkout_head'], 'head': identity.get('pr_head_sha'),
+    owner = installation_owner()
+    p, q, l, q_hash = owner.policy(sys.modules[__name__])
+    value = {'checkout': identity['checkout_head'], 'head': identity['pr_head_sha'],
             'tree': identity['checkout_tree'], 'repository': identity['repository'],
             'run_id': identity['run_id'], 'run_attempt': identity['run_attempt'],
-            'source_sha256': hashlib.sha256(fixture_bytes(members)).hexdigest()}
+            'source_sha256': hashlib.sha256(fixture_bytes(members)).hexdigest(),
+            'profile_policy_sha256': l, 'quality_policy_sha256': q_hash}
+    owner.identity({key: value[key] for key in owner.IDENTITY_KEYS})
+    return value
 
 
 def partition_binding(partition, identity, members):
-    if partition not in PARTITION_COUNTS:
-        raise RuntimeError('hosted partition required')
-    return {'schema': 'ci-partition/1', 'partition': partition,
-            'identity': partition_identity(identity, members),
-            'selection': partition_files(sorted(members), partition),
-            'counts': list(PARTITION_COUNTS[partition])}
+    raise RuntimeError('partition requires a sealed /2 producer; source-only binding refused')
 
 
 def check_partition_binding():
+    """Read and validate the /2 wire relation; CLI admission additionally calls outer().
+
+    A parsed record is data, never a producer/guard capability. Synthetic controls
+    exercise this reader without pretending to own actual BUILD/EVAL resources.
+    """
     partition = partition_label(required=True)
     ev = ci_dir() / 'evidence'
     identity = load_json(ev / 'identity.json')
     if identity.get('errors') != []:
         raise RuntimeError('partition source identity failed')
     pre = load_pre(ev)
-    expected = partition_binding(partition, identity, pre['members'])
     actual = load_json(ev / 'partition.json', JSON_LIMIT)
-    if actual != expected:
+    owner = installation_owner()
+    owner.exact(actual, ('schema','partition','identity','selection','counts','execution'))
+    expected = partition_identity(identity, pre['members'])
+    if actual['schema'] != 'ci-partition/2' or actual['partition'] != partition or actual['identity'] != expected or actual['selection'] != partition_files(sorted(pre['members']),partition) or actual['counts'] != list(PARTITION_COUNTS[partition]):
         raise RuntimeError('partition binding changed')
-    for key, name in [('checkout', 'GITHUB_SHA'), ('run_id', 'GITHUB_RUN_ID'),
-                      ('run_attempt', 'GITHUB_RUN_ATTEMPT'), ('repository', 'GITHUB_REPOSITORY')]:
-        if actual['identity'][key] != os.environ.get(name):
+    owner.validate_summary(sys.modules[__name__],actual['execution'],expected,partition)
+    for key, name in [('checkout','GITHUB_SHA'),('run_id','GITHUB_RUN_ID'),('run_attempt','GITHUB_RUN_ATTEMPT'),('repository','GITHUB_REPOSITORY')]:
+        if expected[key] != os.environ.get(name):
             raise RuntimeError('partition invocation changed')
     return actual
 
@@ -863,7 +882,7 @@ def evaluate_stage(stage, stage_dir, runtime_dir, tracked=None):
 
 # Fixed fixture105 preparation/retention owner. No application import or general loader.
 FIXTURE_NAME = 'desk-connected-fixture105'
-FIXTURE_BINDINGS = ('ADOPTION.json', 'RELEASE.json', 'SOURCE-INVENTORY.json', 'SOURCE-LEDGER.json', 'TOOLS-INVENTORY.json')
+FIXTURE_BINDINGS = ('ADOPTION.json', 'BUILD-CLOSURE.json', 'BUILD-HIDDEN-LOCK.json', 'BUILD-INSTALL-INVOCATION.json', 'BUILD-INSTALL-SETTLEMENT.json', 'BUILD-INSTALL.json', 'BUILD-OPTIONAL-ABSENCES.json', 'BUILD-PACKAGE-METADATA.json', 'BUILD-PROFILE.json', 'BUILD-SOURCE-INVENTORY.json', 'BUILD-TOOLS-INVENTORY.json', 'COPY-RESULT.json', 'DIST-INVENTORY.json', 'EVAL-CLOSURE.json', 'EVAL-HIDDEN-LOCK.json', 'EVAL-INSTALL-INVOCATION.json', 'EVAL-INSTALL-SETTLEMENT.json', 'EVAL-INSTALL.json', 'EVAL-OPTIONAL-ABSENCES.json', 'EVAL-PACKAGE-METADATA.json', 'EVAL-PROFILE.json', 'PROVENANCE.json', 'QUALITY-SETTLEMENT.json', 'QUALITY.json', 'RELEASE.json', 'SOURCE-INVENTORY.json', 'SOURCE-LEDGER.json', 'TOOLS-INVENTORY.json', 'TRANSFER-SETTLEMENT.json', 'TRANSFER.json')
 FIXTURE_EFFECTS = ['construct_fixture_subject', 'evaluate_record_claims_writing', 'evaluate_record_performance', 'record_fixture_audit', 'readback_converge']
 FIXTURE_CONNECTED_COUNTS = {'test/unit/connected-fixture105.test.ts': 58, 'test/unit/fixture105-traversal.test.ts': 10, 'test/integration/connected-fixture105.test.ts': 34}
 FROZEN_RENDER046_COUNTS = {'test/unit/frozen-render046.test.ts': 40, 'test/unit/frozen-render046-responses.test.ts': 89, 'test/unit/frozen-fixture046-master.test.ts': 16, 'test/unit/technical-master-admission.test.ts': 12, 'test/unit/durable-pair.test.ts': 20, 'test/unit/durable-pair-transport.test.ts': 11}
@@ -880,72 +899,24 @@ def fixture_hash(value):
 
 
 def fixture_open(path, directory=False):
-    path = Path(path)
-    if not path.is_absolute() or str(path) != os.path.normpath(path) or '..' in path.parts:
-        raise RuntimeError('fixture absolute path required')
-    fd = os.open('/', os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
-    try:
-        for index, part in enumerate(path.parts[1:]):
-            flags = os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK
-            if directory or index < len(path.parts) - 2:
-                flags |= os.O_DIRECTORY
-            nxt = os.open(part, flags, dir_fd=fd)
-            os.close(fd)
-            fd = nxt
-        return fd
-    except BaseException:
-        os.close(fd)
-        raise
+    return installation_owner().open_fd(path, directory)
+
+
+def fixture_close(fd):
+    return installation_owner().close_fd(fd)
 
 
 def fixture_identity(path, private=True):
-    fd = fixture_open(path, True)
-    try:
-        info = os.fstat(fd)
-        if not stat.S_ISDIR(info.st_mode) or info.st_uid != os.getuid() or (private and stat.S_IMODE(info.st_mode) != 0o700):
-            raise RuntimeError('fixture directory ownership')
-        return {'path': str(path), 'dev': info.st_dev, 'ino': info.st_ino, 'uid': info.st_uid, 'mode': stat.S_IMODE(info.st_mode)}
-    finally:
-        os.close(fd)
+    value=installation_owner().observed_directory(Path(path), private=private)
+    return {key:value[key] for key in ('path','dev','ino','uid','mode')}
 
 
 def fixture_read(path, limit, private=True):
-    fd = fixture_open(path)
-    try:
-        info = os.fstat(fd)
-        if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1 or info.st_uid != os.getuid() or (private and stat.S_IMODE(info.st_mode) != 0o600) or info.st_size > limit:
-            raise RuntimeError('fixture leaf bound/ownership')
-        data = bytearray()
-        while len(data) <= limit:
-            part = os.read(fd, min(65536, limit + 1 - len(data)))
-            if not part:
-                break
-            data.extend(part)
-        after = os.fstat(fd)
-        if len(data) != info.st_size or (info.st_dev, info.st_ino, info.st_mtime_ns, info.st_ctime_ns) != (after.st_dev, after.st_ino, after.st_mtime_ns, after.st_ctime_ns):
-            raise RuntimeError('fixture leaf changed')
-        return bytes(data)
-    finally:
-        os.close(fd)
+    return installation_owner().read(path, limit, private)
 
 
 def fixture_write_raw(path, data, limit=SNAPSHOT_LIMIT):
-    if not isinstance(data, bytes) or len(data) > limit:
-        raise RuntimeError('fixture output bound')
-    parent = fixture_open(Path(path).parent, True)
-    try:
-        fd = os.open(Path(path).name, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600, dir_fd=parent)
-        try:
-            with os.fdopen(fd, 'wb', closefd=False) as stream:
-                stream.write(data)
-                stream.flush()
-                os.fsync(fd)
-        finally:
-            os.close(fd)
-        os.fsync(parent)
-    finally:
-        os.close(parent)
-    return {'bytes': len(data), 'sha256': fixture_hash(data)}
+    return installation_owner().write(path, data, limit)
 
 
 def fixture_write(path, value):
@@ -953,39 +924,9 @@ def fixture_write(path, value):
 
 
 def fixture_graph(base, kind):
-    base = Path(base)
-    result = {}
-    def visit(path, rel):
-        if len(result) > 20000:
-            raise RuntimeError('fixture graph bound')
-        info = path.lstat()
-        mode = stat.S_IMODE(info.st_mode)
-        if stat.S_ISLNK(info.st_mode):
-            target = os.readlink(path)
-            resolved = os.path.normpath(path.parent / target)
-            if kind != 'tools' or os.path.isabs(target) or not resolved.startswith(str(base) + '/'):
-                raise RuntimeError('fixture graph link')
-            result[rel] = {'type': 'symlink', 'mode': mode, 'target': target}
-        elif stat.S_ISDIR(info.st_mode):
-            fd = fixture_open(path, True)
-            try:
-                actual = os.fstat(fd)
-                if (actual.st_dev, actual.st_ino) != (info.st_dev, info.st_ino):
-                    raise RuntimeError('fixture graph directory changed')
-                result[rel] = {'type': 'directory', 'mode': mode}
-                for name in sorted(os.listdir(fd)):
-                    if not rel and name in (('.git', 'node_modules', 'dist') if kind == 'source' else ('.vite-temp',)):
-                        continue
-                    visit(path / name, rel + '/' + name if rel else name)
-            finally:
-                os.close(fd)
-        elif stat.S_ISREG(info.st_mode):
-            data = fixture_read(path, 64 * 1024 * 1024, False)
-            result[rel] = {'type': 'file', 'mode': mode, 'bytes': len(data), 'sha256': fixture_hash(data)}
-        else:
-            raise RuntimeError('fixture graph special file')
-    visit(base, '')
-    return result
+    if kind not in ('source','tools'):
+        raise RuntimeError('fixture graph kind')
+    return installation_owner().graph(Path(base),kind)
 
 
 def fixture_temp(checkout, settled=False):
@@ -1007,8 +948,9 @@ def fixture_temp(checkout, settled=False):
     return {'identity': identity, 'leaves': leaves}
 
 
-def fixture_prepare(base, checkout):
-    """Only cmd_init invokes this after its existing identity/snapshot preconditions."""
+def fixture_prepare(base, checkout, *, metadata):
+    installation_owner().entry()
+    """Exclusive seal primitive; the real caller owns identity/preseal admission."""
     base, checkout = Path(base), Path(checkout)
     temp = base / 'tmp'
     root = temp / FIXTURE_NAME
@@ -1019,14 +961,20 @@ def fixture_prepare(base, checkout):
         raise RuntimeError('fixture loader namespace already exists')
     source = fixture_graph(checkout, 'source')
     tools = fixture_graph(checkout / 'node_modules', 'tools')
+    install = installation_owner()
+    install.entry()
+    if set(metadata) != set(FIXTURE_BINDINGS) - {'ADOPTION.json','RELEASE.json','SOURCE-LEDGER.json'}:
+        raise RuntimeError('fixture preseal metadata population')
+    if metadata['SOURCE-INVENTORY.json'] != fixture_bytes(source) or metadata['TOOLS-INVENTORY.json'] != fixture_bytes(tools):
+        raise RuntimeError('fixture preseal payload drift')
     # Complete graph plus finite owner ledger; never an invented future source hash.
     root.mkdir(mode=0o700)
     for name in ('bindings', 'expectations', 'receipts'):
         (root / name).mkdir(mode=0o700)
-    fixture_write(root / 'bindings/SOURCE-INVENTORY.json', source)
-    fixture_write(root / 'bindings/TOOLS-INVENTORY.json', tools)
+    for name, data in sorted(metadata.items()):
+        fixture_write_raw(root / 'bindings' / name, data, SNAPSHOT_LIMIT if 'INVENTORY' in name else 262144)
     rows = []
-    for name in FIXTURE_OWNER_PATHS:
+    for name in sorted(FIXTURE_OWNER_PATHS):
         row = source.get(name)
         if not row or row.get('type') != 'file':
             raise RuntimeError('fixture owner source missing')
@@ -1042,10 +990,10 @@ def fixture_prepare(base, checkout):
                'contract_sha256': source['docs/connected-fixture105.md']['sha256'], 'fixture_manifest_sha256': manifest_hash,
                'owner_source_ledger_sha256': ledger_pin['sha256'], 'subject_binding': subject, 'allowed_effects': FIXTURE_EFFECTS}
     release_pin = fixture_write(root / 'bindings/RELEASE.json', release)
-    fixture_write(root / 'bindings/ADOPTION.json', {'release_id': release['release_id'], 'release_bytes': release_pin['bytes'], 'release_sha256': release_pin['sha256'], 'ledger_bytes': ledger_pin['bytes'], 'ledger_sha256': ledger_pin['sha256']})
-    marker = {'schema': 'fixture105-execution-root/1', 'purpose': 'test_fixture105', 'checkout': fixture_identity(checkout, False),
+    fixture_write(root / 'bindings/ADOPTION.json', {'release_id': release['release_id'], 'release_bytes': release_pin['bytes'], 'release_sha256': release_pin['sha256'], 'ledger_bytes': ledger_pin['bytes'], 'ledger_sha256': ledger_pin['sha256'], 'execution_provenance_bytes': len(metadata['PROVENANCE.json']), 'execution_provenance_sha256': fixture_hash(metadata['PROVENANCE.json'])})
+    marker = {'schema': 'fixture105-execution-root/2', 'purpose': 'test_fixture105', 'checkout': fixture_identity(checkout),
               'tmp': fixture_identity(temp), 'root': fixture_identity(root), 'source_ledger_sha256': ledger_pin['sha256'], 'release_sha256': release_pin['sha256'],
-              'source_inventory_sha256': fixture_hash(fixture_bytes(source)), 'tools_inventory_sha256': fixture_hash(fixture_bytes(tools))}
+              'source_inventory_sha256': fixture_hash(fixture_bytes(source)), 'tools_inventory_sha256': fixture_hash(fixture_bytes(tools)), 'execution_provenance_sha256': fixture_hash(metadata['PROVENANCE.json'])}
     marker_pin = fixture_write(root / 'ROOT.json', marker)
     binding = {'root': str(root), 'root_sha256': marker_pin['sha256']}
     fixture_write(base / 'evidence/fixture105-binding.json', binding)
@@ -1069,7 +1017,10 @@ def fixture_graph_difference(expected, actual, kind):
 
 
 def fixture_validate(base, checkout, settled=False):
+    installation_owner().entry()
     base, checkout = Path(base), Path(checkout)
+    if checkout != installation_owner().EVAL:
+        raise RuntimeError('fixture evaluation role required')
     binding = json.loads(fixture_read(base / 'evidence/fixture105-binding.json', 8192))
     root = base / 'tmp' / FIXTURE_NAME
     if set(binding) != {'root', 'root_sha256'} or binding['root'] != str(root):
@@ -1078,16 +1029,16 @@ def fixture_validate(base, checkout, settled=False):
     if fixture_hash(marker_bytes) != binding['root_sha256']:
         raise RuntimeError('fixture marker hash')
     marker = json.loads(marker_bytes)
-    if set(marker) != {'schema', 'purpose', 'checkout', 'tmp', 'root', 'source_ledger_sha256', 'release_sha256', 'source_inventory_sha256', 'tools_inventory_sha256'} or marker['schema'] != 'fixture105-execution-root/1' or marker['purpose'] != 'test_fixture105':
+    if set(marker) != {'schema', 'purpose', 'checkout', 'tmp', 'root', 'source_ledger_sha256', 'release_sha256', 'source_inventory_sha256', 'tools_inventory_sha256', 'execution_provenance_sha256'} or marker['schema'] != 'fixture105-execution-root/2' or marker['purpose'] != 'test_fixture105':
         raise RuntimeError('fixture marker shape')
-    for key, path, private in (('root', root, True), ('tmp', base / 'tmp', True), ('checkout', checkout, False)):
+    for key, path, private in (('root', root, True), ('tmp', base / 'tmp', True), ('checkout', checkout, True)):
         if marker[key] != fixture_identity(path, private):
             raise RuntimeError('fixture root identity')
     for directory in ('bindings', 'expectations', 'receipts'):
         fixture_identity(root / directory)
     if sorted(os.listdir(root / 'bindings')) != list(FIXTURE_BINDINGS):
         raise RuntimeError('fixture binding population')
-    for name, key in (('SOURCE-LEDGER.json', 'source_ledger_sha256'), ('RELEASE.json', 'release_sha256'), ('SOURCE-INVENTORY.json', 'source_inventory_sha256'), ('TOOLS-INVENTORY.json', 'tools_inventory_sha256')):
+    for name, key in (('SOURCE-LEDGER.json', 'source_ledger_sha256'), ('RELEASE.json', 'release_sha256'), ('SOURCE-INVENTORY.json', 'source_inventory_sha256'), ('TOOLS-INVENTORY.json', 'tools_inventory_sha256'), ('PROVENANCE.json', 'execution_provenance_sha256')):
         data = fixture_read(root / 'bindings' / name, SNAPSHOT_LIMIT if 'INVENTORY' in name else 262144)
         if fixture_hash(data) != marker[key]:
             raise RuntimeError('fixture binding changed')
@@ -1100,10 +1051,18 @@ def fixture_validate(base, checkout, settled=False):
     release_bytes = fixture_read(root / 'bindings/RELEASE.json', 262144)
     ledger_bytes = fixture_read(root / 'bindings/SOURCE-LEDGER.json', 262144)
     adoption = json.loads(fixture_read(root / 'bindings/ADOPTION.json', 262144))
-    expected_adoption = {'release_id': 'connected-fixture105-test-release/1', 'release_bytes': len(release_bytes), 'release_sha256': fixture_hash(release_bytes), 'ledger_bytes': len(ledger_bytes), 'ledger_sha256': fixture_hash(ledger_bytes)}
+    expected_adoption = {'release_id': 'connected-fixture105-test-release/1', 'release_bytes': len(release_bytes), 'release_sha256': fixture_hash(release_bytes), 'ledger_bytes': len(ledger_bytes), 'ledger_sha256': fixture_hash(ledger_bytes), 'execution_provenance_bytes': len(fixture_read(root / 'bindings/PROVENANCE.json', 8192)), 'execution_provenance_sha256': marker['execution_provenance_sha256']}
     release = json.loads(release_bytes)
     if adoption != expected_adoption or release.get('release_id') != adoption['release_id'] or release.get('owner_source_ledger_sha256') != adoption['ledger_sha256']:
         raise RuntimeError('fixture adoption relation')
+    install = installation_owner()
+    metadata = {name: fixture_read(root / 'bindings' / name, SNAPSHOT_LIMIT if 'INVENTORY' in name else 262144) for name in FIXTURE_BINDINGS}
+    partition = install.parse(fixture_read(base / 'evidence/partition.json', JSON_LIMIT), JSON_LIMIT)
+    install.exact(partition, ('schema','partition','identity','selection','counts','execution'))
+    if partition['schema'] != 'ci-partition/2':
+        raise RuntimeError('fixture /2 partition required')
+    common = {key: partition['identity'][key] for key in install.IDENTITY_KEYS}
+    install.validate_metadata(metadata, fixture_graph(checkout, 'source'), fixture_graph(checkout / 'node_modules', 'tools'), common, install.policy(sys.modules[__name__]), ledger_base=base)
     temp = fixture_temp(checkout, settled)
     if not temp.get('absent'):
         created = json.loads(fixture_read(base / 'evidence/fixture105-loader-created.json', 262144))
@@ -1522,7 +1481,7 @@ def fixture_collect(base, keep, scope, successful):
         except Exception as error:
             keep.problems['errors'].append('fixture terminal retention: ' + type(error).__name__)
 
-FIXTURE_OWNER_PATHS = ('docs/connected-fixture105.md', 'eslint.config.js', 'fixtures/connected-fixture151/AUTHORED-NORMALIZED-ROWS.json', 'fixtures/connected-fixture151/BRIEF.json', 'fixtures/connected-fixture151/CANONICAL-PREIMAGES.json', 'fixtures/connected-fixture151/CEILING-EXPECTATIONS.json', 'fixtures/connected-fixture151/CLAIM-ROWS.json', 'fixtures/connected-fixture151/CONFIG.json', 'fixtures/connected-fixture151/CONNECTED-REFUSAL-WITNESSES.json', 'fixtures/connected-fixture151/CONTEXT-EXPECTED.json', 'fixtures/connected-fixture151/CONTEXT-RESOLUTION.json', 'fixtures/connected-fixture151/DERIVATION-EXPECTED.json', 'fixtures/connected-fixture151/DIRECTION-EXPECTED.json', 'fixtures/connected-fixture151/EVENT-ROWS.json', 'fixtures/connected-fixture151/EVIDENCE-ROWS.json', 'fixtures/connected-fixture151/FIVE-MATCH-INPUTS.json', 'fixtures/connected-fixture151/IDENTITIES.json', 'fixtures/connected-fixture151/INNER-DIGEST-REFUSAL-WITNESSES.json', 'fixtures/connected-fixture151/INNER-DIGEST-RULES.md', 'fixtures/connected-fixture151/PACKAGE.json', 'fixtures/connected-fixture151/PURE-REFUSAL-WITNESSES.json', 'fixtures/connected-fixture151/RESULT-DIGEST-MAP.json', 'fixtures/connected-fixture151/RIGHTS.json', 'fixtures/connected-fixture151/ROSTER.json', 'fixtures/connected-fixture151/ROW-AND-BYTE-BOUNDS.json', 'fixtures/connected-fixture151/SCHEMA-HASH-MAPPING.json', 'fixtures/connected-fixture151/SCHEMA-audit.json', 'fixtures/connected-fixture151/SCHEMA-construction-observation.json', 'fixtures/connected-fixture151/SCHEMA-operation.json', 'fixtures/connected-fixture151/SPOKEN-TEXT.txt', 'fixtures/connected-fixture151/SQL-COLUMN-MAP.json', 'fixtures/connected-fixture151/SUBSTANTIVE-SCRIPT.json', 'fixtures/connected-fixture151/SUCCESSOR-PROVENANCE.json', 'fixtures/connected-fixture151/SUPPORT-ROWS.json', 'fixtures/connected-fixture151/TEMPLATE.json', 'fixtures/connected-fixture151/TEXTURE-CARRIER.json', 'fixtures/connected-fixture151/TEXTURE-OWNER-ADDENDUM.md', 'fixtures/connected-fixture151/TEXTURE-REWRITE.json', 'fixtures/connected-fixture151/TEXTURE-SCRIPT.json', 'fixtures/connected-fixture151/WRITER-VIEW-EXPECTED.json', 'package-lock.json', 'package.json', 'src/identity/artifacts.ts', 'src/identity/domains.ts', 'src/runtime/claims-writing-gate.ts', 'src/runtime/connected-fixture105-data.ts', 'src/runtime/connected-fixture151-data.ts', 'src/runtime/connected-fixture105.ts', 'src/runtime/package.ts', 'src/runtime/performance-direction-fixture105.ts', 'src/runtime/performance-direction.ts', 'src/runtime/speech-texture.ts', 'test/integration/connected-fixture105.test.ts', 'test/support/p33-parity-runner.ts', 'test/unit/connected-fixture105.test.ts', 'tools/ci-validation/ci.py', 'tools/ci-validation/run-stage.sh', 'tools/ci-validation/test_ci.py', 'tsconfig.build.json', 'tsconfig.json', 'vitest.config.ts')
+FIXTURE_OWNER_PATHS = ('docs/connected-fixture105.md', 'eslint.config.js', 'fixtures/connected-fixture151/AUTHORED-NORMALIZED-ROWS.json', 'fixtures/connected-fixture151/BRIEF.json', 'fixtures/connected-fixture151/CANONICAL-PREIMAGES.json', 'fixtures/connected-fixture151/CEILING-EXPECTATIONS.json', 'fixtures/connected-fixture151/CLAIM-ROWS.json', 'fixtures/connected-fixture151/CONFIG.json', 'fixtures/connected-fixture151/CONNECTED-REFUSAL-WITNESSES.json', 'fixtures/connected-fixture151/CONTEXT-EXPECTED.json', 'fixtures/connected-fixture151/CONTEXT-RESOLUTION.json', 'fixtures/connected-fixture151/DERIVATION-EXPECTED.json', 'fixtures/connected-fixture151/DIRECTION-EXPECTED.json', 'fixtures/connected-fixture151/EVENT-ROWS.json', 'fixtures/connected-fixture151/EVIDENCE-ROWS.json', 'fixtures/connected-fixture151/FIVE-MATCH-INPUTS.json', 'fixtures/connected-fixture151/IDENTITIES.json', 'fixtures/connected-fixture151/INNER-DIGEST-REFUSAL-WITNESSES.json', 'fixtures/connected-fixture151/INNER-DIGEST-RULES.md', 'fixtures/connected-fixture151/PACKAGE.json', 'fixtures/connected-fixture151/PURE-REFUSAL-WITNESSES.json', 'fixtures/connected-fixture151/RESULT-DIGEST-MAP.json', 'fixtures/connected-fixture151/RIGHTS.json', 'fixtures/connected-fixture151/ROSTER.json', 'fixtures/connected-fixture151/ROW-AND-BYTE-BOUNDS.json', 'fixtures/connected-fixture151/SCHEMA-HASH-MAPPING.json', 'fixtures/connected-fixture151/SCHEMA-audit.json', 'fixtures/connected-fixture151/SCHEMA-construction-observation.json', 'fixtures/connected-fixture151/SCHEMA-operation.json', 'fixtures/connected-fixture151/SPOKEN-TEXT.txt', 'fixtures/connected-fixture151/SQL-COLUMN-MAP.json', 'fixtures/connected-fixture151/SUBSTANTIVE-SCRIPT.json', 'fixtures/connected-fixture151/SUCCESSOR-PROVENANCE.json', 'fixtures/connected-fixture151/SUPPORT-ROWS.json', 'fixtures/connected-fixture151/TEMPLATE.json', 'fixtures/connected-fixture151/TEXTURE-CARRIER.json', 'fixtures/connected-fixture151/TEXTURE-OWNER-ADDENDUM.md', 'fixtures/connected-fixture151/TEXTURE-REWRITE.json', 'fixtures/connected-fixture151/TEXTURE-SCRIPT.json', 'fixtures/connected-fixture151/WRITER-VIEW-EXPECTED.json', 'package-lock.json', 'package.json', 'src/identity/artifacts.ts', 'src/identity/domains.ts', 'src/runtime/claims-writing-gate.ts', 'src/runtime/connected-fixture105-data.ts', 'src/runtime/connected-fixture151-data.ts', 'src/runtime/connected-fixture105.ts', 'src/runtime/package.ts', 'src/runtime/performance-direction-fixture105.ts', 'src/runtime/performance-direction.ts', 'src/runtime/speech-texture.ts', 'test/integration/connected-fixture105.test.ts', 'test/support/p33-parity-runner.ts', 'test/unit/connected-fixture105.test.ts', 'tools/ci-validation/ci.py', 'tools/ci-validation/run-stage.sh', 'tools/ci-validation/test_ci.py', 'tsconfig.build.json', 'tsconfig.json', 'vitest.config.ts', 'tools/ci-validation/installation.py', 'fixtures/ci-evaluation-installation/INSTALL-POLICY.json', 'fixtures/ci-evaluation-installation/QUALITY-POLICY.json', 'fixtures/ci-evaluation-installation/BUILD-CLOSURE.json', 'fixtures/ci-evaluation-installation/EVAL-CLOSURE.json')
 FIXTURE_RESOURCE_NAMES = ('SUCCESSOR-PROVENANCE.json', 'SUBSTANTIVE-SCRIPT.json', 'TEXTURE-SCRIPT.json', 'TEXTURE-CARRIER.json', 'TEXTURE-REWRITE.json', 'BRIEF.json', 'PACKAGE.json', 'ROSTER.json', 'TEMPLATE.json', 'WRITER-VIEW-EXPECTED.json', 'CONTEXT-EXPECTED.json', 'AUTHORED-NORMALIZED-ROWS.json', 'CEILING-EXPECTATIONS.json', 'FIVE-MATCH-INPUTS.json', 'DIRECTION-EXPECTED.json', 'IDENTITIES.json', 'SQL-COLUMN-MAP.json', 'SCHEMA-construction-observation.json', 'SCHEMA-operation.json', 'SCHEMA-audit.json')
 
 # ---------------------------------------------------------------- subcommands
@@ -1534,14 +1493,15 @@ def load_event():
     return json.loads(read_bounded(path, 4 * 1024 * 1024))
 
 
-def cmd_init():
+def cmd_init(role):
     partition = partition_label(required=True)
     errors = []
     env = os.environ
     base = ci_dir()
-    base.mkdir(mode=0o700)
+    if role not in ('build', 'evaluation') or base != installation_owner().role_base(sys.modules[__name__], role):
+        raise RuntimeError('closed role initialization required')
     for name in ('evidence', 'tmp', 'home'):
-        (base / name).mkdir(mode=0o700)
+        fixture_identity(base / name)
     ev = base / 'evidence'
     record = {'errors': errors, 'github': {k: env.get(k) for k in (
         'GITHUB_SHA', 'GITHUB_REF', 'GITHUB_RUN_ID', 'GITHUB_RUN_ATTEMPT', 'GITHUB_EVENT_NAME', 'GITHUB_WORKFLOW_REF',
@@ -1615,18 +1575,21 @@ def cmd_init():
         write_json_x(ev / 'snapshot-pre.json', snap)
         bind['errors'] = snapshot_errors(snap)
         bind['tracked_files'] = len(tracked)
-        write_json_x(ev / 'partition.json', partition_binding(partition, identity, snap['members']))
+        owner = installation_owner()
+        p, q, l, q_hash = owner.policy(sys.modules[__name__])
+        identity2 = partition_identity(identity, snap['members'])
+        metadata = ev / 'producer/metadata'
+        if role == 'build':
+            value = {'schema': 'ci-build-init/1', 'identity': identity2, 'role': 'build', 'source_pre': owner.raw_pin(ev / 'snapshot-pre.json', SNAPSHOT_LIMIT), 'installation': owner.raw_pin(metadata / 'BUILD-INSTALL.json')}
+            write_json_x(ev / 'build-init.json', value)
+        else:
+            value = {'schema': 'ci-partition-init/2', 'partition': partition, 'identity': identity2, 'role': 'evaluation', 'selection': partition_files(sorted(snap['members']), partition), 'counts': list(PARTITION_COUNTS[partition]), 'source_pre': owner.raw_pin(ev / 'snapshot-pre.json', SNAPSHOT_LIMIT), 'installation': owner.raw_pin(metadata / 'EVAL-INSTALL.json')}
+            write_json_x(ev / 'partition-init.json', value)
     except Exception as error:
         bind['errors'].append('snapshot failed: %s' % type(error).__name__)
     bind['ok'] = not bind['errors']
     write_json_x(ev / 'bind-pre.json', bind)
     errors.extend(bind['errors'])
-    if not errors:
-        try:
-            fixture_prepare(base, ROOT)
-        except Exception as error:
-            errors.append('fixture preparation failed: ' + type(error).__name__)
-            write_json_x(ev / 'fixture105-init-failure.json', {'ok': False, 'error_class': type(error).__name__})
     print(json.dumps({'init': not errors, 'errors': errors[:8]}))
     return 0 if not errors else 1
 
@@ -1639,22 +1602,7 @@ def load_pre(ev):
 
 
 def cmd_bind_build():
-    ev = ci_dir() / 'evidence'
-    record = {'label': 'build', 'errors': []}
-    try:
-        pre = load_pre(ev)
-        tracked = tracked_files()
-        if tracked != sorted(pre['members']):
-            record['errors'].append('tracked file set changed after the pre-execution snapshot')
-        snap = take_snapshot(tracked, allow_dist=True)
-        record['errors'] += snapshot_errors(snap, pre=pre, require_dist=True)
-        record['dist'] = snap['dist']
-    except Exception as error:
-        record['errors'].append('build binding failed: %s: %s' % (type(error).__name__, error))
-    record['ok'] = not record['errors']
-    write_json_x(ev / 'bind-build.json', record)
-    print(json.dumps({'bind-build': record['ok'], 'dist': record.get('dist'), 'errors': record['errors'][:5]}))
-    return 0 if record['ok'] else 1
+    return installation_owner().command(sys.modules[__name__], lambda: installation_owner().seal(sys.modules[__name__]))
 
 
 def cmd_dbprobe():
@@ -1708,6 +1656,11 @@ def stage_verdict_ok(path, stage):
 
 
 def collection_identity_ok(record):
+    try:
+        binding=check_partition_binding()
+        if not installation_owner().same(record.get('execution'),binding['execution']):return False
+    except Exception:
+        return False
     return (record.get('partition') == partition_label()
             and record.get('commit') == os.environ.get('GITHUB_SHA')
             and record.get('run_id') == os.environ.get('GITHUB_RUN_ID')
@@ -1958,6 +1911,8 @@ def cmd_collect(scope):
             check_partition_binding()
         except Exception as error:
             problems['errors'].append('partition binding: ' + type(error).__name__)
+    if partition_label() != 'all':
+        keep.copy(ev/'partition-init.json',Path('partition-init.json'),JSON_LIMIT,required=True)
     for name, limit in COMMON_FILES:
         keep.copy(ev / name, Path(name), limit, required=True)
     if partition_label() == 'rest':
@@ -2013,6 +1968,10 @@ def cmd_collect(scope):
                         keep.copy(case / name, Path('attempts') / attempt.name / case.name / name, limit, required=False)
         except Exception as error:
             problems['errors'].append('attempt collection: %s: %s' % (type(error).__name__, error))
+    if partition_label() != 'all':
+        for name in ('stdout','stderr','owner.json','result.json'):
+            keep.copy(ev/'identity-witness'/name,Path('identity-witness')/name,16384 if name in ('stdout','stderr') else 262144,required=True)
+        installation_owner().retain_bundle(sys.modules[__name__], keep, scope)
     fixture_collect(base, keep, scope, successful)
     warnings = []
     for stage, verdict in successful.items():
@@ -2027,6 +1986,13 @@ def cmd_collect(scope):
              'evidence_status': 'complete' if complete else 'partial/censored',
              'note': 'Acceptance also requires successful artifact upload; this record is written before upload. '
                      'Streams above the retention limit are censored even when below the execution cap.'}
+    if partition_label() != 'all':
+        try:
+            final['execution']=check_partition_binding()['execution']
+            installation_owner().outer(sys.modules[__name__], 'EC')
+        except Exception as error:
+            problems['errors'].append('post-collection provenance: ' + type(error).__name__)
+            final['evidence_status'] = 'partial/censored'
     write_json_x(upload / 'final.json', final)
     print(json.dumps({'collect': scope, 'all_stages_ok': all_ok, 'evidence_status': final['evidence_status']}))
     return 0
@@ -2119,7 +2085,7 @@ def proof_identity_now(allow_dist):
 
 
 def build_partition_proof(binding, verdict):
-    if (binding.get('schema') != 'ci-partition/1' or binding.get('partition') not in PARTITION_COUNTS
+    if (binding.get('schema') != 'ci-partition/2' or binding.get('partition') not in PARTITION_COUNTS
             or verdict.get('ok') is not True or verdict.get('partition') != binding['partition']
             or verdict.get('stage') != 'all'):
         raise RuntimeError('invalid partition verdict')
@@ -2138,8 +2104,8 @@ def build_partition_proof(binding, verdict):
     files, tests, integrations = PARTITION_COUNTS[binding['partition']]
     if len(counts) != files or sum(counts.values()) != tests:
         raise RuntimeError('partition proof count mismatch')
-    return {'schema': 'ci-partition-proof/1', 'partition': binding['partition'], 'identity': binding['identity'],
-            'files': counts, 'totals': [files, tests, integrations], 'source_verified': True, 'evidence_complete': True}
+    return {'schema': 'ci-partition-proof/2', 'partition': binding['partition'], 'identity': binding['identity'],
+            'files': counts, 'totals': [files, tests, integrations], 'source_verified': True, 'evidence_complete': True, 'execution': binding['execution']}
 
 
 def parse_partition_proof(raw):
@@ -2162,17 +2128,17 @@ def parse_partition_proof(raw):
 
 
 def validate_proof_shape(value):
-    if (set(value) != {'schema', 'partition', 'identity', 'files', 'totals', 'source_verified', 'evidence_complete'}
-            or value['schema'] != 'ci-partition-proof/1' or value['partition'] not in PARTITION_COUNTS
+    if (set(value) != {'schema', 'partition', 'identity', 'files', 'totals', 'source_verified', 'evidence_complete', 'execution'}
+            or value['schema'] != 'ci-partition-proof/2' or value['partition'] not in PARTITION_COUNTS
             or value['source_verified'] is not True or value['evidence_complete'] is not True):
         raise RuntimeError('proof shape or assertions invalid')
     identity = value['identity']
-    if not isinstance(identity, dict) or set(identity) != {'checkout', 'head', 'tree', 'repository', 'run_id', 'run_attempt', 'source_sha256'}:
+    if not isinstance(identity, dict) or set(identity) != {'checkout', 'head', 'tree', 'repository', 'run_id', 'run_attempt', 'source_sha256', 'profile_policy_sha256', 'quality_policy_sha256'}:
         raise RuntimeError('proof identity shape invalid')
     for key in ('checkout', 'tree'):
         if not isinstance(identity[key], str) or not HEX40.fullmatch(identity[key]):
             raise RuntimeError('invalid proof commit/tree')
-    if identity['head'] is not None and (not isinstance(identity['head'], str) or not HEX40.fullmatch(identity['head'])):
+    if not isinstance(identity['head'], str) or not HEX40.fullmatch(identity['head']):
         raise RuntimeError('invalid proof head')
     if not isinstance(identity['source_sha256'], str) or not SHA256.fullmatch(identity['source_sha256']):
         raise RuntimeError('invalid source digest')
@@ -2181,6 +2147,8 @@ def validate_proof_shape(value):
     for key in ('run_id', 'run_attempt'):
         if not isinstance(identity[key], str) or not re.fullmatch(r'[1-9][0-9]{0,19}', identity[key]):
             raise RuntimeError('invalid proof run identity')
+    owner = installation_owner()
+    owner.validate_summary(sys.modules[__name__], value['execution'], identity, value['partition'])
     files = value['files']
     if not isinstance(files, dict) or not 1 <= len(files) <= EXPECTED_ALL_FILES:
         raise RuntimeError('proof file count bound')
@@ -2206,8 +2174,8 @@ def joint_problems(proofs, expected_identity, tracked, outcomes):
         except (RuntimeError, TypeError, KeyError):
             errors.append(label + ' malformed proof')
             continue
-        if (not isinstance(proof, dict) or set(proof) != {'schema', 'partition', 'identity', 'files', 'totals', 'source_verified', 'evidence_complete'}
-                or proof['schema'] != 'ci-partition-proof/1' or proof['partition'] != label
+        if (not isinstance(proof, dict) or set(proof) != {'schema', 'partition', 'identity', 'files', 'totals', 'source_verified', 'evidence_complete', 'execution'}
+                or proof['schema'] != 'ci-partition-proof/2' or proof['partition'] != label
                 or proof['identity'] != expected_identity or proof['source_verified'] is not True
                 or proof['evidence_complete'] is not True):
             errors.append(label + ' proof identity/shape mismatch')
@@ -2261,11 +2229,12 @@ def cmd_final():
             binding = check_partition_binding()
             verify_security_report(ci_dir(), binding)
             identity, members = proof_identity_now(True)
-            if partition_binding(binding['partition'], identity, members) != binding:
+            if partition_identity(identity, members) != binding['identity']:
                 raise RuntimeError('source changed before final proof')
             for record in finals.values():
                 if (record.get('partition') != binding['partition'] or record.get('commit') != binding['identity']['checkout']
-                        or record.get('run_id') != binding['identity']['run_id'] or record.get('run_attempt') != binding['identity']['run_attempt']):
+                        or record.get('run_id') != binding['identity']['run_id'] or record.get('run_attempt') != binding['identity']['run_attempt']
+                        or not installation_owner().same(record.get('execution'),binding['execution'])):
                     raise RuntimeError('final record partition/identity mismatch')
             verdict = load_json(ci_dir() / 'evidence/verdict-all.json', JSON_LIMIT * 4)
             proof = build_partition_proof(binding, verdict)
@@ -2285,7 +2254,12 @@ def cmd_final():
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest='command', required=True)
-    sub.add_parser('init')
+    sub.add_parser('producer-build')
+    sub.add_parser('evaluation-init')
+    sub.add_parser('retain-producer-partial')
+    sub.add_parser('diagnostic-final')
+    sub.add_parser('identity-witness')
+    sub.add_parser('traversal-proof')
     sub.add_parser('bind-build')
     sub.add_parser('dbprobe')
     p = sub.add_parser('precheck')
@@ -2300,27 +2274,35 @@ def main(argv=None):
     sub.add_parser('joint')
     sub.add_parser('retain-security')
     args = parser.parse_args(argv)
+    if args.command == 'diagnostic-final':
+        return installation_owner().diagnostic_final(sys.modules[__name__])
+    if args.command == 'retain-producer-partial':
+        return installation_owner().retain_partial(sys.modules[__name__])
     if args.command == 'joint':
         return cmd_joint()
-    if args.command not in ('init', 'collect'):
-        check_partition_binding()
-    if args.command == 'retain-security':
-        return cmd_retain_security()
-    if args.command == 'fixture-binding':
-        return cmd_fixture_binding(args.stage)
-    if args.command == 'init':
-        return cmd_init()
+    if args.command == 'producer-build':
+        return installation_owner().command(sys.modules[__name__], lambda: installation_owner().produce_build(sys.modules[__name__]))
+    if args.command == 'evaluation-init':
+        return installation_owner().command(sys.modules[__name__], lambda: installation_owner().evaluation_init(sys.modules[__name__]))
     if args.command == 'bind-build':
-        return cmd_bind_build()
-    if args.command == 'dbprobe':
-        return cmd_dbprobe()
-    if args.command == 'precheck':
-        return cmd_precheck(args.stage)
-    if args.command == 'check':
-        return cmd_check(args.stage)
-    if args.command == 'collect':
-        return cmd_collect(args.scope)
-    return cmd_final()
+        return installation_owner().command(sys.modules[__name__], cmd_bind_build)
+    def consume():
+        owner = installation_owner()
+        checkpoint = 'EF' if args.command == 'final' else 'EC' if args.command == 'collect' else 'E0'
+        owner.outer(sys.modules[__name__], checkpoint)
+        check_partition_binding()
+        if args.command == 'traversal-proof': result = owner.run_traversal(sys.modules[__name__])
+        elif args.command == 'identity-witness': result = owner.run_identity(sys.modules[__name__])
+        elif args.command == 'retain-security': result = cmd_retain_security()
+        elif args.command == 'fixture-binding': result = cmd_fixture_binding(args.stage)
+        elif args.command == 'dbprobe': result = cmd_dbprobe()
+        elif args.command == 'precheck': result = cmd_precheck(args.stage)
+        elif args.command == 'check': result = cmd_check(args.stage)
+        elif args.command == 'collect': result = cmd_collect(args.scope)
+        else: result = cmd_final()
+        owner.outer(sys.modules[__name__], checkpoint if checkpoint in ('EF','EC') else 'E1')
+        return result
+    return installation_owner().command(sys.modules[__name__], consume)
 
 
 if __name__ == '__main__':

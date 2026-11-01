@@ -12,6 +12,7 @@ import selectors
 import shutil
 import signal
 import socket
+import stat as stat_module
 import subprocess
 import sys
 import tempfile
@@ -36,14 +37,37 @@ def handlers():
         signal.signal(sig, interrupted)
 
 
+PRIVATE_WRITE_PENDING = []
+PRIVATE_WRITE_SECONDARY = []
+
+
+def write_private(path, data, *, sync):
+    """Exclusive private creation; close uncertainty blocks later writer I/O."""
+    if PRIVATE_WRITE_PENDING:
+        raise RuntimeError('private writer pending close')
+    fd=os.open(path,os.O_WRONLY|os.O_CREAT|os.O_EXCL|os.O_NOFOLLOW,0o600)
+    primary=None
+    try:
+        info=os.fstat(fd)
+        if not stat_module.S_ISREG(info.st_mode) or info.st_uid!=os.getuid() or info.st_nlink!=1 or stat_module.S_IMODE(info.st_mode)!=0o600:
+            raise RuntimeError('private writer mode/identity')
+        if os.write(fd,data)!=len(data):
+            raise RuntimeError('short record write')
+        if sync:os.fsync(fd)
+    except BaseException as error:primary=error
+    try:os.close(fd)
+    except BaseException as error:
+        PRIVATE_WRITE_PENDING.append(fd)
+        if primary is None:primary=error
+        else:PRIVATE_WRITE_SECONDARY.append(type(error).__name__)
+    if primary is not None:raise primary
+
+
 def write_record(path, value, limit=OUTPUT_LIMIT):
     data = (json.dumps(value, separators=(",", ":")) + "\n").encode()
     if len(data) > limit:
         raise RuntimeError("record bound")
-    with open(path, "xb", buffering=0) as stream:
-        if stream.write(data) != len(data):
-            raise RuntimeError("short record write")
-        os.fsync(stream.fileno())
+    write_private(path,data,sync=True)
 
 
 def close_recorded(resource, label, errors):
@@ -604,9 +628,7 @@ def case_owner(args):
         quarantine(folder, 'parent_loss' if parent_lost else 'settlement_uncertain', settlement)
     try:
         shutil.rmtree(child_tmp)
-        with open(folder/'output.log', 'xb') as stream:
-            if stream.write(output) != len(output):
-                raise RuntimeError('short capture write')
+        write_private(folder/'output.log',output,sync=False)
         controls = []
         if args.mode != 'p33':
             controls = [json.loads(line)['control'] for line in output.splitlines()]
@@ -643,10 +665,23 @@ def case_owner(args):
         quarantine(folder, 'report_or_guard_loss', {'error': type(error).__name__, 'settlement': settlement})
 
 
-def runtime_dir():
+def runtime_basename(exclusive=False):
     key = hashlib.sha256(str(ROOT).encode()).hexdigest()[:24]
-    path = Path(tempfile.gettempdir())/f'the-desk-p33-{os.getuid()}-{key}'
-    path.mkdir(mode=0o700, exist_ok=True)
+    prefix = 'p33t-' if exclusive else 'the-desk-p33-'
+    return f'{prefix}{os.getuid()}-{key}'
+
+
+def traversal_socket_path(folder):
+    path=str(folder/'guard.sock')
+    encoded=os.fsencode(path)
+    if b'\0' in encoded or len(encoded)+1>108:
+        raise RuntimeError('traversal socket pathname bound')
+    return path
+
+
+def runtime_dir(exclusive=False):
+    path = Path(tempfile.gettempdir())/runtime_basename(exclusive)
+    path.mkdir(mode=0o700, exist_ok=not exclusive)
     st = path.lstat()
     if not path.is_dir() or path.is_symlink() or st.st_uid != os.getuid() or st.st_mode & 0o077:
         raise RuntimeError('unsafe runtime directory')
@@ -659,13 +694,20 @@ class ContainedRejection(Exception):
 
 def guard(args):
     handlers()
-    directory = runtime_dir()
+    directory = runtime_dir(exclusive=args.profile == 'fixture105-traversal')
     # Stable inode, no truncate/unlink/replacement, no explicit LOCK_UN.
     lease = os.open(directory/'validation.lock', os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW, 0o600)
     fcntl.flock(lease, fcntl.LOCK_EX | fcntl.LOCK_NB)
     os.set_inheritable(lease, False)
     st = os.fstat(lease)
     folder = Path(tempfile.mkdtemp(prefix='attempt-', dir=directory))
+    path = traversal_socket_path(folder) if args.profile=='fixture105-traversal' else str(folder/'guard.sock')
+    def namespace_identity(path):
+        value=path.lstat()
+        if not stat_module.S_ISDIR(value.st_mode) or value.st_uid!=os.getuid() or stat_module.S_IMODE(value.st_mode)!=0o700:
+            raise RuntimeError('guard namespace identity')
+        return {'path':str(path),'dev':value.st_dev,'ino':value.st_ino,'uid':value.st_uid,'gid':value.st_gid,'mode':stat_module.S_IMODE(value.st_mode)}
+    namespace = {'runtime':namespace_identity(directory),'attempt':namespace_identity(folder)} if args.profile=='fixture105-traversal' else None
     preflight = prerequisite()
     write_record(folder/'prerequisite.json', preflight)
     if args.profile == 'prerequisite':
@@ -676,7 +718,6 @@ def guard(args):
         raise RuntimeError('Node missing')
     node = os.path.realpath(node)
     token = secrets.token_hex(24)
-    path = str(folder/'guard.sock')
     server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
     server.bind(path)
     server.listen(1)
@@ -813,7 +854,7 @@ def guard(args):
             fatal = fatal or 'stop_failed:' + type(error).__name__
     settlement = settle(main_proc, main_identity)
     try:
-        write_record(folder/'guard-result.json', {'fatal': fatal, 'containedRejection': rejected, 'cleanupErrors': cleanup_errors, **settlement})
+        write_record(folder/'guard-result.json', {'fatal': fatal, 'containedRejection': rejected, 'cleanupErrors': cleanup_errors, **settlement, **({'namespace':namespace} if namespace is not None else {})})
     except BaseException:
         quarantine(folder, 'guard evidence failure', settlement)
     if not settlement['settled']:

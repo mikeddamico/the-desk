@@ -12,10 +12,12 @@ import subprocess
 import sys
 import time
 
+ROLE_ROOTS = {'build':Path('/tmp/d'),'evaluation':Path('/tmp/e')}
+ROLE = None
 DESTINATION = Path('/tmp/d')
 UID = os.getuid()
 CAP = 262144
-SOURCE_FILES = 507
+SOURCE_FILES = 515
 STATE = {'phase': 'preflight', 'primary': None, 'cleanup_errors': [],
          'cancelled': None, 'settling': False, 'actions': [],
          'evidence': None, 'source': None, 'owned_root': None, 'prepared': False}
@@ -514,16 +516,18 @@ def validate_clone_config(owned):
         'stable': True, 'observed_values_retained': False})
 
 def main():
-    global SOURCE, EVIDENCE, GIT_ENV, GIT, tmp, WHOLE_DEADLINE
+    global SOURCE, EVIDENCE, GIT_ENV, GIT, tmp, WHOLE_DEADLINE, ROLE, DESTINATION
     before, names, tools_before = None, None, None
     try:
         signal.signal(signal.SIGTERM, cancel)
         signal.signal(signal.SIGINT, cancel)
         WHOLE_DEADLINE = time.monotonic() + 240
-        need(len(sys.argv) == 1, 'fixed_zero_argument_owner')
+        need(len(sys.argv) == 2 and sys.argv[1] in ('build', 'evaluation'), 'fixed_dependency_role')
+        ROLE = sys.argv[1]
+        DESTINATION = ROLE_ROOTS[ROLE]
         need(os.name == 'posix' and os.environ.get('GITHUB_ACTIONS') == 'true' and
              os.environ.get('ImageOS') == 'ubuntu24' and
-             os.environ.get('DESK_CI_PARTITION') == 'rest', 'hosted_rest_only')
+             os.environ.get('DESK_CI_PARTITION') in ('writer', 'rest'), 'hosted_partition_only')
         need(os.environ.get('GITHUB_REPOSITORY') == 'mikeddamico/the-desk', 'repository')
         SHA = os.environ.get('GITHUB_SHA', '')
         need(re.fullmatch('[0-9a-f]{40}', SHA), 'actual_checkout_sha')
@@ -540,7 +544,11 @@ def main():
         need(tmp['uid'] == 0 and tmp['mode'] == 0o1777, 'shared_tmp_shape')
         need(not os.path.lexists(DESTINATION), 'exclusive_short_root')
         need(STATE['cancelled'] is None, 'owner_cancelled')
-        EVIDENCE = temporary / 'fixture105-layout'
+        role_temp = temporary / ROLE
+        need(not os.path.lexists(role_temp), 'exclusive_role_temp')
+        role_temp.mkdir(mode=0o700)
+        need(identity(role_temp)['uid'] == UID and identity(role_temp)['mode'] == 0o700, 'role_temp_owner')
+        EVIDENCE = role_temp / 'fixture105-layout'
         EVIDENCE.mkdir(mode=0o700)
         STATE['evidence'] = identity(EVIDENCE)
         publish_evidence_claim()
@@ -577,7 +585,7 @@ def main():
         record('source-before.json', before)
         STATE['source_snapshot_sha256'] = hashlib.sha256(json.dumps(before, sort_keys=True).encode()).hexdigest()
         STATE['phase'] = 'root_claim'
-        record('intent.json', {'root': str(DESTINATION), 'head': SHA, 'tree': original_tree,
+        record('intent.json', {'role': ROLE, 'root': str(DESTINATION), 'head': SHA, 'tree': original_tree,
                                'source': STATE['source'], 'tmp': tmp,
                                'scope': 'independent complete local Git clone only; no install or application',
                                'shared_git_registration': False})
