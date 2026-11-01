@@ -867,6 +867,7 @@ STAGE_PHASES = ('PREP', 'BIND', 'GUARD', 'CHECK')
 STAGE_STREAM_CAP = 67108864
 STAGE_SIGNALS = (signal.SIGINT, signal.SIGTERM, signal.SIGHUP)
 STAGE_READER = None
+STAGE_CI = None
 
 
 def stage_read(path, limit):
@@ -884,13 +885,38 @@ def stage_record(path, value):
     write_private(path,raw,sync=True)
 
 
-def stage_argv(stage, phase):
-    if stage not in ('prerequisite', 'focused') or phase not in STAGE_PHASES:
+def stage_partition():
+    value = os.environ.get('DESK_CI_PARTITION')
+    if value not in ('writer','rest'):raise RuntimeError('stage partition')
+    return value
+
+
+def stage_ci():
+    global STAGE_CI
+    if STAGE_CI is None:
+        import runpy
+        STAGE_CI = runpy.run_path(str(ROOT/'tools/ci-validation/ci.py'),run_name='stage_ci_definitions')
+    return STAGE_CI
+
+
+def stage_guard_url(stage, partition, env):
+    value = env.get('TEST_DATABASE_URL')
+    if stage == 'all' and partition == 'rest':
+        try:stage_ci()['validate_db_url'](value)
+        except Exception:raise RuntimeError('stage disposable database') from None
+    elif value is not None:raise RuntimeError('stage unexpected database')
+    return value
+
+
+def stage_argv(stage, phase, partition=None):
+    if stage not in ('prerequisite', 'focused', 'all') or phase not in STAGE_PHASES:
         raise RuntimeError('stage command map')
+    partition = stage_partition() if partition is None else partition
+    if partition not in ('writer','rest'):raise RuntimeError('stage partition')
     if phase == 'GUARD':
         return ['/usr/bin/timeout', '--signal=TERM', '--kill-after=20',
-                '30' if stage == 'prerequisite' else '120', '/usr/bin/python3',
-                'test/support/p33-parity-supervisor.py', 'guard', stage]
+                '30' if stage == 'prerequisite' else '120' if stage == 'focused' else '7200', '/usr/bin/python3',
+                'test/support/p33-parity-supervisor.py', 'guard', partition if stage == 'all' else stage]
     return ['/usr/bin/python3', '-I', '-B', 'tools/ci-validation/ci.py',
             {'PREP':'precheck', 'BIND':'fixture-binding', 'CHECK':'check'}[phase], stage]
 
@@ -948,6 +974,9 @@ def stage_parent_live(expected, fd):
 def stage_child(args):
     """An execed bootstrap waits for authorization; Popen preexec_fn never waits."""
     stage_argv(args.stage,args.phase)
+    if args.partition != stage_partition():raise RuntimeError('stage child partition')
+    if args.phase == 'GUARD':stage_guard_url(args.stage,args.partition,os.environ)
+    elif 'TEST_DATABASE_URL' in os.environ:raise RuntimeError('stage phase database')
     if len(args.nonce) != 48 or any(c not in '0123456789abcdef' for c in args.nonce):
         raise RuntimeError('stage nonce')
     parent = {'pid':args.parent,'start':args.start}
@@ -957,12 +986,12 @@ def stage_child(args):
     primary = None
     try:
         row = stat(os.getpid())
-        ready = {'nonce':args.nonce,'phase':args.phase,'stage':args.stage,
+        ready = {'nonce':args.nonce,'phase':args.phase,'stage':args.stage,'partition':args.partition,
                  'pid':row['pid'],'start':row['start'],'ppid':row['ppid']}
         link.sendall((json.dumps(ready,separators=(',',':'))+'\n').encode())
         grant = receive_line(link,4096,time.monotonic()+5)
         if (type(grant) is not dict or type(grant.get('grant')) is not bool
-                or grant != {'nonce':args.nonce,'phase':args.phase,'stage':args.stage,'grant':True}):
+                or grant != {'nonce':args.nonce,'phase':args.phase,'stage':args.stage,'partition':args.partition,'grant':True}):
             raise RuntimeError('stage grant framing')
         # EOF after one complete grant excludes duplicate/trailing authorization.
         link.settimeout(.25)
@@ -984,8 +1013,8 @@ def stage_child(args):
 class StageOwner:
     """Three fixed grants (or one CHECK), one waiter, one total monotonic budget."""
     def __init__(self, stage, checking, started):
-        self.stage = stage; self.checking = checking
-        self.deadline = started + (90 if checking else 150 if stage == 'prerequisite' else 240)
+        self.stage = stage; self.checking = checking; self.partition = stage_partition()
+        self.deadline = started + (90 if checking else 150 if stage == 'prerequisite' else 240 if stage == 'focused' else 7280)
         self.final_deadline = self.deadline + 20
         self.cancelled = False; self.failed = False; self.grant_committed = False
         self.errors = []; self.pending = []; self.actions = []
@@ -1002,6 +1031,7 @@ class StageOwner:
             live = stage_parent_live(self.parent,self.parent_fd)
         except BaseException:
             live = False
+        if stage_partition()!=self.partition:self.failed = True
         if INTERRUPTED or not live:
             self.cancelled = True
         if self.root_identity is not None and stage_private(ROOT)!=self.root_identity:self.failed = True
@@ -1018,7 +1048,7 @@ class StageOwner:
             self.pending.append(value)  # No retry or destructor-based release proof.
 
     def grant(self, link, ready, direct, phase, nonce):
-        expected = {'nonce':nonce,'phase':phase,'stage':self.stage,
+        expected = {'nonce':nonce,'phase':phase,'stage':self.stage,'partition':self.partition,
                     'pid':direct['pid'],'start':direct['start'],'ppid':os.getpid()}
         if type(ready) is not dict or ready != expected:
             raise RuntimeError('stage ready identity')
@@ -1029,7 +1059,7 @@ class StageOwner:
             self.barrier()
             # Linearization: a concurrently arriving masked signal belongs to an
             # already-owned committed phase. Restoring the mask observes it next.
-            grant = {'nonce':nonce,'phase':phase,'stage':self.stage,'grant':True}
+            grant = {'nonce':nonce,'phase':phase,'stage':self.stage,'partition':self.partition,'grant':True}
             self.grant_committed = True
             link.sendall((json.dumps(grant,separators=(',',':'))+'\n').encode())
             link.shutdown(socket.SHUT_WR)
@@ -1043,6 +1073,9 @@ class StageOwner:
 
     def phase(self, phase, env, output=None):
         self.barrier()
+        if env.get('DESK_CI_PARTITION')!=self.partition:raise RuntimeError('stage phase partition')
+        credential = stage_guard_url(self.stage,self.partition,env) if phase=='GUARD' else None
+        if phase!='GUARD' and 'TEST_DATABASE_URL' in env:raise RuntimeError('stage phase database')
         if self.actions and not self.actions[-1]['settled']:
             raise RuntimeError('stage predecessor unsettled')
         self.grant_committed = False
@@ -1066,7 +1099,7 @@ class StageOwner:
             left,right = socket.socketpair();links = [left,right]
             self.barrier()
             argv = ['/usr/bin/python3','-I','-B',str(SELF),'stage-child','--stage',self.stage,
-                    '--phase',phase,'--link',str(right.fileno()),'--parent',str(os.getpid()),
+                    '--partition',self.partition,'--phase',phase,'--link',str(right.fileno()),'--parent',str(os.getpid()),
                     '--start',str(stat(os.getpid())['start']),'--nonce',nonce]
             spawn_attempted = True
             proc = subprocess.Popen(argv,cwd=ROOT,env=env,stdin=subprocess.DEVNULL,
@@ -1078,7 +1111,7 @@ class StageOwner:
             direct = identity(proc)
             if direct['pgid'] != proc.pid or direct['sid'] != proc.pid:
                 raise RuntimeError('stage direct session')
-            launch = {'pid':proc.pid,'pgid':proc.pid,'identity':direct,'argv':stage_argv(self.stage,phase)}
+            launch = {'pid':proc.pid,'pgid':proc.pid,'identity':direct,'argv':stage_argv(self.stage,phase,self.partition)}
             stage_record(directory/'process.json',launch)
             for name in observed:
                 streams[name] = getattr(proc,name)
@@ -1127,8 +1160,15 @@ class StageOwner:
                 try:os.fsync(stream.fileno())
                 except BaseException as error:self.errors.append(name+'-sync:'+type(error).__name__)
                 self.close(stream,name+'-file-close')
+        try:
+            for name in observed:
+                raw = stage_read((output if output is not None else directory)/name,STAGE_STREAM_CAP)
+                if stage_ci()['redact'](raw,[credential or '']) != raw:raise RuntimeError('stage credential output')
+        except BaseException as error:
+            if primary is None:primary = error
+            else:self.errors.append('output-check:'+type(error).__name__)
         clean = bool(settlement and settlement['settled'] and all(eof.values()) and not self.errors and not self.pending)
-        value = {'phase':phase,'argv':stage_argv(self.stage,phase),'granted':self.grant_committed,'launch':launch,
+        value = {'phase':phase,'argv':stage_argv(self.stage,phase,self.partition),'granted':self.grant_committed,'launch':launch,
                  'exit':None if proc is None else proc.returncode,
                  'primary':None if primary is None else type(primary).__name__,
                  'settled':clean,'settlement':settlement,'cleanupErrors':list(self.errors),
@@ -1195,7 +1235,7 @@ def stage_owner(stage, checking=False):
         for path in (base,base/'tmp',base/'home',base/'evidence'):stage_private(path)
         stage_umask()
         candidate = base/'evidence'/('stage-check' if checking else 'stage-owner')/stage
-        # Parent is a closed two-stage namespace; its exact role parent is private.
+        # Parent is a closed three-stage namespace; its exact role parent is private.
         namespace = candidate.parent
         try:namespace.mkdir(mode=0o700)
         except FileExistsError:stage_private(namespace)
@@ -1230,6 +1270,8 @@ def stage_owner(stage, checking=False):
                          'GITHUB_SHA','GITHUB_REPOSITORY','GITHUB_RUN_ID','GITHUB_RUN_ATTEMPT')}
             guard_env.update(PATH=str(Path(node).parent)+':/usr/bin:/bin',HOME=str(base/'home'),TMPDIR=str(base/'tmp'),
                              LANG='C.UTF-8',LC_ALL='C.UTF-8',TZ='UTC',CI='true',DESK_FIXTURE105_BINDING=json.dumps(binding,separators=(',',':')))
+            if stage=='all' and owner.partition=='rest':guard_env['TEST_DATABASE_URL']=os.environ.get('TEST_DATABASE_URL','')
+            stage_guard_url(stage,owner.partition,guard_env)
             if 'RUNNER_TRACKING_ID' in os.environ:guard_env['RUNNER_TRACKING_ID']=os.environ['RUNNER_TRACKING_ID']
             guard_error = None
             try:owner.phase('GUARD',guard_env,output)
@@ -1259,7 +1301,7 @@ def stage_owner(stage, checking=False):
 def stage_finish(owner, primary, directory):
     # This durable record is provisional: final process exit and fresh CHECK
     # remain necessary. Keep parent monitoring live through all reporting.
-    result = {'stage':owner.stage,'checking':owner.checking,
+    result = {'stage':owner.stage,'partition':owner.partition,'checking':owner.checking,
               'success':primary is None and not owner.failed and not owner.errors and not owner.pending and not owner.cancelled and not INTERRUPTED and not PRIVATE_WRITE_PENDING,
               'primary':None if primary is None else type(primary).__name__,'cleanupErrors':owner.errors,
               'cancelled':owner.cancelled or INTERRUPTED,'pending':len(owner.pending)+len(PRIVATE_WRITE_PENDING),
@@ -1282,6 +1324,9 @@ def stage_finish(owner, primary, directory):
     try:
         if stage_private(ROOT)!=owner.root_identity:raise RuntimeError('stage final root changed')
     except BaseException as error:failed('final-root',error)
+    try:
+        if stage_partition()!=owner.partition:raise RuntimeError('stage partition changed')
+    except BaseException as error:failed('final-partition',error)
     owner.cancelled = owner.cancelled or INTERRUPTED or not live
     if time.monotonic()>=owner.final_deadline:owner.errors.append('final-deadline')
     success = (primary is None and not owner.failed and not owner.cancelled and not owner.errors
@@ -1300,8 +1345,8 @@ def stage_finish(owner, primary, directory):
 def stage_previous_owner(base, stage):
     directory = base/'evidence/stage-owner'/stage
     value = json.loads(stage_read(directory/'owner.json',65536))
-    keys = {'stage','checking','success','primary','cleanupErrors','cancelled','pending','parent','identity','root','actions'}
-    if (type(value) is not dict or set(value)!=keys or value['stage']!=stage or value['checking'] is not False
+    keys = {'stage','partition','checking','success','primary','cleanupErrors','cancelled','pending','parent','identity','root','actions'}
+    if (type(value) is not dict or set(value)!=keys or value['stage']!=stage or value['partition']!=stage_partition() or value['checking'] is not False
             or value['success'] is not True or value['primary'] is not None or value['cleanupErrors']!=[]
             or value['cancelled'] is not False or type(value['pending']) is not int or value['pending']!=0
             or value['root']!=stage_private(ROOT) or type(value['actions']) is not list
@@ -1328,6 +1373,7 @@ def stage_previous_owner(base, stage):
             raw = stage_read((base/'evidence'/stage if phase=='GUARD' else directory/phase)/name,STAGE_STREAM_CAP)
             if type(pin['bytes']) is not int or pin['bytes']!=len(raw) or pin['sha256']!=hashlib.sha256(raw).hexdigest():
                 raise RuntimeError('stage raw stream drift')
+            if stage_ci()['redact'](raw)!=raw:raise RuntimeError('stage credential output')
     return value
 
 
@@ -1347,9 +1393,10 @@ def main():
     c.add_argument('mode', choices=['complete', 'noncomplete'])
     for name in ('stage-owner','stage-check'):
         phase_owner = sub.add_parser(name)
-        phase_owner.add_argument('stage',choices=['prerequisite','focused'])
+        phase_owner.add_argument('stage',choices=['prerequisite','focused','all'])
     child = sub.add_parser('stage-child')
-    child.add_argument('--stage',choices=['prerequisite','focused'],required=True)
+    child.add_argument('--stage',choices=['prerequisite','focused','all'],required=True)
+    child.add_argument('--partition',choices=['writer','rest'],required=True)
     child.add_argument('--phase',choices=STAGE_PHASES,required=True)
     for key in ('parent','start','link'):child.add_argument('--'+key,type=int,required=True)
     child.add_argument('--nonce',required=True)

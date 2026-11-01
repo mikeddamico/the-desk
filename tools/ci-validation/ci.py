@@ -1899,7 +1899,7 @@ def fixture046_keep_runtime(keep, evidence, scope):
 def retain_stage_owner(keep, base, stage):
     """Closed partial retention; presence is an attempt, never a stage verdict."""
     present = False
-    if stage not in ('prerequisite','focused'):return present
+    if stage not in ('prerequisite','focused','all'):return present
     for namespace,phases in (('stage-owner',('PREP','BIND','GUARD')),('stage-check',('CHECK',))):
         directory = base/'evidence'/namespace/stage
         if not os.path.lexists(directory):continue
@@ -2075,11 +2075,75 @@ def verify_security_report(base, binding):
         raise RuntimeError('security report is not an unchanged successful scan')
 
 
+def security_workspace(binding):
+    """The pinned action writes only in the original, identity-matching checkout."""
+    global ROOT
+    original = ROOT
+    workspace = Path(os.environ['GITHUB_WORKSPACE'])
+    if (not workspace.is_absolute() or str(workspace)!=os.environ['GITHUB_WORKSPACE']
+            or workspace.resolve()!=workspace or workspace in (Path('/tmp/d'),Path('/tmp/e'))):
+        raise RuntimeError('security workspace route')
+    try:
+        ROOT = workspace
+        identity, members = proof_identity_now(False)
+        if partition_identity(identity,members)!=binding['identity']:
+            raise RuntimeError('security workspace binding')
+    finally:ROOT = original
+    info = os.lstat(workspace)
+    return workspace, {'dev':info.st_dev,'ino':info.st_ino,'uid':info.st_uid,'mode':stat.S_IMODE(info.st_mode)}
+
+
+def cmd_security_precheck():
+    binding = check_partition_binding()
+    workspace, identity = security_workspace(binding)
+    if os.path.lexists(workspace/'results.sarif'):raise RuntimeError('security stale report')
+    fixture_write(ci_dir()/'evidence/security-pre.json',
+                  {'schema':'ci-security-pre/1','binding':binding,'workspace':str(workspace),'identity':identity})
+    return 0
+
+
 def cmd_retain_security():
     binding = check_partition_binding()
-    record = retain_security_report(ci_dir(), ROOT, binding, load_pre(ci_dir() / 'evidence'),
-                                    os.environ.get('GITLEAKS_OUTCOME'))
-    print(json.dumps({'security_report_retained': True, 'bytes': record['bytes'], 'sha256': record['sha256']}))
+    base = ci_dir();pre = load_pre(base/'evidence')
+    receipt = json.loads(fixture_read(base/'evidence/security-pre.json',JSON_LIMIT))
+    workspace = Path(os.environ['GITHUB_WORKSPACE'])
+    info = os.lstat(workspace)
+    identity = {'dev':info.st_dev,'ino':info.st_ino,'uid':info.st_uid,'mode':stat.S_IMODE(info.st_mode)}
+    if (not workspace.is_absolute() or workspace.resolve()!=workspace or str(workspace)!=os.environ['GITHUB_WORKSPACE']
+            or workspace in (Path('/tmp/d'),Path('/tmp/e')) or receipt!={
+                'schema':'ci-security-pre/1','binding':binding,'workspace':str(workspace),'identity':identity}):
+        raise RuntimeError('security workspace replaced')
+    outcome = os.environ.get('GITLEAKS_OUTCOME')
+    if outcome not in ('success','failure') or 'results.sarif' in pre['members']:
+        raise RuntimeError('security report ownership/outcome mismatch')
+    source = workspace/'results.sarif'
+    before = os.lstat(source)
+    def same_source():
+        current = os.lstat(source)
+        if any(getattr(before,k)!=getattr(current,k) for k in
+               ('st_dev','st_ino','st_uid','st_gid','st_mode','st_nlink','st_size','st_mtime_ns','st_ctime_ns')):
+            raise RuntimeError('security report custody changed')
+    data = fixture_read(source,COPY_LIMIT,False)
+    same_source()
+    findings = security_report_findings(data)
+    destination = base/'security-report';destination.mkdir(mode=0o700)
+    retained = destination/'results.sarif'
+    fixture_write_raw(retained,data,COPY_LIMIT)
+    second = fixture_read(source,COPY_LIMIT,False)
+    same_source()
+    if second!=data or fixture_read(retained,COPY_LIMIT,False)!=data:
+        raise RuntimeError('security report transfer changed')
+    # Cooperative custody checks, not atomic protection from hostile writers.
+    # Only the generated file proven absent at precheck and retained exactly.
+    same_source()
+    os.unlink(source)
+    if os.path.lexists(source):raise RuntimeError('security report removal failed')
+    current, current_identity = security_workspace(binding)
+    if current!=workspace or current_identity!=identity:raise RuntimeError('security workspace changed')
+    record = {'schema':'ci-security-report/1','binding':binding,'outcome':outcome,
+              'findings':findings,'bytes':len(data),'sha256':fixture_hash(data)}
+    fixture_write(destination/'manifest.json',record)
+    print(json.dumps({'security_report_retained':True,'bytes':record['bytes'],'sha256':record['sha256']}))
     return 0
 
 
@@ -2298,6 +2362,7 @@ def main(argv=None):
     f.add_argument('stage', choices=STAGES)
     sub.add_parser('final')
     sub.add_parser('joint')
+    sub.add_parser('security-precheck')
     sub.add_parser('retain-security')
     args = parser.parse_args(argv)
     if args.command == 'diagnostic-final':
@@ -2319,6 +2384,7 @@ def main(argv=None):
         check_partition_binding()
         if args.command == 'traversal-proof': result = owner.run_traversal(sys.modules[__name__])
         elif args.command == 'identity-witness': result = owner.run_identity(sys.modules[__name__])
+        elif args.command == 'security-precheck': result = cmd_security_precheck()
         elif args.command == 'retain-security': result = cmd_retain_security()
         elif args.command == 'fixture-binding': result = cmd_fixture_binding(args.stage)
         elif args.command == 'dbprobe': result = cmd_dbprobe()

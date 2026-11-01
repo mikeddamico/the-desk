@@ -501,3 +501,32 @@ a root cause or fix, exercise live autovacuum/races/hidden-admin metadata, or
 give full-suite acceptance. Restoring the temporary route and running normal
 candidate acceptance are separate reviewed gates. Assembly implementation,
 real audio, genuine semantic admission and publication remain unauthorized.
+
+## Prospective complete CI restoration
+
+CI153 accepted the selected four-owner case at 123539ms under its reviewed
+180000ms budget, including final assertions and cleanup. Original CI144/CI152
+120000ms benchmark failures remain failed; this is not a speedup or product SLA.
+Full CI acceptance remains unproved until both fresh sealed partitions and the
+container/joint gates pass. Writer requires 4908 tests; rest requires 3858 tests,
+including all 34 native cases with suite_complete=true. The ordinary command
+proof covers seven g2-command-connection tests only.
+
+The closed aggregate StageOwner grants PREP, BIND and GUARD, then a separate
+CHECK validates their settled records. Writer/rest identity is bound throughout.
+The aggregate work budget is 7280 seconds from before setup, with 20 seconds for
+settlement/finalization; its guard stays at 7200 seconds, TERM/KILL20, inside the
+122-minute step and 190-minute job. CHECK has 90 seconds plus 20 for finalization
+inside two minutes. These are finite engineering allocations, not proved timing
+margins. Cancellation, incomplete EOF/reaping, identity drift, credential output
+or failed evidence retention cannot admit. No automatic retries or budget ratchet.
+
+Pinned synthetic media preparation/cleanup, audit, Gitleaks, both full evidence
+uploads and security uploads remain mandatory. The pinned action writes its
+report in the original workspace. A fresh source-bound precheck requires that
+report absent; exclusive bounded transfer verifies its retained bytes before
+removing only that exact generated file and rechecking workspace identity.
+Final acceptance requires a successful zero-findings report and actual upload
+and media-cleanup outcomes. Partial producer evidence remains non-authoritative
+under unchanged logical/object/byte limits. No paid providers, real media,
+registry publication, deployment, credential expansion or merge is authorized.

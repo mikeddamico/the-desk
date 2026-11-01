@@ -152,3 +152,32 @@ Each synchronous TypeScript graph retains its own absolute ancestry and active d
 Leaf/link correspondence, namespace rebinds and active bound-directory mutations fail closed even with identical content hashes. A close failure preserves the first error, retains private ownership metadata, and permanently prevents another graph in that module realm; there is no reset or fd-number retry. This is a resource barrier, not a content cache. No new public capability or authority is returned.
 
 The temporary CI138 cost probe and source instrumentation are removed. Retained CI138 evidence established a dominant open/ancestor cost in one warmed, instrumented call; it did not prove historical cause or future savings. CI144 and CI152 failed the original single four-owner 120000ms benchmark; those failures remain failures. The prospective acceptance amendment assigns only that case 180000ms, leaving shared LIMIT=120000 and every other case unchanged. The finite 50% headroom is an engineering allocation, not a measured margin, speedup or product SLA. One reviewed run may establish complete duration and revised semantic acceptance together; timeout, assertion failure or incomplete integrity/cleanup evidence fails acceptance, with no automatic retry or budget ratchet. Every operation, fresh integrity read, assertion and all 58 lifecycle markers remain required. Its isolated journal must have suite_complete=false, one completed selected case and four completed/nonreturned expected calls. Only the full34-case suite can require suite_complete=true. The original 120-second objective is not satisfied by revised acceptance.
+
+## Prospective complete CI restoration
+
+CI153 accepted the selected four-owner case at 123539ms under its reviewed
+180000ms budget, including final assertions and cleanup. Original CI144/CI152
+120000ms benchmark failures remain failed; this is not a speedup or product SLA.
+Full CI acceptance remains unproved until both fresh sealed partitions and the
+container/joint gates pass. Writer requires 4908 tests; rest requires 3858 tests,
+including all 34 native cases with suite_complete=true. The ordinary command
+proof covers seven g2-command-connection tests only.
+
+The closed aggregate StageOwner grants PREP, BIND and GUARD, then a separate
+CHECK validates their settled records. Writer/rest identity is bound throughout.
+The aggregate work budget is 7280 seconds from before setup, with 20 seconds for
+settlement/finalization; its guard stays at 7200 seconds, TERM/KILL20, inside the
+122-minute step and 190-minute job. CHECK has 90 seconds plus 20 for finalization
+inside two minutes. These are finite engineering allocations, not proved timing
+margins. Cancellation, incomplete EOF/reaping, identity drift, credential output
+or failed evidence retention cannot admit. No automatic retries or budget ratchet.
+
+Pinned synthetic media preparation/cleanup, audit, Gitleaks, both full evidence
+uploads and security uploads remain mandatory. The pinned action writes its
+report in the original workspace. A fresh source-bound precheck requires that
+report absent; exclusive bounded transfer verifies its retained bytes before
+removing only that exact generated file and rechecking workspace identity.
+Final acceptance requires a successful zero-findings report and actual upload
+and media-cleanup outcomes. Partial producer evidence remains non-authoritative
+under unchanged logical/object/byte limits. No paid providers, real media,
+registry publication, deployment, credential expansion or merge is authorized.

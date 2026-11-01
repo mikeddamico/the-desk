@@ -1,7 +1,7 @@
 name: foundation-ci
 
-# REPRESENTATIVE FIRST: two independent ordinary installations and transferred-build provenance.
-# Writer, aggregate, image and full acceptance remain HOLD; no additional run is dispatched.
+# FULL RESTORATION: independent ordinary installations and complete partition acceptance.
+# CI153 revised selected-case proof accepted; original 120-second benchmark remains failed.
 on:
   pull_request:
   push:
@@ -10,7 +10,6 @@ permissions:
   contents: read
 jobs:
   verify-writer:
-    if: ${{ false }} # Representative-first route; no writer run.
     runs-on: ubuntu-24.04
     timeout-minutes: 190
     services:
@@ -111,7 +110,7 @@ jobs:
           DESK_CI_ROLE_TEMP: ${{ runner.temp }}/evaluation
         run: /usr/bin/python3 -I -B tools/ci-validation/ci.py identity-witness
       - name: Probe the disposable database read-only
-        if: ${{ success() && steps.init.outcome == 'success' }}
+        if: ${{ success() && steps.init.outcome == 'success' && steps.semantic-identities.outcome == 'success' }}
         working-directory: /tmp/e
         timeout-minutes: 1
         env:
@@ -119,37 +118,37 @@ jobs:
         run: |
           /usr/bin/python3 -I -B tools/ci-validation/ci.py dbprobe
       - name: Guard P33 prerequisite
-        if: ${{ success() && steps.init.outcome == 'success' }}
-        working-directory: /tmp/e
-        timeout-minutes: 1
-        env:
-          DESK_CI_ROLE_TEMP: ${{ runner.temp }}/evaluation
-        run: |
-          /bin/bash tools/ci-validation/run-stage.sh prerequisite
-      - name: Validate P33 prerequisite
-        if: ${{ success() && steps.init.outcome == 'success' }}
-        working-directory: /tmp/e
-        timeout-minutes: 1
-        env:
-          DESK_CI_ROLE_TEMP: ${{ runner.temp }}/evaluation
-        run: |
-          /usr/bin/python3 -I -B tools/ci-validation/ci.py check prerequisite
-      - name: Guard P33 focused
-        if: ${{ success() && steps.init.outcome == 'success' }}
+        if: ${{ success() && steps.init.outcome == 'success' && steps.semantic-identities.outcome == 'success' }}
         working-directory: /tmp/e
         timeout-minutes: 3
         env:
           DESK_CI_ROLE_TEMP: ${{ runner.temp }}/evaluation
         run: |
-          /bin/bash tools/ci-validation/run-stage.sh focused
-      - name: Validate P33 focused
-        if: ${{ success() && steps.init.outcome == 'success' }}
+          exec /bin/bash tools/ci-validation/run-stage.sh prerequisite
+      - name: Validate P33 prerequisite
+        if: ${{ success() && steps.init.outcome == 'success' && steps.semantic-identities.outcome == 'success' }}
         working-directory: /tmp/e
-        timeout-minutes: 1
+        timeout-minutes: 2
         env:
           DESK_CI_ROLE_TEMP: ${{ runner.temp }}/evaluation
         run: |
-          /usr/bin/python3 -I -B tools/ci-validation/ci.py check focused
+          exec /usr/bin/python3 -I -B test/support/p33-parity-supervisor.py stage-check prerequisite
+      - name: Guard P33 focused
+        if: ${{ success() && steps.init.outcome == 'success' && steps.semantic-identities.outcome == 'success' }}
+        working-directory: /tmp/e
+        timeout-minutes: 5
+        env:
+          DESK_CI_ROLE_TEMP: ${{ runner.temp }}/evaluation
+        run: |
+          exec /bin/bash tools/ci-validation/run-stage.sh focused
+      - name: Validate P33 focused
+        if: ${{ success() && steps.init.outcome == 'success' && steps.semantic-identities.outcome == 'success' }}
+        working-directory: /tmp/e
+        timeout-minutes: 2
+        env:
+          DESK_CI_ROLE_TEMP: ${{ runner.temp }}/evaluation
+        run: |
+          exec /usr/bin/python3 -I -B test/support/p33-parity-supervisor.py stage-check focused
       - name: Collect controls evidence
         id: collect-controls
         if: ${{ always() && steps.init.outcome == 'success' }}
@@ -169,22 +168,22 @@ jobs:
           path: ${{ runner.temp }}/evaluation/ci/upload-controls
           if-no-files-found: error
           retention-days: 30
-      - name: Guard P33 aggregate all (held)
-        if: ${{ false }}
+      - name: Guard P33 aggregate all
+        if: ${{ success() && steps.init.outcome == 'success' && steps.semantic-identities.outcome == 'success' && steps.collect-controls.outcome == 'success' && steps.upload-controls.outcome == 'success' }}
         working-directory: /tmp/e
         timeout-minutes: 122
         env:
           DESK_CI_ROLE_TEMP: ${{ runner.temp }}/evaluation
         run: |
-          /bin/bash tools/ci-validation/run-stage.sh all
-      - name: Validate aggregate counts coverage and source (held)
-        if: ${{ false }}
+          exec /bin/bash tools/ci-validation/run-stage.sh all
+      - name: Validate aggregate counts coverage and source
+        if: ${{ success() && steps.init.outcome == 'success' && steps.semantic-identities.outcome == 'success' && steps.collect-controls.outcome == 'success' && steps.upload-controls.outcome == 'success' }}
         working-directory: /tmp/e
         timeout-minutes: 2
         env:
           DESK_CI_ROLE_TEMP: ${{ runner.temp }}/evaluation
         run: |
-          /usr/bin/python3 -I -B tools/ci-validation/ci.py check all
+          exec /usr/bin/python3 -I -B test/support/p33-parity-supervisor.py stage-check all
       - name: Collect full evidence
         id: collect-full
         if: ${{ always() && steps.init.outcome == 'success' }}
@@ -221,25 +220,34 @@ jobs:
           path: ${{ runner.temp }}/producer-failure
           if-no-files-found: error
           retention-days: 30
-      - name: Audit (held until full-validation release)
+      - name: Audit complete locked BUILD dependencies
         id: audit
-        if: ${{ false }}
+        if: ${{ success() && steps.init.outcome == 'success' }}
         working-directory: /tmp/d
         timeout-minutes: 5
         env:
           DESK_CI_ROLE_TEMP: ${{ runner.temp }}/build
         run: |
           npm audit --audit-level=high
+      - name: Bind the original workspace before the security scan
+        id: security-precheck
+        if: ${{ success() && steps.init.outcome == 'success' }}
+        working-directory: /tmp/e
+        timeout-minutes: 2
+        env:
+          DESK_CI_ROLE_TEMP: ${{ runner.temp }}/evaluation
+        run: /usr/bin/python3 -I -B tools/ci-validation/ci.py security-precheck
       - id: gitleaks
-        if: ${{ false }} # Full-validation gate remains held, not removed.
+        if: ${{ success() && steps.security-precheck.outcome == 'success' }}
         uses: gitleaks/gitleaks-action@e0c47f4f8be36e29cdc102c57e68cb5cbf0e8d1e # v3.0.0
         timeout-minutes: 5
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITLEAKS_ENABLE_UPLOAD_ARTIFACT: "false"
-      - name: Retain security report (held)
+          GITLEAKS_ENABLE_COMMENTS: "false"
+      - name: Retain security report
         id: retain-security
-        if: ${{ false }}
+        if: ${{ always() && steps.init.outcome == 'success' && steps.security-precheck.outcome == 'success' && (steps.gitleaks.outcome == 'success' || steps.gitleaks.outcome == 'failure') }}
         working-directory: /tmp/e
         timeout-minutes: 1
         env:
@@ -247,9 +255,9 @@ jobs:
           GITLEAKS_OUTCOME: ${{ steps.gitleaks.outcome }}
         run: |
           /usr/bin/python3 -I -B tools/ci-validation/ci.py retain-security
-      - name: Upload partition security report (held)
+      - name: Upload partition security report
         id: upload-security
-        if: ${{ false }}
+        if: ${{ always() && steps.retain-security.outcome == 'success' }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         timeout-minutes: 2
         with:
@@ -257,22 +265,21 @@ jobs:
           path: ${{ runner.temp }}/evaluation/ci/security-report
           if-no-files-found: error
           retention-days: 30
-      - name: HOLD original representative cannot qualify for full CI
+      - name: Require complete partition and retained security proof
         id: final
-        if: ${{ always() && steps.build-layout.outcome != 'skipped' }}
-        working-directory: ${{ github.workspace }}
+        if: ${{ always() && steps.init.outcome == 'success' }}
+        working-directory: /tmp/e
         timeout-minutes: 3
         env:
+          DESK_CI_ROLE_TEMP: ${{ runner.temp }}/evaluation
           PRODUCER_UPLOAD_OUTCOME: ${{ steps.upload-producer.outcome }}
-          NATIVE_OUTCOME: ${{ steps.command-postgres.outcome }}
-          NATIVE_UPLOAD_OUTCOME: ${{ steps.upload-native.outcome }}
           CONTROLS_UPLOAD_OUTCOME: ${{ steps.upload-controls.outcome }}
           UPLOAD_OUTCOME: ${{ steps.upload-full.outcome }}
           AUDIT_OUTCOME: ${{ steps.audit.outcome }}
           GITLEAKS_OUTCOME: ${{ steps.gitleaks.outcome }}
           SECURITY_UPLOAD_OUTCOME: ${{ steps.upload-security.outcome }}
         run: |
-          /usr/bin/python3 -I -B tools/ci-validation/ci.py diagnostic-final
+          /usr/bin/python3 -I -B tools/ci-validation/ci.py final
 
   verify-rest:
     runs-on: ubuntu-24.04
@@ -366,9 +373,9 @@ jobs:
           DESK_CI_ROLE_TEMP: ${{ runner.temp }}/evaluation
         run: |
           /bin/bash tools/ci-validation/run-stage.sh bind-build
-      - name: Reconstruct the fixed synthetic fixture FFmpeg runtime (held)
+      - name: Reconstruct the fixed synthetic fixture FFmpeg runtime
         id: fixture046-runtime
-        if: ${{ false }} # Representative-first route; no media preparation.
+        if: ${{ success() && steps.init.outcome == 'success' }}
         working-directory: /tmp/e
         timeout-minutes: 16
         env:
@@ -464,7 +471,7 @@ jobs:
           path: ${{ runner.temp }}/evaluation/ci/upload-controls
           if-no-files-found: error
           retention-days: 30
-      - name: Diagnose the original fixed four-owner native case
+      - name: Prove ordinary PostgreSQL command connection semantics
         id: command-postgres
         if: ${{ success() && steps.init.outcome == 'success' && steps.semantic-identities.outcome == 'success' && steps.collect-controls.outcome == 'success' && steps.upload-controls.outcome == 'success' }}
         working-directory: /tmp/e
@@ -474,33 +481,33 @@ jobs:
         run: |
           /usr/bin/env HOME="$DESK_CI_ROLE_TEMP/ci/home" TMPDIR="$DESK_CI_ROLE_TEMP/ci/tmp" \
             /usr/bin/timeout --signal=TERM --kill-after=20s 1200s \
-            node --import tsx test/support/command-postgres-hosted.ts fixture105-unknown
-      - name: Retain native diagnostic including failed cleanup observations
-        id: upload-native
+            node --import tsx test/support/command-postgres-hosted.ts
+      - name: Retain ordinary command proof including failed cleanup observations
+        id: upload-command-postgres
         if: ${{ always() && steps.init.outcome == 'success' && steps.command-postgres.outcome != 'skipped' }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         timeout-minutes: 2
         with:
-          name: ci-fixture105-unknown-rest-${{ github.run_id }}-${{ github.run_attempt }}
-          path: ${{ runner.temp }}/evaluation/ci/evidence/fixture105-unknown/retained
+          name: ci-command-postgres-rest-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/evaluation/ci/evidence/command-postgres/retained
           if-no-files-found: error
           retention-days: 30
-      - name: Guard P33 aggregate all (held)
-        if: ${{ false }}
+      - name: Guard P33 aggregate all
+        if: ${{ success() && steps.init.outcome == 'success' && steps.semantic-identities.outcome == 'success' && steps.collect-controls.outcome == 'success' && steps.upload-controls.outcome == 'success' }}
         working-directory: /tmp/e
         timeout-minutes: 122
         env:
           DESK_CI_ROLE_TEMP: ${{ runner.temp }}/evaluation
         run: |
-          /bin/bash tools/ci-validation/run-stage.sh all
-      - name: Validate aggregate counts coverage and source (held)
-        if: ${{ false }}
+          exec /bin/bash tools/ci-validation/run-stage.sh all
+      - name: Validate aggregate counts coverage and source
+        if: ${{ success() && steps.init.outcome == 'success' && steps.semantic-identities.outcome == 'success' && steps.collect-controls.outcome == 'success' && steps.upload-controls.outcome == 'success' }}
         working-directory: /tmp/e
         timeout-minutes: 2
         env:
           DESK_CI_ROLE_TEMP: ${{ runner.temp }}/evaluation
         run: |
-          /usr/bin/python3 -I -B tools/ci-validation/ci.py check all
+          exec /usr/bin/python3 -I -B test/support/p33-parity-supervisor.py stage-check all
       - name: Settle owned fixture runtime before full retention
         id: fixture046-cleanup
         if: ${{ always() && steps.init.outcome == 'success' && (steps.fixture046-runtime.outcome == 'success' || steps.fixture046-runtime.outcome == 'failure') }}
@@ -511,7 +518,7 @@ jobs:
         run: /usr/bin/python3 -I -B test/support/fixture046-ffmpeg-supply.py cleanup
       - name: Collect full evidence
         id: collect-full
-        if: ${{ false }} # Traversal-only first tranche; restore all prerequisites in fresh roles later.
+        if: ${{ always() && steps.init.outcome == 'success' }}
         working-directory: /tmp/e
         timeout-minutes: 3
         env:
@@ -521,7 +528,7 @@ jobs:
           /usr/bin/python3 -I -B tools/ci-validation/ci.py collect --scope full
       - name: Retain full evidence
         id: upload-full
-        if: ${{ false }} # Traversal-only first tranche; restore all prerequisites in fresh roles later.
+        if: ${{ always() && steps.collect-full.outcome == 'success' }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         timeout-minutes: 3
         with:
@@ -546,25 +553,34 @@ jobs:
           path: ${{ runner.temp }}/producer-failure
           if-no-files-found: error
           retention-days: 30
-      - name: Audit (held until full-validation release)
+      - name: Audit complete locked BUILD dependencies
         id: audit
-        if: ${{ false }}
+        if: ${{ success() && steps.init.outcome == 'success' }}
         working-directory: /tmp/d
         timeout-minutes: 5
         env:
           DESK_CI_ROLE_TEMP: ${{ runner.temp }}/build
         run: |
           npm audit --audit-level=high
+      - name: Bind the original workspace before the security scan
+        id: security-precheck
+        if: ${{ success() && steps.init.outcome == 'success' }}
+        working-directory: /tmp/e
+        timeout-minutes: 2
+        env:
+          DESK_CI_ROLE_TEMP: ${{ runner.temp }}/evaluation
+        run: /usr/bin/python3 -I -B tools/ci-validation/ci.py security-precheck
       - id: gitleaks
-        if: ${{ false }} # Full-validation gate remains held, not removed.
+        if: ${{ success() && steps.security-precheck.outcome == 'success' }}
         uses: gitleaks/gitleaks-action@e0c47f4f8be36e29cdc102c57e68cb5cbf0e8d1e # v3.0.0
         timeout-minutes: 5
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITLEAKS_ENABLE_UPLOAD_ARTIFACT: "false"
-      - name: Retain security report (held)
+          GITLEAKS_ENABLE_COMMENTS: "false"
+      - name: Retain security report
         id: retain-security
-        if: ${{ false }}
+        if: ${{ always() && steps.init.outcome == 'success' && steps.security-precheck.outcome == 'success' && (steps.gitleaks.outcome == 'success' || steps.gitleaks.outcome == 'failure') }}
         working-directory: /tmp/e
         timeout-minutes: 1
         env:
@@ -572,9 +588,9 @@ jobs:
           GITLEAKS_OUTCOME: ${{ steps.gitleaks.outcome }}
         run: |
           /usr/bin/python3 -I -B tools/ci-validation/ci.py retain-security
-      - name: Upload partition security report (held)
+      - name: Upload partition security report
         id: upload-security
-        if: ${{ false }}
+        if: ${{ always() && steps.retain-security.outcome == 'success' }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         timeout-minutes: 2
         with:
@@ -582,15 +598,14 @@ jobs:
           path: ${{ runner.temp }}/evaluation/ci/security-report
           if-no-files-found: error
           retention-days: 30
-      - name: HOLD original representative cannot qualify for full CI
+      - name: Require complete partition and retained security proof
         id: final
-        if: ${{ always() && steps.build-layout.outcome != 'skipped' }}
-        working-directory: ${{ github.workspace }}
+        if: ${{ always() && steps.init.outcome == 'success' }}
+        working-directory: /tmp/e
         timeout-minutes: 3
         env:
+          DESK_CI_ROLE_TEMP: ${{ runner.temp }}/evaluation
           PRODUCER_UPLOAD_OUTCOME: ${{ steps.upload-producer.outcome }}
-          NATIVE_OUTCOME: ${{ steps.command-postgres.outcome }}
-          NATIVE_UPLOAD_OUTCOME: ${{ steps.upload-native.outcome }}
           CONTROLS_UPLOAD_OUTCOME: ${{ steps.upload-controls.outcome }}
           UPLOAD_OUTCOME: ${{ steps.upload-full.outcome }}
           AUDIT_OUTCOME: ${{ steps.audit.outcome }}
@@ -598,7 +613,7 @@ jobs:
           SECURITY_UPLOAD_OUTCOME: ${{ steps.upload-security.outcome }}
           FIXTURE046_CLEANUP_OUTCOME: ${{ steps.fixture046-cleanup.outcome }}
         run: |
-          /usr/bin/python3 -I -B tools/ci-validation/ci.py diagnostic-final
+          /usr/bin/python3 -I -B tools/ci-validation/ci.py final
 
   verify:
     needs: [verify-writer, verify-rest, container]
@@ -629,7 +644,6 @@ jobs:
           CONTAINER_OUTCOME: ${{ needs.container.result }}
 
   container:
-    if: ${{ false }} # Native diagnostic: no image build.
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:

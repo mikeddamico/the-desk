@@ -589,7 +589,8 @@ class EvaluationProvenance(unittest.TestCase):
             self.assertLessEqual(len(os.fsencode(ordinary_address))+1,108)
         wrapper=(ci.ROOT/'tools/ci-validation/run-stage.sh').read_text()
         hosted=(ci.ROOT/'test/support/command-postgres-hosted.ts').read_text()
-        self.assertIn('for dir in "$CI_DIR"/tmp/p33-*/attempt-*; do',wrapper)
+        self.assertIn("(base/'tmp').glob('p33-*')",supervisor_text)
+        self.assertIn("runtime.glob('attempt-*')",supervisor_text)
         self.assertIn('`p33-${String(process.getuid?.())}-${sha256(Buffer.from(root)).slice(0, 24)}`',hosted)
         self.assertIn('path = guard_socket_path(folder)\n',supervisor_text)
         self.assertNotIn('the-desk-p33-',wrapper+hosted+supervisor_text)
@@ -973,25 +974,46 @@ class EvaluationProvenance(unittest.TestCase):
         import signal,select
         subject=runpy.run_path(str(ci.ROOT/'test/support/p33-parity-supervisor.py'),run_name='stage_owner_controls')
         cls=subject['StageOwner'];ns=cls.barrier.__globals__
+        real_partition=ns['stage_partition'];ns['stage_partition']=lambda:'writer'
+        ns['stage_ci']=lambda:{'validate_db_url':ci.validate_db_url,'redact':ci.redact}
         routed=(ci.ROOT/'tools/ci-validation/run-stage.sh').read_text()
-        self.assertEqual(routed.count('prerequisite|focused) exec /usr/bin/python3 -I -B test/support/p33-parity-supervisor.py stage-owner "$STAGE"'),1)
-        self.assertLess(routed.index('stage-owner "$STAGE"'),routed.index('precheck "$STAGE"'))
+        self.assertEqual(routed.count('prerequisite|focused|all) exec /usr/bin/python3 -I -B test/support/p33-parity-supervisor.py stage-owner "$STAGE"'),1)
+        self.assertNotIn('precheck "$STAGE"',routed)
         for stage,seconds in (('prerequisite','30'),('focused','120')):
             self.assertEqual(subject['stage_argv'](stage,'GUARD'),['/usr/bin/timeout','--signal=TERM','--kill-after=20',seconds,
                 '/usr/bin/python3','test/support/p33-parity-supervisor.py','guard',stage])
             for phase,command in (('PREP','precheck'),('BIND','fixture-binding'),('CHECK','check')):
                 self.assertEqual(subject['stage_argv'](stage,phase),['/usr/bin/python3','-I','-B','tools/ci-validation/ci.py',command,stage])
-        for stage,phase in (('all','GUARD'),('focused','arbitrary'),('fixture105-unknown','GUARD')):
+        for stage,phase in (('unknown','GUARD'),('focused','arbitrary'),('fixture105-unknown','GUARD')):
             with self.assertRaises(RuntimeError):subject['stage_argv'](stage,phase)
+        for partition in ('writer','rest'):
+            with mock.patch.dict(ns,stage_partition=lambda:partition):
+                self.assertEqual(subject['stage_argv']('all','GUARD')[-1],partition)
+                self.assertEqual(subject['stage_argv']('all','GUARD')[3],'7200')
+                for phase,command in (('PREP','precheck'),('BIND','fixture-binding'),('CHECK','check')):
+                    self.assertEqual(subject['stage_argv']('all',phase)[-2:],[command,'all'])
+        for partition in ('writer','rest','all','',None):
+            with mock.patch.dict(os.environ,{},clear=True):
+                if partition is not None:os.environ['DESK_CI_PARTITION']=partition
+                if partition in ('writer','rest'):self.assertEqual(real_partition(),partition)
+                else:
+                    with self.assertRaises(RuntimeError):real_partition()
+        secret='postgresql://canary:fixed-secret@localhost:5432/the_desk_test'
+        self.assertEqual(subject['stage_guard_url']('all','rest',{'TEST_DATABASE_URL':secret}),secret)
+        for stage,partition,value in (('all','writer',secret),('focused','rest',secret),('all','rest',None),
+                                      ('all','rest',secret.replace('localhost','remote.example'))):
+            with self.assertRaises(RuntimeError):subject['stage_guard_url'](stage,partition,{} if value is None else {'TEST_DATABASE_URL':value})
+        self.assertNotEqual(ci.redact(('prefix '+secret+' suffix').encode(),[secret]),('prefix '+secret+' suffix').encode())
+        self.assertNotIn(b'fixed-secret',ci.redact(secret.encode(),[secret]))
         def modeled_owner(directory=None):
-            o=object.__new__(cls);o.stage='prerequisite';o.checking=False;o.deadline=10**12;o.final_deadline=10**12+20
+            o=object.__new__(cls);o.stage='prerequisite';o.partition='writer';o.checking=False;o.deadline=10**12;o.final_deadline=10**12+20
             o.cancelled=False;o.failed=False;o.grant_committed=False;o.errors=[];o.pending=[];o.actions=[]
             o.parent={'pid':44,'start':88};o.parent_fd=999;o.root_identity=None;o.directory=directory
             return o
         direct={'pid':77,'start':99,'ppid':os.getpid(),'pgid':77,'sid':77,'state':'S'}
         nonce='a'*48
-        ready={'nonce':nonce,'phase':'PREP','stage':'prerequisite','pid':77,'start':99,'ppid':os.getpid()}
-        for cut in ('success','cancelled','parent-loss','failed','pending','ready','pending-signal','committed-cancel'):
+        ready={'nonce':nonce,'phase':'PREP','stage':'prerequisite','partition':'writer','pid':77,'start':99,'ppid':os.getpid()}
+        for cut in ('success','cancelled','parent-loss','failed','pending','ready','partition','pending-signal','committed-cancel'):
             o=modeled_owner();link=mock.Mock()
             def send(raw):
                 if cut=='committed-cancel':ns['INTERRUPTED']=True
@@ -1003,10 +1025,10 @@ class EvaluationProvenance(unittest.TestCase):
                 if cut=='cancelled':o.cancelled=True
                 if cut=='failed':o.failed=True
                 if cut=='pending':o.pending.append(object())
-                offered=dict(ready,pid=78) if cut=='ready' else ready
+                offered=dict(ready,pid=78) if cut=='ready' else dict(ready,partition='rest') if cut=='partition' else ready
                 if cut in ('success','committed-cancel'):
                     o.grant(link,offered,direct,'PREP',nonce);self.assertTrue(o.grant_committed)
-                    self.assertEqual(json.loads(link.sendall.call_args.args[0]),{'nonce':nonce,'phase':'PREP','stage':'prerequisite','grant':True})
+                    self.assertEqual(json.loads(link.sendall.call_args.args[0]),{'nonce':nonce,'phase':'PREP','stage':'prerequisite','partition':'writer','grant':True})
                     link.shutdown.assert_called_once_with(socket.SHUT_WR)
                     if cut=='committed-cancel':
                         with self.assertRaises(RuntimeError):o.barrier()
@@ -1035,6 +1057,9 @@ class EvaluationProvenance(unittest.TestCase):
                     change.assert_not_called()
         with mock.patch.object(Path,'open',side_effect=[io.BytesIO(b'Umask:\t0022\n'),io.BytesIO(b'Umask:\t0022\n')]),mock.patch.object(os,'umask'):
             with self.assertRaisesRegex(RuntimeError,'effective'):subject['stage_umask']()
+        with mock.patch.dict(ns,stat=lambda pid:{'pid':pid,'start':88},stage_parent=lambda *a:999):
+            total=cls('all',False,100.0);self.assertEqual(total.deadline,7380.0);self.assertEqual(total.final_deadline,7400.0)
+            check=cls('all',True,100.0);self.assertEqual(check.deadline,190.0);self.assertEqual(check.final_deadline,210.0)
         # Final status rechecks after reporting while the parent pidfd is live.
         # Durable snapshots are deliberately not rewritten or treated as exit0.
         for cut in ('success','write','print','close','deadline','close-deadline','cancel','close-cancel','parent-loss','parent-error','root-change','root-refusal','primary-and-root','primary-and-print'):
@@ -1099,12 +1124,12 @@ class EvaluationProvenance(unittest.TestCase):
                     if cut=='close':self.assertEqual(ns['PRIVATE_WRITE_PENDING'],[999])
         # The child cannot exec on malformed/duplicate/foreign grant, EOF, lost
         # parent or descriptor-close uncertainty. No real descriptor is changed.
-        grant={'nonce':nonce,'phase':'PREP','stage':'prerequisite','grant':True}
+        grant={'nonce':nonce,'phase':'PREP','stage':'prerequisite','partition':'writer','grant':True}
         for cut in ('success','foreign','extra','numeric-grant','eof','trailing','parent-loss','close'):
             link=mock.Mock();link.recv.return_value=b'x' if cut=='trailing' else b''
             if cut=='close':link.close.side_effect=OSError('close')
             offered=dict(grant,nonce='b'*48) if cut=='foreign' else dict(grant,extra=True) if cut=='extra' else dict(grant,grant=1) if cut=='numeric-grant' else grant
-            args=types.SimpleNamespace(stage='prerequisite',phase='PREP',nonce=nonce,parent=44,start=88,link=999)
+            args=types.SimpleNamespace(stage='prerequisite',partition='writer',phase='PREP',nonce=nonce,parent=44,start=88,link=999)
             with mock.patch.dict(ns,stage_parent=mock.Mock(return_value=998),stage_parent_live=mock.Mock(return_value=cut!='parent-loss'),
                                  stat=lambda pid:dict(direct,pid=pid),receive_line=mock.Mock(side_effect=RuntimeError('transport EOF') if cut=='eof' else None,return_value=offered)), \
                  mock.patch.object(socket,'socket',return_value=link),mock.patch.object(os,'set_inheritable'), \
@@ -1129,7 +1154,7 @@ class EvaluationProvenance(unittest.TestCase):
                 _,incomplete=subject['owned'](direct=rows[77]);self.assertTrue(incomplete)
         clean={'settled':True,'directReaped':True,'noChildren':True,'complete':True,'reaped':[],
                'residual':[],'errors':[],'discoveryDetails':{}}
-        for cut in ('success','spawn','cancel-before-grant','cancel-after-grant','wait','settlement','settlement-fault','record','close','eof'):
+        for cut in ('success','spawn','cancel-before-grant','cancel-after-grant','wait','settlement','settlement-fault','record','close','eof','credential-output'):
             with tempfile.TemporaryDirectory() as directory:
                 o=modeled_owner(Path(directory));pipes=[];links=[mock.Mock(),mock.Mock()]
                 links[1].fileno.return_value=987
@@ -1138,7 +1163,9 @@ class EvaluationProvenance(unittest.TestCase):
                     if cut=='spawn':raise ValueError('first-primary')
                     streams=[]
                     for _ in range(2):
-                        read_fd,write_fd=os.pipe();os.close(write_fd);stream=os.fdopen(read_fd,'rb',buffering=0);streams.append(stream);pipes.append(stream)
+                        read_fd,write_fd=os.pipe()
+                        if cut=='credential-output':os.write(write_fd,secret.encode())
+                        os.close(write_fd);stream=os.fdopen(read_fd,'rb',buffering=0);streams.append(stream);pipes.append(stream)
                     return types.SimpleNamespace(pid=77,stdout=streams[0],stderr=streams[1],returncode=None)
                 def receiving(*args):
                     if cut=='cancel-before-grant':ns['INTERRUPTED']=True
@@ -1169,9 +1196,9 @@ class EvaluationProvenance(unittest.TestCase):
                         o.barrier=mock.Mock(side_effect=[None,None,None,None,None,RuntimeError('EOF-primary')])
                         o.pump=mock.Mock()  # No EOF can be asserted from empty callbacks.
                     try:
-                        if cut=='success':self.assertEqual(o.phase('PREP',{} )['exit'],0)
+                        if cut=='success':self.assertEqual(o.phase('PREP',{'DESK_CI_PARTITION':'writer'})['exit'],0)
                         else:
-                            with self.assertRaises((RuntimeError,ValueError,OSError)) as failure:o.phase('PREP',{})
+                            with self.assertRaises((RuntimeError,ValueError,OSError)) as failure:o.phase('PREP',{'DESK_CI_PARTITION':'writer'})
                             if cut in ('spawn','wait','record','settlement-fault'):self.assertEqual(str(failure.exception),'first-primary')
                         self.assertEqual(popen.call_count,1)
                         if cut!='record':self.assertTrue((Path(directory)/'PREP/owner.json').is_file())
@@ -1190,7 +1217,7 @@ class EvaluationProvenance(unittest.TestCase):
                             if not pipe.closed:pipe.close()
         # CHECK consumes all three settled phase records and their actual raw
         # bytes; no success flag, substituted identity or missing EOF can suffice.
-        for cut in ('success','failed','cancelled','pending','phase-order','argv','identity','eof','settlement','raw','phase-record','process-record'):
+        for cut in ('success','failed','cancelled','pending','phase-order','argv','identity','eof','settlement','raw','phase-record','process-record','partition'):
             with tempfile.TemporaryDirectory() as directory:
                 base=Path(directory);slot=base/'evidence/stage-owner/prerequisite';slot.mkdir(parents=True,mode=0o700)
                 output=base/'evidence/prerequisite';output.mkdir(mode=0o700)
@@ -1206,9 +1233,10 @@ class EvaluationProvenance(unittest.TestCase):
                         pins[name]={'eof':True,'bytes':len(raw),'sha256':ns['hashlib'].sha256(raw).hexdigest()}
                     actions.append({'phase':phase,'argv':argv,'granted':True,'launch':launch,'exit':0,'primary':None,
                                     'settled':True,'settlement':dict(clean),'cleanupErrors':[],'streams':pins})
-                value={'stage':'prerequisite','checking':False,'success':True,'primary':None,'cleanupErrors':[],
+                value={'stage':'prerequisite','partition':'writer','checking':False,'success':True,'primary':None,'cleanupErrors':[],
                        'cancelled':False,'pending':0,'parent':{'pid':44,'start':88},'identity':{'pid':os.getpid()},
                        'root':root_identity,'actions':actions}
+                if cut=='partition':value['partition']='rest'
                 if cut=='failed':value['success']=False
                 if cut=='cancelled':value['cancelled']=True
                 if cut=='pending':value['pending']=1
@@ -1243,7 +1271,7 @@ class EvaluationProvenance(unittest.TestCase):
                 self.assertFalse((base/'evidence/prerequisite').exists())
                 (owner/'unreviewed').write_text('x');copied.clear()
                 self.assertTrue(ci.retain_stage_owner(keep,base,'prerequisite'));self.assertTrue(keep.problems['errors']);self.assertEqual(copied,[])
-                self.assertFalse(ci.retain_stage_owner(keep,base,'all'))
+                self.assertFalse(ci.retain_stage_owner(keep,base,'unknown'))
 
         # Terminal-only BUILD diagnostics: synthetic cuts, no producer child or
         # actual signal-handler installation. Keep the existing result contract.
@@ -1611,6 +1639,13 @@ class EvaluationProvenance(unittest.TestCase):
                              ('PREP/process.json',(json.dumps(launch,sort_keys=True)+'\n').encode()),
                              ('PREP/stdout',new_blobs[1]),('PREP/stderr',new_blobs[2])]:
                 (slot/name).write_bytes(raw)
+            specs=self.owner.partial_specs(staged)
+            self.assertEqual(len(specs),281)
+            aggregate=[rel.as_posix() for _,rel,_ in specs if '/all/' in rel.as_posix() or rel.as_posix()=='evaluation/fixture105-before-all.json']
+            self.assertEqual(len(aggregate),21)
+            self.assertEqual(len(set(aggregate)),21)
+            self.assertIn('evaluation/stage-owner/all/GUARD/stdout',aggregate)
+            self.assertIn('evaluation/stage-check/all/CHECK/process.json',aggregate)
             stage_index=inspect_retained(staged)
             self.assertEqual(len(stage_index['entries']),146)
             previous={row['artifact']['sha256'] for row in complete['entries'] if row['representation']['kind']=='blob'}
@@ -1621,6 +1656,30 @@ class EvaluationProvenance(unittest.TestCase):
                 self.assertEqual(recipe['kind'],'derived');self.assertEqual(recipe['pointer'],pointer)
                 self.assertEqual(recipe['encoding'],'json-sort-spaces-lf/1')
             self.assertFalse((staged/'evaluation/ci/evidence/prerequisite').exists())
+            aggregate_runner=world/'aggregate-runner';aggregate_runner.mkdir(mode=0o700)
+            for role in ('build','evaluation'):shutil.copytree(runner/role,aggregate_runner/role)
+            aggregate_slot=aggregate_runner/'evaluation/ci/evidence/stage-owner/all'
+            shutil.copytree(slot,aggregate_slot)
+            aggregate_index=inspect_retained(aggregate_runner)
+            self.assertEqual(len(aggregate_index['entries']),146)
+            self.assertEqual(aggregate_index['physical_objects'],stage_index['physical_objects'])
+            self.assertLessEqual(len(self.owner.canonical(aggregate_index)),262144)
+            aggregate_aliases={row['logical_path']:row['representation'] for row in aggregate_index['entries']}
+            for name,pointer in [('owner.json',['actions',0]),('process.json',['actions',0,'launch'])]:
+                recipe=aggregate_aliases['evaluation/stage-owner/all/PREP/'+name]
+                self.assertEqual(recipe['kind'],'derived');self.assertEqual(recipe['pointer'],pointer)
+            # Missing sources stay absent rather than reconstructed from parents.
+            omitted=world/'aggregate-omission';omitted.mkdir(mode=0o700)
+            for role in ('build','evaluation'):shutil.copytree(aggregate_runner/role,omitted/role)
+            (omitted/'evaluation/ci/evidence/stage-owner/all/PREP/process.json').unlink()
+            omitted_index=inspect_retained(omitted)
+            self.assertNotIn('evaluation/stage-owner/all/PREP/process.json',{row['logical_path'] for row in omitted_index['entries']})
+            substituted=world/'aggregate-substitution';substituted.mkdir(mode=0o700)
+            for role in ('build','evaluation'):shutil.copytree(aggregate_runner/role,substituted/role)
+            (substituted/'evaluation/ci/evidence/stage-owner/all/PREP/process.json').write_text('{}')
+            substituted_index=inspect_retained(substituted)
+            recipe=next(row['representation'] for row in substituted_index['entries'] if row['logical_path']=='evaluation/stage-owner/all/PREP/process.json')
+            self.assertEqual(recipe['kind'],'blob')  # Never normalize substituted bytes into the parent's launch.
             later=world/'late-runner';later.mkdir(mode=0o700)
             for role in ('build','evaluation'):shutil.copytree(runner/role,later/role)
             for name in ('owner.json','result.json'):(later/'evaluation/ci/evidence/identity-witness'/name).unlink()
@@ -1632,9 +1691,10 @@ class EvaluationProvenance(unittest.TestCase):
             self.assertIn(b'late-failure',(later/'producer-failure'/tail['representation']['path']).read_bytes())
         wrapper=(ci.ROOT/'tools/ci-validation/run-stage.sh').read_text()
         role_ci_line='CI_DIR="$DESK_CI_ROLE_TEMP/ci"'
-        self.assertEqual(wrapper.count(role_ci_line),1)
+        self.assertNotIn(role_ci_line,wrapper)
+        self.assertIn('prerequisite|focused|all) exec',wrapper)
         self.assertNotIn('CI_DIR="$RUNNER_TEMP/ci"',wrapper)
-        self.assertIn('RUNNER_TEMP="$RUNNER_TEMP" DESK_CI_ROLE_TEMP="$DESK_CI_ROLE_TEMP" DESK_CI_PARTITION="$DESK_CI_PARTITION"',wrapper)
+        self.assertNotIn('DB_FEED=',wrapper)
         prefix="    printf '{\"schema\":\"ci-stage-envelope/1\""
         receipt_lines=[line for line in wrapper.splitlines() if line.startswith(prefix)]
         expected_receipt='    printf \'{"schema":"ci-stage-envelope/1","operation":"%s","observed_umask":"%s","effective_umask":"%s","restriction_only":true}\\n\' "$STAGE" "$OBSERVED_MASK" "$EFFECTIVE_MASK" || exit 79'

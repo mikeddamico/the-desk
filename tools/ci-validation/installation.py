@@ -1768,7 +1768,7 @@ def partial_specs(original):
             specs.append((base/'evidence/producer/transfer'/name,Path(role)/'transfer'/name,262144 if name.endswith('.json') else 8388608))
         specs.append((base/'evidence/producer/POISON.json',Path(role)/'POISON.json',8192))
         if role=='evaluation':
-            for stage in ('prerequisite','focused'):
+            for stage in ('prerequisite','focused','all'):
                 for namespace,phases in (('stage-owner',('PREP','BIND','GUARD')),('stage-check',('CHECK',))):
                     slot=base/'evidence'/namespace/stage;relative=Path(role)/namespace/stage
                     specs.append((slot/'owner.json',relative/'owner.json',65536))
@@ -1791,7 +1791,7 @@ def retain_partial(ctx):
     def derived(relative,raw):
         parts=relative.parts
         if (len(parts)==5 and parts[0]=='evaluation' and parts[1] in ('stage-owner','stage-check')
-                and parts[2] in ('prerequisite','focused') and parts[3] in ('PREP','BIND','GUARD','CHECK')
+                and parts[2] in ('prerequisite','focused','all') and parts[3] in ('PREP','BIND','GUARD','CHECK')
                 and parts[4] in ('owner.json','process.json')):
             parent=owners.get(str(Path(*parts[:3])/'owner.json'))
             if parent is None:return None
