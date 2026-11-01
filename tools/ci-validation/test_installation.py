@@ -93,8 +93,8 @@ class EvaluationProvenance(unittest.TestCase):
                 yield ctx,checkout,base
 
     def traversal_output(self):
-        return (' ✓ test/unit/fixture105-traversal.test.ts (10 tests) 12ms\n'
-                ' Test Files  1 passed (1)\n      Tests  10 passed (10)\n'
+        return (' ✓ test/unit/fixture105-traversal.test.ts (17 tests) 12ms\n'
+                ' Test Files  1 passed (1)\n      Tests  17 passed (17)\n'
                 'FIXTURE105_NODE_RELATIONS 12/12\n'), ('FIXTURE_TARGET_DIAGNOSTIC_SELFTEST {"schema":"fixture-target-selftest/2","groups":20,"passed":20}\n')
 
     def traversal_guard(self):
@@ -123,7 +123,74 @@ class EvaluationProvenance(unittest.TestCase):
         self.owner.write(slot/'owner.json',self.owner.canonical({'process':process,'cleanup':[],'pending':False,'cancelled':None}))
         return process
 
+    def traversal_failed_capture(self, ctx, error, mutation=None):
+        """Synthetic retained records only; no child or production admission."""
+        process=self.traversal_capture(ctx)
+        slot=ctx.ci_dir()/'evidence/fixture105-traversal'
+        capture=ctx.ci_dir()/'tmp/capture-fixture105-traversal';capture.mkdir(mode=0o700)
+        argv=['/usr/bin/python3','-I','-B','test/support/p33-parity-supervisor.py','guard','fixture105-traversal']
+        process.update(label='operation',argv=['/usr/bin/timeout','--signal=TERM','--kill-after=20s','900s']+argv,
+            exit=1,additional_reaps=[],primary={'code':'git_exit','phase':'operation'})
+        for name in ('stdout','stderr'):
+            raw=(slot/name).read_bytes();process['streams'][name]['sha256']=self.owner.digest(raw)
+            self.owner.write(capture/('operation.'+name),raw)
+        root=self.owner.observed_directory(ctx.ROOT)
+        owner={'schema':'ci-producer-raw/1','role':'evaluation','argv':argv,'cwd':str(ctx.ROOT),'envelope':None,
+            'source':self.common,'profile_policy_sha256':self.policies[2],'root_before':root,'root_after':root,
+            'tools_before':{'synthetic_tools':True},'tools_after':{'synthetic_tools':True},'process':process,
+            'auxiliary_actions':[{key:value for key,value in process.items() if key!='spawn_attempts'}],
+            'owned_scope_observation':{'strict':True,'entries':1,'bytes':0,'races':[],
+                'race_events_total':0,'race_events_directory':0,'race_events_leaf':0,'race_events_omitted':0,
+                'race_sample_saturated':False,'live_scan_count':1,'scan_work':1,'live_work_total':1,
+                'scan_limit':464,'aggregate_work_limit':464*65536},'resolution':None,'identity_witness':None,
+            'launch':{'pid':424240,'pgid':424240},'primary':'LayoutFailure','cleanup':[],'pending':False,'cancelled':None}
+        runtime=self.owner.traversal_runtime(ctx);path=runtime/'attempt-aaaaaaaa/guard-result.json'
+        guard=json.loads(path.read_bytes())
+        guard['reaped']=[{'pid':424242,'raw':256,'exit':1}]
+        guard['discoveryDetails']={'scansStarted':3,'scansCompleted':3,'scansFailed':0,'scansNotStarted':0,
+            'reasonCounts':{},'records':[],'droppedRecords':0}
+        if mutation is not None:mutation(owner,guard,slot,runtime)
+        (slot/'owner.json').write_bytes(self.owner.canonical(owner));path.write_bytes(self.owner.canonical(guard))
+        installation_model.put(capture/'operation.json',self.owner.canonical(owner['auxiliary_actions'][0]),root=capture)
+        installation_model.put(capture/'operation.process.json',self.owner.canonical(owner['launch']),root=capture)
+        raise error
+
     def test_01_complete_explicit_model(self):
+        # Model construction is independent of inherited 0022/0077. Simulate
+        # the mkdir mode filter locally; never change the process umask.
+        real_mkdir=os.mkdir
+        for mask in (0o022,0o077):
+            with tempfile.TemporaryDirectory() as directory:
+                root=Path(directory);before=root.stat();calls=[]
+                def masked_mkdir(path,mode=0o777,*,dir_fd=None):
+                    calls.append(mode);return real_mkdir(path,mode & ~mask,dir_fd=dir_fd)
+                with mock.patch.object(installation_model.os,'mkdir',side_effect=masked_mkdir):
+                    installation_model.put(root/'a/b/c/value',b'model',root=root)
+                self.assertEqual(calls,[0o700]*3)
+                for path in (root,root/'a',root/'a/b',root/'a/b/c'):
+                    self.assertEqual(stat.S_IMODE(path.stat().st_mode),0o700)
+                self.assertEqual((root.stat().st_dev,root.stat().st_ino),(before.st_dev,before.st_ino))
+        with tempfile.TemporaryDirectory() as directory:
+            root=Path(directory);bad=root/'bad';bad.mkdir(mode=0o700)
+            # Deliberately invalid, private test-owned fixture; the helper must
+            # refuse it unchanged, never repair it.
+            bad.chmod(0o755);before=bad.stat()
+            with self.assertRaisesRegex(RuntimeError,'model_directory_owner'):
+                installation_model.private_dirs(root,bad/'child')
+            self.assertEqual(bad.stat(),before);self.assertFalse((bad/'child').exists())
+            (root/'link').symlink_to(bad);(root/'file').write_bytes(b'fixture')
+            for target in (root/'link/child',root/'file/child',root.parent/'escape'):
+                with self.assertRaises((OSError,ValueError,RuntimeError)):
+                    installation_model.private_dirs(root,target)
+            actual_fstat=os.fstat
+            def foreign(fd):
+                info=actual_fstat(fd)
+                return types.SimpleNamespace(st_mode=info.st_mode,st_uid=os.getuid()+1)
+            with mock.patch.object(installation_model.os,'fstat',side_effect=foreign):
+                with self.assertRaisesRegex(RuntimeError,'model_directory_owner'):
+                    installation_model.private_dirs(root,root/'foreign-child')
+            self.assertFalse((root/'foreign-child').exists())
+        self.assertEqual(self.raw['BUILD-SOURCE-INVENTORY.json'],self.raw['SOURCE-INVENTORY.json'])
         value=self.validate()
         self.assertEqual(len(value),30)
         self.assertEqual(ci.fixture_validate(self.base,self.checkout),(self.binding,{'absent':True}))
@@ -133,8 +200,9 @@ class EvaluationProvenance(unittest.TestCase):
         node='FIXTURE105_NODE_RELATIONS 12/12\n'
         for left,right,code in ((stdout.replace(node,''),stderr,'traversal_marker'),(stdout+node,stderr,'traversal_marker'),
             (stdout,'','traversal_marker'),(stdout,stderr+stderr,'traversal_marker'),
-            (stdout.replace('10 passed (10)','9 passed (10)'),stderr,'traversal_ten_cases'),
-            (stdout.replace('(10 tests)','(10 tests | 1 skipped)'),stderr,'traversal_one_file'),
+            (stdout.replace('17 passed (17)','16 passed (17)'),stderr,'traversal_ten_cases'),
+            (stdout.replace('17 passed (17)','10 passed (10)').replace('(17 tests)','(10 tests)'),stderr,'traversal_ten_cases'),
+            (stdout.replace('(17 tests)','(17 tests | 1 skipped)'),stderr,'traversal_one_file'),
             (stdout.replace('fixture105-traversal.test.ts','foreign.test.ts'),stderr,'traversal_one_file')):
             with self.subTest(code=code),self.assertRaisesRegex(RuntimeError,code):self.owner.traversal_results(ci,left,right,guard)
         for field,value in (('settled',False),('complete',False),('directReaped',False),('residual',[1]),('fatal','cut')):
@@ -559,6 +627,73 @@ class EvaluationProvenance(unittest.TestCase):
                 subject['traversal_socket_path'](folder)
 
     def test_23_metadata_namespace_symlink_and_extra(self):
+        class LayoutFailure(Exception):pass
+        cuts={
+            'clean':lambda o,g,s,r:None,
+            'timeout':lambda o,g,s,r:o['process'].update(exit=124),
+            'signal':lambda o,g,s,r:o['process'].update(exit=-15),
+            'spawn':lambda o,g,s,r:o['process'].update(spawn_attempts=2),
+            'reap':lambda o,g,s,r:o['process'].update(direct_reaped=False),
+            'population':lambda o,g,s,r:o['process']['population'].update(children=[1]),
+            'discovery':lambda o,g,s,r:o['process']['population'].update(complete=False),
+            'pending':lambda o,g,s,r:o.update(pending=True),
+            'cancel':lambda o,g,s,r:o.update(cancelled=15),
+            'cleanup':lambda o,g,s,r:o.update(cleanup=['fault']),
+            'infrastructure':lambda o,g,s,r:o['process'].update(primary={'code':'disk','phase':'operation'}),
+            'eof':lambda o,g,s,r:o['process']['streams']['stdout'].update(eof=False),
+            'hash':lambda o,g,s,r:o['process']['streams']['stdout'].update(sha256='0'*64),
+            'truncated':lambda o,g,s,r:o['process']['streams']['stderr'].update(truncated=True),
+            'raw':lambda o,g,s,r:(s/'stdout').write_bytes(b'substitution'),
+            'argv':lambda o,g,s,r:o.update(argv=['foreign']),
+            'cwd':lambda o,g,s,r:o.update(cwd='/foreign'),
+            'source':lambda o,g,s,r:o.update(source=dict(self.common,head='f'*40)),
+            'root':lambda o,g,s,r:o.update(root_after=dict(o['root_after'],ino=0)),
+            'tool':lambda o,g,s,r:o.update(tools_after={'foreign':True}),
+            'policy':lambda o,g,s,r:o.update(profile_policy_sha256='0'*64),
+            'disk':lambda o,g,s,r:o['owned_scope_observation'].update(strict=False),
+            'guard-fatal':lambda o,g,s,r:g.update(fatal='fault'),
+            'guard-exit':lambda o,g,s,r:g['reaped'][0].update(exit=0,raw=0),
+            'guard-scan':lambda o,g,s,r:g['discoveryDetails'].update(scansFailed=1),
+            'guard-field':lambda o,g,s,r:g.pop('complete'),
+            'guard-malformed':lambda o,g,s,r:g.clear(),
+            'guard-signal':lambda o,g,s,r:g['reaped'][0].update(raw=15,exit=-15),
+            'launch':lambda o,g,s,r:o['launch'].update(pgid=1),
+            'incomplete':lambda o,g,s,r:o['process']['streams']['stdout'].update(complete=False),
+            'pending-object':lambda o,g,s,r:self.owner.PENDING_OBJECTS.append(object()),
+            'cancelled-state':lambda o,g,s,r:setattr(self.owner,'CANCELLED',15),
+            'namespace':lambda o,g,s,r:g['namespace']['attempt'].update(ino=0),
+            'extra':lambda o,g,s,r:(r/'extra').write_bytes(b'extra'),
+            'extra-attempt':lambda o,g,s,r:(r/'attempt-bbbbbbbb').mkdir(mode=0o700),
+            'poison':lambda o,g,s,r:self.owner.POISON.append({'pending':True}),
+        }
+        for cut,mutation in cuts.items():
+            with self.subTest(failed_traversal=cut),self.traversal_world() as (ctx,checkout,base):
+                first=LayoutFailure('original child exit 1')
+                with mock.patch.object(self.owner,'outer',return_value={}), \
+                     mock.patch.object(self.owner,'policy',return_value=self.policies), \
+                     mock.patch.object(self.owner,'tools',return_value={'synthetic_tools':True}), \
+                     mock.patch.object(self.owner,'owned_capture',side_effect=lambda *_:self.traversal_failed_capture(ctx,first,mutation)):
+                    with self.assertRaises(LayoutFailure) as found:self.owner.run_traversal(ctx)
+                self.assertIs(found.exception,first)
+                self.assertEqual((checkout/'node_modules/.vite-temp').exists(),cut!='clean')
+                if cut not in ('poison','cancelled-state'):
+                    result=json.loads((base/'evidence/fixture105-traversal/result.json').read_bytes())
+                    self.assertFalse(result['functional_complete']);self.assertFalse(result['successful_proof'])
+                    self.assertEqual(result['primary'],'LayoutFailure')
+                    self.assertEqual(result['loader_removed'],cut=='clean')
+                    self.assertEqual(bool(result['secondary']),cut!='clean')
+        with self.traversal_world() as (ctx,checkout,base):
+            first=LayoutFailure('first')
+            with mock.patch.object(self.owner,'outer',return_value={}), \
+                 mock.patch.object(self.owner,'policy',return_value=self.policies), \
+                 mock.patch.object(self.owner,'tools',return_value={'synthetic_tools':True}), \
+                 mock.patch.object(self.owner,'owned_capture',side_effect=lambda *_:self.traversal_failed_capture(ctx,first)), \
+                 mock.patch.object(self.owner,'settle_traversal_loader',side_effect=OSError('cleanup')):
+                with self.assertRaises(LayoutFailure) as found:self.owner.run_traversal(ctx)
+            self.assertIs(found.exception,first)
+            result=json.loads((base/'evidence/fixture105-traversal/result.json').read_bytes())
+            self.assertEqual(result['secondary'],[{'phase':'loader_cleanup','code':'OSError'}])
+            self.assertFalse(result['loader_removed']);self.assertFalse(result['successful_proof'])
         with tempfile.TemporaryDirectory() as directory:
             path=Path(directory);(path/'PROVENANCE.json').symlink_to(self.root/'bindings/PROVENANCE.json')
             with self.assertRaises(RuntimeError):self.owner.load_records(path)
@@ -1054,7 +1189,7 @@ class EvaluationProvenance(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             world=Path(directory);runner=world/'runner';workspace=world/'workspace'
             runner.mkdir(mode=0o700);workspace.mkdir(mode=0o700)
-            def put(path,raw):installation_model.put(path,raw)
+            def put(path,raw):installation_model.put(path,raw,root=world)
             def data(tag):return self.owner.canonical({'synthetic_retention_only':True,'tag':tag})
             build_names={name for name in self.owner.BINDINGS if name.startswith('BUILD-')}|{'QUALITY.json','QUALITY-SETTLEMENT.json','DIST-INVENTORY.json'}
             eval_names=set(self.owner.BINDINGS)-{'ADOPTION.json','RELEASE.json','SOURCE-LEDGER.json'}

@@ -7,6 +7,7 @@ from contextlib import contextmanager
 import hashlib
 import json
 import os
+import stat
 from pathlib import Path
 from unittest import mock
 
@@ -19,8 +20,31 @@ def pinned(raw):
     return {'bytes': len(raw), 'sha256': hashlib.sha256(raw).hexdigest()}
 
 
-def put(path, raw):
-    path = Path(path);path.parent.mkdir(parents=True, mode=0o700, exist_ok=True)
+def private_dirs(root, path):
+    """Test-only creation beneath one already-owned private model root."""
+    root, path = Path(root), Path(path)
+    if not root.is_absolute() or root.resolve() != root or not path.is_absolute() or str(path) != os.path.normpath(path):
+        raise RuntimeError('model_directory_path')
+    relative = path.relative_to(root)
+    fd = os.open(root, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    try:
+        for name in (None, *relative.parts):
+            if name is not None:
+                try:
+                    os.mkdir(name, 0o700, dir_fd=fd)
+                except FileExistsError:
+                    pass
+                child = os.open(name, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=fd)
+                os.close(fd);fd = child
+            info = os.fstat(fd)
+            if not stat.S_ISDIR(info.st_mode) or info.st_uid != os.getuid() or stat.S_IMODE(info.st_mode) != 0o700:
+                raise RuntimeError('model_directory_owner')
+    finally:
+        os.close(fd)
+
+
+def put(path, raw, *, root):
+    path = Path(path);private_dirs(root, path.parent)
     fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
     try:
         offset = 0
@@ -43,34 +67,39 @@ def package_model(ci, checkout, prefix, closure):
         if relative.startswith('node_modules/'):
             relative = relative[len('node_modules/'):]
         value = {'name': row.get('name', relative), 'version': row['version'], 'synthetic_inert_model': True}
-        put(checkout / name / 'package.json', encoded(value))
+        put(checkout / name / 'package.json', encoded(value), root=checkout)
     put(checkout / 'node_modules/.package-lock.json', encoded({'name': 'the-desk', 'version': '0.1.0',
-        'lockfileVersion': 3, 'requires': True, 'packages': chosen}))
+        'lockfileVersion': 3, 'requires': True, 'packages': chosen}), root=checkout)
     # This byte witness remains inert and gives V9 a genuine mutable leaf.
     if prefix == 'EVAL':
-        put(checkout / 'node_modules/inert-tooling-witness.js', b'// synthetic bytes; never imported\n')
+        put(checkout / 'node_modules/inert-tooling-witness.js', b'// synthetic bytes; never imported\n', root=checkout)
     return chosen
 
 
 def make(ci, checkout, *, ledger_base, logical=False):
     """Canonical model objects with real private descriptor identities/leaf bytes."""
     owner = ci.installation_owner();checkout = Path(checkout)
+    private_dirs(checkout,checkout)
     for actual in sorted((ci.ROOT/'test').rglob('*.test.ts')):
         relative=actual.relative_to(ci.ROOT)
-        if not (checkout/relative).exists(): put(checkout/relative,b'// explicitly synthetic source model; never executed\n')
+        if not (checkout/relative).exists(): put(checkout/relative,b'// explicitly synthetic source model; never executed\n',root=checkout)
     for name in ('.node-version','.npmrc','.prettierignore','eslint.config.js','tsconfig.build.json','tsconfig.json','vitest.config.ts'):
         if not (checkout/name).exists():
-            put(checkout/name,(ci.ROOT/name).read_bytes())
-    build = checkout.parent / (checkout.name + '-build-model');build.mkdir(mode=0o700)
+            put(checkout/name,(ci.ROOT/name).read_bytes(),root=checkout)
+    build = checkout.parent / (checkout.name + '-build-model')
+    if os.path.lexists(build):raise RuntimeError('model_build_exists')
+    private_dirs(checkout.parent,build)
     # Complete this test's declared source model in both roles, not a real source tree.
     for parent, directories, files in os.walk(checkout):
         relative = Path(parent).relative_to(checkout)
         if not relative.parts:
             directories[:] = [name for name in directories if name not in ('node_modules', 'dist', '.git')]
+        private_dirs(checkout,Path(parent))
+        for name in directories:private_dirs(checkout,Path(parent)/name)
         for name in files:
-            put(build / relative / name, (Path(parent) / name).read_bytes())
+            put(build / relative / name, (Path(parent) / name).read_bytes(),root=build)
     for root in (build, checkout):
-        (root / 'node_modules').mkdir(mode=0o700, exist_ok=True)
+        private_dirs(root,root / 'node_modules')
     p_raw = (checkout / owner.POLICY_PATH).read_bytes();q_raw = (checkout / owner.QUALITY_PATH).read_bytes()
     p, q = json.loads(p_raw), json.loads(q_raw)
     l = hashlib.sha256(b'THE-DESK/EVALUATION-INSTALL-POLICY/1\n' + p_raw).hexdigest()
@@ -178,7 +207,7 @@ def bind(ci, base, checkout, *, logical=False):
     source=ci.fixture_graph(checkout,'source');tests=sorted(name for name,row in source.items() if row['type']=='file')
     wire={'schema':'ci-partition/2','partition':'rest','identity':identity2,'selection':ci.partition_files(tests,'rest'),'counts':list(ci.PARTITION_COUNTS['rest']),
           'execution':execution(ci,identity2,'rest',model['records'])}
-    put(Path(base)/'evidence/partition.json',encoded(wire))
+    put(Path(base)/'evidence/partition.json',encoded(wire),root=base)
     model['partition']='rest'
     return binding, model
 

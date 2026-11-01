@@ -382,7 +382,7 @@ jobs:
         env:
           DESK_CI_ROLE_TEMP: ${{ runner.temp }}/evaluation
         run: /usr/bin/python3 -I -B tools/ci-validation/ci.py identity-witness
-      - name: Prove traversal10 Node12 and callback20 after genuine seal
+      - name: Prove traversal17 Node12 and callback20 after genuine seal
         id: traversal-proof
         if: ${{ success() && steps.init.outcome == 'success' && steps.semantic-identities.outcome == 'success' }}
         working-directory: /tmp/e

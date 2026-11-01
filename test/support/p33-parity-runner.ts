@@ -1070,7 +1070,7 @@ function fixtureExecutionProvenance(
   fixtureSame(partition.selection, selected);
   fixtureSame(
     partition.counts,
-    partition.partition === "writer" ? [1, 4908, 0] : [84, 3851, 29],
+    partition.partition === "writer" ? [1, 4908, 0] : [84, 3858, 29],
   );
   const sourced = (value: FixtureRootObject): void => {
     fixtureSame(value.source, identity);

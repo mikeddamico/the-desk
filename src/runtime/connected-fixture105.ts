@@ -1039,7 +1039,7 @@ function fixtureExecutionProvenance(
   fixtureSame(partition.selection, selected);
   fixtureSame(
     partition.counts,
-    partition.partition === "writer" ? [1, 4908, 0] : [84, 3851, 29],
+    partition.partition === "writer" ? [1, 4908, 0] : [84, 3858, 29],
   );
   const sourced = (value: FixtureRootObject): void => {
     fixtureSame(value.source, identity);
@@ -2313,6 +2313,7 @@ function readRelease(): {
           "eslint.config.js",
           "vitest.config.ts",
           "tools/ci-validation/ci.py",
+          "tools/ci-validation/installation.py",
           "tools/ci-validation/test_ci.py",
           "tools/ci-validation/run-stage.sh",
         ].includes(row.path)) ||

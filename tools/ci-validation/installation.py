@@ -1940,8 +1940,8 @@ def traversal_results(ctx, stdout, stderr, guard):
     problems=[];ctx.check_ledger(guard,'guard',problems,guard=True)
     need(not problems,'traversal_guard_settled')
     summary,problems=ctx.parse_summary(stdout);files=ctx.parse_file_lines(stdout)
-    need(not problems and same(summary,{'files':{'passed':1,'total':1},'tests':{'passed':10,'total':10}}),'traversal_ten_cases')
-    need(same(files,{'test/unit/fixture105-traversal.test.ts':[{'tests':10,'failed':0,'skipped':0,'todo':0}]}),'traversal_one_file')
+    need(not problems and same(summary,{'files':{'passed':1,'total':1},'tests':{'passed':17,'total':17}}),'traversal_ten_cases')
+    need(same(files,{'test/unit/fixture105-traversal.test.ts':[{'tests':17,'failed':0,'skipped':0,'todo':0}]}),'traversal_one_file')
     clean=ctx.ANSI.sub('',stdout+'\n'+stderr)
     need(ctx.FAILURE_LINE.search(clean) is None and not any(text in clean for text in ctx.FATAL_TEXT),'traversal_fatal')
     for marker in ('FIXTURE105_NODE_RELATIONS 12/12', 'FIXTURE_TARGET_DIAGNOSTIC_SELFTEST {"schema":"fixture-target-selftest/2","groups":20,"passed":20}'):
@@ -2047,6 +2047,88 @@ def settle_traversal_loader(ctx, saved, slot):
     return {'removed_leased_inode':True,'public_path_absent':True,'retained_empty_settlement':str(quarantine)}
 
 
+def traversal_failed_guard(ctx, slot, runtime, source):
+    """Cleanup evidence only for the exact, settled traversal child exit 1.
+
+    This never returns a functional verdict or changes shared capture admission.
+    Read back both publications and the original bounded capture records.
+    """
+    entry();need(not PENDING_OBJECTS and not LEASES,'traversal_failed_pending')
+    argv=['/usr/bin/python3','-I','-B','test/support/p33-parity-supervisor.py','guard','fixture105-traversal']
+    owner=parse(read(slot/'owner.json',262144))
+    exact(owner,('schema','role','argv','cwd','envelope','source','profile_policy_sha256',
+        'root_before','root_after','tools_before','tools_after','process','auxiliary_actions',
+        'owned_scope_observation','resolution','identity_witness','launch','primary','cleanup','pending','cancelled'))
+    identity(source)
+    need(owner['schema']=='ci-producer-raw/1' and owner['role']=='evaluation' and owner['argv']==argv and
+        owner['cwd']==str(EVAL) and owner['envelope'] is None and same(owner['source'],source) and
+        owner['profile_policy_sha256']==policy(ctx)[2] and owner['primary']=='LayoutFailure' and
+        owner['cleanup']==[] and owner['pending'] is False and owner['cancelled'] is None and
+        owner['resolution'] is None and owner['identity_witness'] is None,'traversal_failed_owner')
+    need(same(owner['root_before'],owner['root_after']) and same(owner['root_after'],observed_directory(EVAL)) and
+        same(owner['tools_before'],owner['tools_after']) and same(owner['tools_after'],tools(ctx)),'traversal_failed_identity')
+    process=owner['process']
+    exact(process,('label','argv','exit','direct_reaped','population','streams','settlement',
+        'additional_reaps','primary','cleanup_errors','spawn_attempts'))
+    need(process['label']=='operation' and process['argv']==['/usr/bin/timeout','--signal=TERM','--kill-after=20s','900s']+argv and
+        type(process['exit']) is int and process['exit']==1 and process['direct_reaped'] is True and
+        process['settlement']=='complete' and same(process['population'],{'complete':True,'members':[],'children':[],'errors':[]}) and
+        process['additional_reaps']==[] and same(process['primary'],{'code':'git_exit','phase':'operation'}) and
+        process['cleanup_errors']==[] and type(process['spawn_attempts']) is int and process['spawn_attempts']==1,'traversal_failed_process')
+    action={key:value for key,value in process.items() if key!='spawn_attempts'}
+    capture=ctx.ci_dir()/'tmp/capture-fixture105-traversal'
+    need(same(owner['auxiliary_actions'],[action]) and same(parse(read(capture/'operation.json',262144),canonical_required=False),action),'traversal_failed_action')
+    launch=exact(owner['launch'],('pid','pgid'))
+    need(type(launch['pid']) is int and launch['pid']>1 and launch['pid']==launch['pgid'] and
+        same(parse(read(capture/'operation.process.json',262144),canonical_required=False),launch),'traversal_failed_launch')
+    exact(process['streams'],('stdout','stderr'))
+    for name in ('stdout','stderr'):
+        stream=exact(process['streams'][name],('retained_bytes','sha256','observed_bytes','eof','truncated','complete'))
+        raw=read(slot/name,8388608)
+        need(stream['eof'] is True and stream['complete'] is True and stream['truncated'] is False and
+            type(stream['observed_bytes']) is int and type(stream['retained_bytes']) is int and
+            stream['observed_bytes']==stream['retained_bytes']==len(raw) and stream['sha256']==digest(raw) and
+            raw==read(capture/('operation.'+name),8388608),'traversal_failed_stream')
+    observation=exact(owner['owned_scope_observation'],('strict','entries','bytes','races','race_events_total',
+        'race_events_directory','race_events_leaf','race_events_omitted','race_sample_saturated','live_scan_count',
+        'scan_work','live_work_total','scan_limit','aggregate_work_limit'))
+    need(observation['strict'] is True and uint(observation['entries'],65536)>=0 and
+        uint(observation['bytes'],1073741824)>=0 and uint(observation['scan_work'],65536)>=0 and
+        observation['scan_limit']==464 and observation['aggregate_work_limit']==464*65536 and
+        uint(observation['live_scan_count'],464)>=0 and uint(observation['live_work_total'],464*65536)>=0,
+        'traversal_failed_disk')
+    for key in ('race_events_total','race_events_directory','race_events_leaf','race_events_omitted'):
+        uint(observation[key],464*65536)
+    need(type(observation['races']) is list and len(observation['races'])<=64 and
+        observation['race_events_total']==len(observation['races'])+observation['race_events_omitted']==
+        observation['race_events_directory']+observation['race_events_leaf'] and
+        observation['race_sample_saturated'] is (observation['race_events_omitted']>0),'traversal_failed_disk')
+    children=[]
+    with os.scandir(runtime) as scan:
+        for child in scan:
+            need(len(children)<2,'traversal_one_guard');children.append(Path(child.path))
+    attempts=[path for path in children if path.name!='validation.lock']
+    need(len(children)==2 and len(attempts)==1 and re.fullmatch(r'attempt-[a-z0-9_]{8}',attempts[0].name) is not None,'traversal_one_guard')
+    guard=parse(read(attempts[0]/'guard-result.json',65536),canonical_required=False)
+    exact(guard,('settled','directReaped','noChildren','complete','residual','errors','cleanupErrors',
+        'reaped','discoveryDetails','fatal','containedRejection','namespace'))
+    need(all(guard[key] is True for key in ('settled','directReaped','noChildren','complete')) and
+        all(guard[key]==[] for key in ('residual','errors','cleanupErrors')) and
+        guard['fatal'] is None and guard['containedRejection'] is None,'traversal_failed_guard')
+    need(type(guard['reaped']) is list and len(guard['reaped'])==1,'traversal_failed_reap')
+    reaped=exact(guard['reaped'][0],('pid','raw','exit'))
+    need(type(reaped['pid']) is int and reaped['pid']>1 and reaped['pid']!=launch['pid'] and
+        type(reaped['raw']) is int and reaped['raw']==256 and type(reaped['exit']) is int and reaped['exit']==1,'traversal_failed_reap')
+    discovery=exact(guard['discoveryDetails'],('scansStarted','scansCompleted','scansFailed','scansNotStarted','reasonCounts','records','droppedRecords'))
+    need(type(discovery['scansStarted']) is int and discovery['scansStarted']>0 and
+        type(discovery['scansCompleted']) is int and discovery['scansStarted']==discovery['scansCompleted'] and
+        all(type(discovery[key]) is int and discovery[key]==0 for key in ('scansFailed','scansNotStarted','droppedRecords')) and
+        discovery['reasonCounts']=={} and discovery['records']==[],'traversal_failed_discovery')
+    namespace=exact(guard['namespace'],('runtime','attempt'))
+    need(same(namespace['runtime'],observed_directory(runtime)) and same(namespace['attempt'],observed_directory(attempts[0])),'traversal_failed_namespace')
+    return guard
+
+
 def run_traversal(ctx):
     """One genuine postseal diagnostic; never a normal focused-stage verdict."""
     entry();need(ctx.ROOT == EVAL and ctx.partition_label(True) == 'rest', 'traversal_role')
@@ -2063,12 +2145,14 @@ def run_traversal(ctx):
         'same_filesystem':same_filesystem,'binding_started':False,'child_started':False}))
     need(same_filesystem,'traversal_loader_filesystem')
     primary=None;secondary=[];saved=None;outcome=None;functional=False;removed=False;guard=None;retained=None
+    capture_started=False;failed_guard=False;source=None
     try:
         need(ctx.cmd_fixture_binding('focused') == 0, 'traversal_binding')
         binding,saved=ctx.fixture_validate(base,EVAL,True)
         need(saved.get('leaves') == [] and not saved.get('absent'), 'traversal_loader_created')
         write(slot/'binding-before.json',canonical({'binding':binding,'loader':saved}))
         source=parse(read(base/'evidence/producer/metadata/EVAL-INSTALL.json',16384))['source']
+        capture_started=True
         outcome=owned_capture(ctx,'evaluation',slot,
             ['/usr/bin/python3','-I','-B','test/support/p33-parity-supervisor.py','guard','fixture105-traversal'],900,source)
         check_raw_settlement(outcome)
@@ -2079,6 +2163,12 @@ def run_traversal(ctx):
         write(slot/'guard-result.json',canonical(guard),65536);functional=True
     except BaseException as error:primary=error
     finally:
+        if capture_started and outcome is None and type(primary).__name__=='LayoutFailure' and not POISON and not CANCELLED:
+            try:
+                guard=traversal_failed_guard(ctx,slot,runtime,source);failed_guard=True
+                write(slot/'guard-result.json',canonical(guard),65536)
+            except BaseException as error:
+                secondary.append({'phase':'failed_settlement','code':type(error).__name__})
         # Each remaining safe operation is independent; first failure is retained.
         for phase,work in (('outer_after',lambda:outer(ctx,'E1')),
             ('runtime_retention',lambda:retain_traversal_runtime(runtime,slot/'runtime-retained',None if guard is None else guard.get('namespace')))):
@@ -2091,7 +2181,12 @@ def run_traversal(ctx):
                 if primary is None:primary=error
         if saved is not None and not POISON and not CANCELLED and not secondary:
             try:
-                owner=parse(read(slot/'owner.json',262144),canonical_required=False);check_raw_settlement(owner['process'])
+                owner=parse(read(slot/'owner.json',262144),canonical_required=False)
+                if failed_guard:
+                    need(same(guard,traversal_failed_guard(ctx,slot,runtime,source)),'traversal_failed_guard_drift')
+                    row=next(row for row in retained['entries'] if row['relative_path'].endswith('/guard-result.json'))
+                    need(same(parse(read(slot/'runtime-retained'/row['retained_leaf'],65536),canonical_required=False),guard),'traversal_failed_retained_guard')
+                else:check_raw_settlement(owner['process'])
                 need(not owner['cleanup'] and not owner['pending'] and owner['cancelled'] is None,'traversal_owner_clean')
                 settle_traversal_loader(ctx,saved,slot);removed=True;outer(ctx,'E1')
             except BaseException as error:

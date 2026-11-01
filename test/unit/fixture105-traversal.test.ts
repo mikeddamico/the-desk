@@ -394,12 +394,13 @@ function boundRelease(w: World): {
         "actual=pathlib.Path.cwd();checkout=pathlib.Path(sys.argv[1]);base=pathlib.Path(sys.argv[2])",
         "spec=importlib.util.spec_from_file_location('release_binding_model',actual/'tools/ci-validation/ci.py');ci=importlib.util.module_from_spec(spec);sys.modules[spec.name]=ci;spec.loader.exec_module(ci)",
         "ms=importlib.util.spec_from_file_location('installation_model',actual/'tools/ci-validation/installation_model.py');model=importlib.util.module_from_spec(ms);ms.loader.exec_module(model)",
-        "checkout.mkdir(mode=0o700);base.mkdir(mode=0o700,parents=True)",
-        "for name in ('tmp','evidence','home'):(base/name).mkdir(mode=0o700)",
+        "model.private_dirs(checkout.parent,checkout);model.private_dirs(checkout.parent,base)",
+        "for name in ('tmp','evidence','home'):model.private_dirs(base,base/name)",
         "names=set(ci.FIXTURE_OWNER_PATHS)|{'fixtures/connected-fixture151/'+name for name in ci.FIXTURE_RESOURCE_NAMES}",
-        "for name in sorted(names):\n p=checkout/name;p.parent.mkdir(mode=0o700,parents=True,exist_ok=True);shutil.copyfile(actual/name,p);p.chmod(0o600)",
+        "for name in sorted(names):\n model.put(checkout/name,(actual/name).read_bytes(),root=checkout)",
         "witness=checkout/'graph-only-bound-witness.txt';witness.write_text('original bound graph bytes');witness.chmod(0o600)",
         "binding,record=model.bind(ci,base,checkout,logical=True)",
+        "assert record['records']['BUILD-SOURCE-INVENTORY.json']==record['records']['SOURCE-INVENTORY.json']",
         "print(json.dumps({'binding':binding,'identity':record['identity'],'synthetic_model_only':True}))",
       ].join("\n"),
       checkout,
@@ -1617,117 +1618,61 @@ describe("fixture105 fresh component traversal", () => {
         }
       });
   });
-  it("V9 runs genuine release root comparisons across an internal cut and a subsequent call", () => {
-    // Target only the acquired FINAL descriptor: fixtureOpen's component closes
-    // have already settled before either helper performs its first fstatSync.
-    for (const helper of ["identity", "read"] as const)
-      for (const cut of [
-        "undefined_body_close_error",
-        "successful_body_undefined_close",
-      ] as const)
-        world((w) => {
-          const bound = boundRelease(w),
-            target = helper === "identity" ? w.base : w.leaf,
-            secondaryClose = new Error("final descriptor close error");
-          const acquired: { value: Acquisition | undefined } = {
-            value: undefined,
-          };
-          const undefinedFailure = (): unknown => undefined;
-          let finalStats = 0,
-            finalReads = 0,
-            closeCuts = 0;
-          w.hook = (name, args, next) => {
-            if (name === "fstatSync" && targetFd(w, args[0], target)) {
-              if (typeof args[0] !== "number")
-                throw new Error("final descriptor required");
-              const entry = requiredValue(w.active.get(args[0]));
-              acquired.value ??= entry;
-              expect(entry).toBe(acquired.value);
-              finalStats++;
-              if (cut === "undefined_body_close_error")
-                throw undefinedFailure();
-            }
-            if (name === "readFileSync" && targetFd(w, args[0], target))
-              finalReads++;
-            if (
-              name === "closeSync" &&
-              acquired.value !== undefined &&
-              args[0] === acquired.value.fd
-            ) {
-              closeCuts++;
-              if (cut === "undefined_body_close_error") throw secondaryClose;
-              throw undefinedFailure();
-            }
-            return next();
-          };
-          let caught = false,
-            value: unknown;
-          try {
-            if (helper === "identity") bound.identity(target, true);
-            else bound.read(target, 262144, true);
-          } catch (error) {
-            caught = true;
-            value = error;
-          }
-          expect(caught).toBe(true);
-          expect(value).toBeUndefined();
-          expect(value).not.toBe(secondaryClose);
-          expect(closeCuts).toBe(1);
-          expect(finalStats).toBe(
-            cut === "undefined_body_close_error" || helper === "identity"
-              ? 1
-              : 2,
-          );
-          expect(finalReads).toBe(
-            cut === "successful_body_undefined_close" && helper === "read"
-              ? 1
-              : 0,
-          );
-          const final = requiredValue(acquired.value);
-          expect(final.path).toBe(target);
-          expect(
-            w.acquisitions.filter((entry) => entry.path === target),
-          ).toHaveLength(1);
-          expect(w.unexpectedCloses).toEqual([]);
-          for (const entry of w.acquisitions) {
-            expect(entry.closeAttempts).toBe(1);
-            expect(entry.settled).toBe(entry !== final);
-          }
-          expect([...w.active.values()]).toEqual([final]);
-          expect([...w.held.keys()]).toEqual([final.fd]);
-          const state = bound.cleanupState();
-          expect(state.poison).toBe(true);
-          expect(state.owned).toHaveLength(0);
-          expect(state.retained).toHaveLength(1);
-          const retained = requiredValue(state.retained[0]);
-          expect(retained.fd).toBe(final.fd);
-          expect(retained.ordinal).toBe(final.ordinal);
-          for (const invoke of [
-            () => bound.identity(w.base, true),
-            () => bound.read(w.leaf, 262144, true),
-            bound.root,
-            bound.release,
-            () => bound.graph(w.base, "source"),
-          ]) {
-            const calls = w.calls.length,
-              opens = w.acquisitions.length;
-            expect(failure(invoke)).toMatchObject({
-              message: "fixture_inventory_changed",
-            });
-            expect(w.calls.length).toBe(calls);
-            expect(w.acquisitions.length).toBe(opens);
-            expect(final.closeAttempts).toBe(1);
-            expect(w.active.get(final.fd)).toBe(final);
-            expect(w.held.get(final.fd)).toBe(target);
-          }
-          // All ownership/poison assertions precede world()'s harness repair.
-          const after = bound.cleanupState();
-          expect(after.poison).toBe(true);
-          expect(after.owned).toHaveLength(0);
-          expect(after.retained).toHaveLength(1);
-          expect(requiredValue(after.retained[0]).fd).toBe(final.fd);
-          expect(requiredValue(after.retained[0]).ordinal).toBe(final.ordinal);
-        });
+  it("V9a checks ledger paths and fresh graph mutation", () => {
+    // Exercise the actual required set and closed path predicate in the
+    // existing AST/realm seam; do not duplicate or broaden the row grammar.
+    const releaseDeclaration = requiredValue(
+      parsed.statements.find(
+        (node) =>
+          ts.isFunctionDeclaration(node) && node.name?.text === "readRelease",
+      ),
+    );
+    const requiredSets: ts.Expression[] = [];
+    const pathRefusals: ts.BinaryExpression[] = [];
+    const inspect = (node: ts.Node): void => {
+      if (
+        ts.isVariableDeclaration(node) &&
+        ts.isIdentifier(node.name) &&
+        node.name.text === "expectedPaths" &&
+        node.initializer
+      )
+        requiredSets.push(node.initializer);
+      if (
+        ts.isBinaryExpression(node) &&
+        node.operatorToken.kind === ts.SyntaxKind.AmpersandAmpersandToken &&
+        ts.isPrefixUnaryExpression(node.left) &&
+        ts.isPrefixUnaryExpression(node.right) &&
+        node.left.getText(parsed).includes(".test(") &&
+        node.right.getText(parsed).includes(".includes(row.path)")
+      )
+        pathRefusals.push(node);
+      ts.forEachChild(node, inspect);
+    };
+    inspect(releaseDeclaration);
+    expect(requiredSets).toHaveLength(1);
+    expect(pathRefusals).toHaveLength(1);
+    const requiredPaths: unknown = runInNewContext(
+      requiredValue(requiredSets[0]).getText(parsed),
+      {},
+      { timeout: 1000 },
+    );
+    if (!Array.isArray(requiredPaths))
+      throw new Error("required paths missing");
+    expect(requiredPaths).toHaveLength(66);
+    for (const ledgerPath of [
+      ...(requiredPaths as unknown[]),
+      "tools/ci-validation/unrequired.py",
+    ]) {
+      expect(typeof ledgerPath).toBe("string");
+      expect(
+        runInNewContext(
+          requiredValue(pathRefusals[0]).getText(parsed),
+          { row: { path: ledgerPath } },
+          { timeout: 1000 },
+        ),
+        String(ledgerPath),
+      ).toBe(ledgerPath === "tools/ci-validation/unrequired.py");
+    }
     world((w) => {
       const before = w.graph(w.base, "source");
       fs.writeFileSync(w.leaf, "different governed bytes");
@@ -1738,12 +1683,126 @@ describe("fixture105 fresh component traversal", () => {
       ).toHaveLength(1);
       expect(w.held.size).toBe(0);
     });
-    for (const cut of [
-      "between_root_scans",
-      "after_completed_release",
-    ] as const)
+  });
+  // Each vector retains its own fresh world/model and default test deadline.
+  for (const [label, helper, cut] of [
+    ["V9b", "identity", "undefined_body_close_error"],
+    ["V9c", "identity", "successful_body_undefined_close"],
+    ["V9d", "read", "undefined_body_close_error"],
+    ["V9e", "read", "successful_body_undefined_close"],
+  ] as const)
+    it(`${label} preserves ${helper} ${cut}`, () => {
+      // Target the FINAL descriptor after component closes have settled.
+      world((w) => {
+        const bound = boundRelease(w),
+          target = helper === "identity" ? w.base : w.leaf,
+          secondaryClose = new Error("final descriptor close error");
+        const acquired: { value: Acquisition | undefined } = {
+          value: undefined,
+        };
+        const undefinedFailure = (): unknown => undefined;
+        let finalStats = 0,
+          finalReads = 0,
+          closeCuts = 0;
+        w.hook = (name, args, next) => {
+          if (name === "fstatSync" && targetFd(w, args[0], target)) {
+            if (typeof args[0] !== "number")
+              throw new Error("final descriptor required");
+            const entry = requiredValue(w.active.get(args[0]));
+            acquired.value ??= entry;
+            expect(entry).toBe(acquired.value);
+            finalStats++;
+            if (cut === "undefined_body_close_error") throw undefinedFailure();
+          }
+          if (name === "readFileSync" && targetFd(w, args[0], target))
+            finalReads++;
+          if (
+            name === "closeSync" &&
+            acquired.value !== undefined &&
+            args[0] === acquired.value.fd
+          ) {
+            closeCuts++;
+            if (cut === "undefined_body_close_error") throw secondaryClose;
+            throw undefinedFailure();
+          }
+          return next();
+        };
+        let caught = false,
+          value: unknown;
+        try {
+          if (helper === "identity") bound.identity(target, true);
+          else bound.read(target, 262144, true);
+        } catch (error) {
+          caught = true;
+          value = error;
+        }
+        expect(caught).toBe(true);
+        expect(value).toBeUndefined();
+        expect(value).not.toBe(secondaryClose);
+        expect(closeCuts).toBe(1);
+        expect(finalStats).toBe(
+          cut === "undefined_body_close_error" || helper === "identity" ? 1 : 2,
+        );
+        expect(finalReads).toBe(
+          cut === "successful_body_undefined_close" && helper === "read"
+            ? 1
+            : 0,
+        );
+        const final = requiredValue(acquired.value);
+        expect(final.path).toBe(target);
+        expect(
+          w.acquisitions.filter((entry) => entry.path === target),
+        ).toHaveLength(1);
+        expect(w.unexpectedCloses).toEqual([]);
+        for (const entry of w.acquisitions) {
+          expect(entry.closeAttempts).toBe(1);
+          expect(entry.settled).toBe(entry !== final);
+        }
+        expect([...w.active.values()]).toEqual([final]);
+        expect([...w.held.keys()]).toEqual([final.fd]);
+        const state = bound.cleanupState();
+        expect(state.poison).toBe(true);
+        expect(state.owned).toHaveLength(0);
+        expect(state.retained).toHaveLength(1);
+        const retained = requiredValue(state.retained[0]);
+        expect(retained.fd).toBe(final.fd);
+        expect(retained.ordinal).toBe(final.ordinal);
+        for (const invoke of [
+          () => bound.identity(w.base, true),
+          () => bound.read(w.leaf, 262144, true),
+          bound.root,
+          bound.release,
+          () => bound.graph(w.base, "source"),
+        ]) {
+          const calls = w.calls.length,
+            opens = w.acquisitions.length;
+          expect(failure(invoke)).toMatchObject({
+            message: "fixture_inventory_changed",
+          });
+          expect(w.calls.length).toBe(calls);
+          expect(w.acquisitions.length).toBe(opens);
+          expect(final.closeAttempts).toBe(1);
+          expect(w.active.get(final.fd)).toBe(final);
+          expect(w.held.get(final.fd)).toBe(target);
+        }
+        // All ownership/poison assertions precede world()'s harness repair.
+        const after = bound.cleanupState();
+        expect(after.poison).toBe(true);
+        expect(after.owned).toHaveLength(0);
+        expect(after.retained).toHaveLength(1);
+        expect(requiredValue(after.retained[0]).fd).toBe(final.fd);
+        expect(requiredValue(after.retained[0]).ordinal).toBe(final.ordinal);
+      });
+    });
+  for (const [label, cut] of [
+    ["V9f", "between_root_scans"],
+    ["V9g", "after_completed_release"],
+  ] as const)
+    it(`${label} detects ${cut}`, () => {
       world((w) => {
         const bound = boundRelease(w);
+        // Synthetic diagnostic baseline, before the counted mutation hook.
+        expect(bound.root()).toHaveProperty("root", bound.bindingRoot);
         let rootTailReads = 0;
         let releaseReads = 0;
         let mutationCut: number | undefined;
@@ -1794,6 +1853,24 @@ describe("fixture105 fresh component traversal", () => {
           changed = true;
         }
         const refusal = failure(bound.release);
+        if (!changed) {
+          const stack: unknown =
+            typeof refusal === "object" && refusal !== null
+              ? Reflect.get(refusal, "stack")
+              : undefined;
+          process.stderr.write(
+            "FIXTURE105_V9_UNREACHED " +
+              JSON.stringify({
+                cut,
+                rootTailReads,
+                releaseReads,
+                freshReads,
+                mutationCut: mutationCut ?? null,
+                stack: typeof stack === "string" ? stack : null,
+              }) +
+              "\n",
+          );
+        }
         expect(refusal).toMatchObject({ message: "fixture_root_changed" });
         expect(changed).toBe(true);
         expect(releaseReads).toBe(cut === "between_root_scans" ? 4 : 6);
@@ -1806,10 +1883,11 @@ describe("fixture105 fresh component traversal", () => {
         expect(w.held.size).toBe(0);
         expect(w.unexpectedCloses).toEqual([]);
       });
+    });
+  it("V9h checks all twelve Node provenance relations", () => {
     world(nodeRelationControls);
-    // The actual await/context mutation witness remains in the unchanged native suite;
-    // this group exercises synchronous release filesystem cuts, not an across-await filesystem claim.
   });
+  // The unchanged native suite owns the actual await/context mutation witness.
   it("V10 independently opens the complete absolute chain for every directory and file", async () => {
     world((w) => {
       for (let index = 0; index < 3; index++)
