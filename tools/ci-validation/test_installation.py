@@ -559,7 +559,11 @@ class EvaluationProvenance(unittest.TestCase):
                 (runtime/'attempt-aaaaaaaa').mkdir(mode=0o700)
                 with self.assertRaises(FileExistsError):fn(exclusive=True)
                 legacy=fn();self.assertNotEqual(legacy,runtime)
-                self.assertTrue(legacy.name.startswith('the-desk-p33-'));self.assertEqual(fn(),legacy)
+                self.assertTrue(legacy.name.startswith('p33-'));self.assertEqual(fn(),legacy)
+                self.assertEqual(ci.find_runtime_dir(directory),legacy)
+                self.assertEqual(sorted(Path(directory).glob('p33-*/attempt-*')),[])
+                ordinary_attempt=legacy/'attempt-bbbbbbbb';ordinary_attempt.mkdir(mode=0o700)
+                self.assertEqual(sorted(Path(directory).glob('p33-*/attempt-*')),[ordinary_attempt])
                 self.assertTrue(runtime.name.startswith('p33t-'))
                 self.assertEqual(sorted(v.name for v in runtime.iterdir()),['attempt-aaaaaaaa'])
 
@@ -575,56 +579,67 @@ class EvaluationProvenance(unittest.TestCase):
             runtime=self.owner.traversal_runtime(ctx)
             self.assertEqual(runtime,ordinary_tmp/basename)
             self.assertEqual(basename,'p33t-1001-'+self.owner.digest(b'/tmp/e')[:24])
-            address=subject['traversal_socket_path'](runtime/'attempt-aaaaaaaa')
+            address=subject['guard_socket_path'](runtime/'attempt-aaaaaaaa')
             self.assertEqual(len(os.fsencode(address)),104)
             self.assertLessEqual(len(os.fsencode(address))+1,108)
-            self.assertEqual(subject['runtime_basename'](False),'the-desk-p33-1001-'+self.owner.digest(b'/tmp/e')[:24])
+            ordinary_basename=subject['runtime_basename'](False)
+            self.assertEqual(ordinary_basename,'p33-1001-'+self.owner.digest(b'/tmp/e')[:24])
+            ordinary_address=subject['guard_socket_path'](ordinary_tmp/ordinary_basename/'attempt-aaaaaaaa')
+            self.assertEqual(len(os.fsencode(ordinary_address)),103)
+            self.assertLessEqual(len(os.fsencode(ordinary_address))+1,108)
+        wrapper=(ci.ROOT/'tools/ci-validation/run-stage.sh').read_text()
+        hosted=(ci.ROOT/'test/support/command-postgres-hosted.ts').read_text()
+        self.assertIn('for dir in "$CI_DIR"/tmp/p33-*/attempt-*; do',wrapper)
+        self.assertIn('`p33-${String(process.getuid?.())}-${sha256(Buffer.from(root)).slice(0, 24)}`',hosted)
+        self.assertIn('path = guard_socket_path(folder)\n',supervisor_text)
+        self.assertNotIn('the-desk-p33-',wrapper+hosted+supervisor_text)
         # Real AF_UNIX bind at a private pathname with exactly the ordinary
         # hosted TMPDIR byte length; uses genuine runtime_dir/socket construction.
         # This is local model data, not a hosted role or an admission capability.
-        for label,tmp_bytes in (('ordinary',len(os.fsencode(ordinary_tmp))),('overlong',len(os.fsencode(ordinary_tmp))+8)):
-            # Stay inside the existing finite owner's short private TMP scope.
-            with tempfile.TemporaryDirectory(prefix='p33t-') as directory:
-                parent=Path(directory);padding=tmp_bytes-len(os.fsencode(parent))-1
-                self.assertGreater(padding,0);temporary=parent/('p'*padding);temporary.mkdir(mode=0o700)
-                self.assertEqual(len(os.fsencode(temporary)),tmp_bytes)
-                subject=runpy.run_path(str(supervisor),run_name='finite_real_path_definitions')
-                ns=subject['guard'].__globals__
-                with mock.patch.dict(ns,ROOT=Path('/tmp/e')),mock.patch.object(ns['tempfile'],'gettempdir',return_value=str(temporary)):
-                    if label=='ordinary':
-                        runtime=subject['runtime_dir'](True)
-                        attempt=Path(tempfile.mkdtemp(prefix='attempt-',dir=runtime))
-                        address=subject['traversal_socket_path'](attempt)
-                        self.assertEqual(len(os.fsencode(address)),tmp_bytes+len(str(os.getuid()))+59)
-                        server=socket.socket(socket.AF_UNIX,socket.SOCK_STREAM)
-                        try:
-                            server.bind(address)
-                            self.assertEqual(server.getsockname(),address)
-                            self.assertTrue(stat.S_ISSOCK((attempt/'guard.sock').lstat().st_mode))
-                        finally:server.close()
-                    else:
-                        # Exercise guard itself through its production pathname
-                        # cut. No handlers, prerequisite fork, socket or Popen may run.
-                        original_open=os.open;original_close=os.close;leases=[]
-                        def opened(path,*args,**kwargs):
-                            fd=original_open(path,*args,**kwargs)
-                            if Path(path).name=='validation.lock':leases.append(fd)
-                            return fd
-                        preflight=mock.Mock(side_effect=AssertionError('preflight must not run'))
-                        try:
-                            with mock.patch.dict(ns,handlers=mock.Mock(),prerequisite=preflight), \
-                                 mock.patch.object(os,'open',side_effect=opened),mock.patch.object(socket,'socket') as sockets, \
-                                 mock.patch.object(subprocess,'Popen') as children:
-                                with self.assertRaisesRegex(RuntimeError,'^traversal socket pathname bound$'):
-                                    subject['guard'](types.SimpleNamespace(profile='fixture105-traversal'))
-                                preflight.assert_not_called();sockets.assert_not_called();children.assert_not_called()
-                            self.assertEqual(len(leases),1)
-                        finally:
-                            # Test-only process-exit surrogate, AFTER no-child assertions.
-                            for fd in leases:original_close(fd)
+        for exclusive,profile in ((True,'fixture105-traversal'),(False,'focused'),(False,'prerequisite'),(False,'fixture105-unknown')):
+            for label,tmp_bytes in (('ordinary',len(os.fsencode(ordinary_tmp))),('overlong',len(os.fsencode(ordinary_tmp))+8)):
+                # Stay inside the existing finite owner's short private TMP scope.
+                with tempfile.TemporaryDirectory(prefix='p33t-') as directory:
+                    parent=Path(directory);padding=tmp_bytes-len(os.fsencode(parent))-1
+                    self.assertGreater(padding,0);temporary=parent/('p'*padding);temporary.mkdir(mode=0o700)
+                    self.assertEqual(len(os.fsencode(temporary)),tmp_bytes)
+                    subject=runpy.run_path(str(supervisor),run_name='finite_real_path_definitions')
+                    ns=subject['guard'].__globals__
+                    with mock.patch.dict(ns,ROOT=Path('/tmp/e')),mock.patch.object(ns['tempfile'],'gettempdir',return_value=str(temporary)):
+                        if label=='ordinary':
+                            runtime=subject['runtime_dir'](exclusive)
+                            attempt=Path(tempfile.mkdtemp(prefix='attempt-',dir=runtime))
+                            address=subject['guard_socket_path'](attempt)
+                            self.assertEqual(len(os.fsencode(address)),tmp_bytes+len(str(os.getuid()))+(59 if exclusive else 58))
+                            server=socket.socket(socket.AF_UNIX,socket.SOCK_STREAM)
+                            try:
+                                server.bind(address)
+                                self.assertEqual(server.getsockname(),address)
+                                self.assertTrue(stat.S_ISSOCK((attempt/'guard.sock').lstat().st_mode))
+                            finally:server.close()
+                        else:
+                            # Exercise guard itself through its production pathname
+                            # cut. No handlers, prerequisite fork, socket or Popen may run.
+                            original_open=os.open;original_close=os.close;leases=[]
+                            def opened(path,*args,**kwargs):
+                                fd=original_open(path,*args,**kwargs)
+                                if Path(path).name=='validation.lock':leases.append(fd)
+                                return fd
+                            preflight=mock.Mock(side_effect=AssertionError('preflight must not run'))
+                            try:
+                                with mock.patch.dict(ns,handlers=mock.Mock(),prerequisite=preflight), \
+                                     mock.patch.object(os,'open',side_effect=opened),mock.patch.object(socket,'socket') as sockets, \
+                                     mock.patch.object(subprocess,'Popen') as children:
+                                    with self.assertRaisesRegex(RuntimeError,'^guard socket pathname bound$'):
+                                        subject['guard'](types.SimpleNamespace(profile=profile))
+                                    preflight.assert_not_called();sockets.assert_not_called();children.assert_not_called()
+                                self.assertEqual(len(leases),1)
+                            finally:
+                                # Test-only process-exit surrogate, AFTER no-child assertions.
+                                for fd in leases:original_close(fd)
         for folder in (Path('/tmp')/('é'*60),Path('/tmp/null\0folder')):
-            with self.assertRaisesRegex(RuntimeError,'traversal socket pathname bound'):
-                subject['traversal_socket_path'](folder)
+            with self.assertRaisesRegex(RuntimeError,'guard socket pathname bound'):
+                subject['guard_socket_path'](folder)
 
     def test_23_metadata_namespace_symlink_and_extra(self):
         class LayoutFailure(Exception):pass

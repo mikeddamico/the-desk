@@ -599,7 +599,7 @@ def check_prerequisite_record(value, errors):
 
 
 def find_runtime_dir(tmp_dir):
-    found = sorted(p for p in Path(tmp_dir).glob('the-desk-p33-*') if p.is_dir() and not p.is_symlink())
+    found = sorted(p for p in Path(tmp_dir).glob('p33-*') if p.is_dir() and not p.is_symlink())
     if len(found) != 1:
         raise RuntimeError('expected exactly one P33 runtime directory, found %d' % len(found))
     return found[0]

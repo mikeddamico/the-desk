@@ -123,7 +123,7 @@ list_attempts() {
     set -o pipefail
     shopt -s nullglob
     names=()
-    for dir in "$CI_DIR"/tmp/the-desk-p33-*/attempt-*; do
+    for dir in "$CI_DIR"/tmp/p33-*/attempt-*; do
       names+=("${dir##*/}")
     done
     if [ "${#names[@]}" -gt 0 ]; then

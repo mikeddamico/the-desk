@@ -188,7 +188,7 @@ function groups(pid: number): number[] {
 const guardDirectory = join(
   base,
   "tmp",
-  `the-desk-p33-${String(process.getuid?.())}-${sha256(Buffer.from(root)).slice(0, 24)}`,
+  `p33-${String(process.getuid?.())}-${sha256(Buffer.from(root)).slice(0, 24)}`,
 );
 function attempts(): string[] {
   try {

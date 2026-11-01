@@ -384,7 +384,7 @@ jobs:
         run: /usr/bin/python3 -I -B tools/ci-validation/ci.py identity-witness
       - name: Prove traversal17 Node12 and callback20 after genuine seal
         id: traversal-proof
-        if: ${{ success() && steps.init.outcome == 'success' && steps.semantic-identities.outcome == 'success' }}
+        if: ${{ false }} # Native tranche uses fresh focused receipts; traversal is already proved.
         working-directory: /tmp/e
         timeout-minutes: 21
         env:
@@ -393,7 +393,7 @@ jobs:
           /usr/bin/timeout --signal=TERM --kill-after=20s 1200s /usr/bin/python3 -I -B tools/ci-validation/ci.py traversal-proof
       - name: Retain traversal proof including failed capture and loader evidence
         id: upload-traversal
-        if: ${{ always() && steps.init.outcome == 'success' && steps.traversal-proof.outcome != 'skipped' }}
+        if: ${{ false }} # No traversal attempt in the native tranche.
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         timeout-minutes: 3
         with:
@@ -406,7 +406,7 @@ jobs:
           if-no-files-found: error
           retention-days: 30
       - name: Probe the disposable database read-only
-        if: ${{ false }} # Traversal-only first tranche; restore all prerequisites in fresh roles later.
+        if: ${{ success() && steps.init.outcome == 'success' && steps.semantic-identities.outcome == 'success' }}
         working-directory: /tmp/e
         timeout-minutes: 1
         env:
@@ -414,7 +414,7 @@ jobs:
         run: |
           /usr/bin/python3 -I -B tools/ci-validation/ci.py dbprobe
       - name: Guard P33 prerequisite
-        if: ${{ false }} # Traversal-only first tranche; restore all prerequisites in fresh roles later.
+        if: ${{ success() && steps.init.outcome == 'success' && steps.semantic-identities.outcome == 'success' }}
         working-directory: /tmp/e
         timeout-minutes: 1
         env:
@@ -422,7 +422,7 @@ jobs:
         run: |
           /bin/bash tools/ci-validation/run-stage.sh prerequisite
       - name: Validate P33 prerequisite
-        if: ${{ false }} # Traversal-only first tranche; restore all prerequisites in fresh roles later.
+        if: ${{ success() && steps.init.outcome == 'success' && steps.semantic-identities.outcome == 'success' }}
         working-directory: /tmp/e
         timeout-minutes: 1
         env:
@@ -430,7 +430,7 @@ jobs:
         run: |
           /usr/bin/python3 -I -B tools/ci-validation/ci.py check prerequisite
       - name: Guard P33 focused
-        if: ${{ false }} # Traversal-only first tranche; restore all prerequisites in fresh roles later.
+        if: ${{ success() && steps.init.outcome == 'success' && steps.semantic-identities.outcome == 'success' }}
         working-directory: /tmp/e
         timeout-minutes: 3
         env:
@@ -438,7 +438,7 @@ jobs:
         run: |
           /bin/bash tools/ci-validation/run-stage.sh focused
       - name: Validate P33 focused
-        if: ${{ false }} # Traversal-only first tranche; restore all prerequisites in fresh roles later.
+        if: ${{ success() && steps.init.outcome == 'success' && steps.semantic-identities.outcome == 'success' }}
         working-directory: /tmp/e
         timeout-minutes: 1
         env:
@@ -447,7 +447,7 @@ jobs:
           /usr/bin/python3 -I -B tools/ci-validation/ci.py check focused
       - name: Collect controls evidence
         id: collect-controls
-        if: ${{ false }} # Traversal-only first tranche; restore all prerequisites in fresh roles later.
+        if: ${{ always() && steps.init.outcome == 'success' }}
         working-directory: /tmp/e
         timeout-minutes: 2
         env:
@@ -456,7 +456,7 @@ jobs:
           /usr/bin/python3 -I -B tools/ci-validation/ci.py collect --scope controls
       - name: Retain controls evidence
         id: upload-controls
-        if: ${{ false }} # Traversal-only first tranche; restore all prerequisites in fresh roles later.
+        if: ${{ always() && steps.collect-controls.outcome == 'success' }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         timeout-minutes: 2
         with:
@@ -466,7 +466,7 @@ jobs:
           retention-days: 30
       - name: Diagnose the original fixed four-owner native case
         id: command-postgres
-        if: ${{ false }} # Traversal-only first tranche; restore all prerequisites in fresh roles later.
+        if: ${{ success() && steps.init.outcome == 'success' && steps.semantic-identities.outcome == 'success' && steps.collect-controls.outcome == 'success' && steps.upload-controls.outcome == 'success' }}
         working-directory: /tmp/e
         timeout-minutes: 21
         env:
@@ -477,7 +477,7 @@ jobs:
             node --import tsx test/support/command-postgres-hosted.ts fixture105-unknown
       - name: Retain native diagnostic including failed cleanup observations
         id: upload-native
-        if: ${{ false }} # Traversal-only first tranche; restore all prerequisites in fresh roles later.
+        if: ${{ always() && steps.init.outcome == 'success' && steps.command-postgres.outcome != 'skipped' }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         timeout-minutes: 2
         with:

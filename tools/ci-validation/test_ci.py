@@ -156,7 +156,7 @@ def build_world(tmp):
     """Evidence/runtime directories plus the common (non-stage) records, all ok."""
     root = Path(tmp) / 'ci'
     ev = root / 'evidence'
-    runtime = root / 'tmp' / 'the-desk-p33-1000-abc'
+    runtime = root / 'tmp' / 'p33-1000-abc'
     ev.mkdir(parents=True)
     runtime.mkdir(parents=True)
     for name in ('env.json', 'identity.json', 'db-probe.json', 'snapshot-pre.json', 'bind-pre.json', 'bind-build.json'):
@@ -707,7 +707,7 @@ class StageGateCommands(unittest.TestCase):
             return fn(*args)
 
     def stage(self, ev, runner, stage, seen):
-        runtime = runner / 'ci' / 'tmp' / 'the-desk-p33-1000-abc'
+        runtime = runner / 'ci' / 'tmp' / 'p33-1000-abc'
         make_stage(ev / stage, runtime, ATTEMPTS[stage], stage, seen)
 
     def test_precheck_ordering_and_single_attempt(self):
@@ -1083,6 +1083,9 @@ def _evaluation_workflow(test, text):
         conditions=[line.strip() for line in block.splitlines() if line.startswith('        if:')]
         test.assertEqual(len(conditions),1)
         test.assertRegex(conditions[0],r'^if:[ \t]*\$\{\{[ \t]*false[ \t]*\}\}(?:[ \t]+#[^\r\n]*|[ \t]*)$')
+    def assert_condition(block, expression):
+        conditions=[line.strip() for line in block.splitlines() if line.startswith('        if:')]
+        test.assertEqual(conditions,['if: ${{ '+expression+' }}'])
     for label,job in (('writer',writer),('rest',rest)):
         test.assertIn('DESK_CI_PARTITION: '+label,job)
         test.assertIn('image: postgres:17',job)
@@ -1138,7 +1141,8 @@ def _evaluation_workflow(test, text):
             test.assertNotIn('fixture046-cleanup',steps)
             test.assertNotIn('fixture046-ffmpeg-supply.py',job)
         for name,gate in (('collect-controls','init'),('collect-full','init'),('upload-controls','collect-controls'),('upload-full','collect-full'),('upload-producer','collect-producer')):
-            if label=='rest' and name!='upload-producer':assert_held(steps[name])
+            if label=='rest' and name in ('collect-full','upload-full'):assert_held(steps[name])
+            elif label=='rest':assert_condition(steps[name],"always() && steps."+gate+".outcome == 'success'")
             else:test.assertIn("always() && steps."+gate+".outcome == 'success'",steps[name])
         for name in ('collect-producer','final'):
             test.assertIn('working-directory: ${{ github.workspace }}',steps[name])
@@ -1158,24 +1162,27 @@ def _evaluation_workflow(test, text):
         test.assertIn('if-no-files-found: error',job)
         if label=='rest':
             native=steps['command-postgres']
-            assert_held(native)
+            assert_condition(native,"success() && steps.init.outcome == 'success' && steps.semantic-identities.outcome == 'success' && steps.collect-controls.outcome == 'success' && steps.upload-controls.outcome == 'success'")
             test.assertIn('HOME="$DESK_CI_ROLE_TEMP/ci/home" TMPDIR="$DESK_CI_ROLE_TEMP/ci/tmp"',native)
             test.assertNotIn('HOME="$RUNNER_TEMP',native)
             traversal=steps['traversal-proof']
-            test.assertIn("success() && steps.init.outcome == 'success' && steps.semantic-identities.outcome == 'success'",traversal)
+            assert_held(traversal)
             test.assertIn('working-directory: /tmp/e',traversal)
             test.assertIn('--signal=TERM --kill-after=20s 1200s /usr/bin/python3 -I -B tools/ci-validation/ci.py traversal-proof',traversal)
             test.assertLess(job.index('ci.py identity-witness'),job.index('ci.py traversal-proof'))
             test.assertLess(job.index('ci.py traversal-proof'),job.index('run-stage.sh focused'))
-            test.assertIn("always() && steps.init.outcome == 'success' && steps.traversal-proof.outcome != 'skipped'",steps['upload-traversal'])
+            assert_held(steps['upload-traversal'])
             for path in ('evaluation/ci/evidence/fixture105-traversal','evaluation/ci/evidence/fixture105-before-focused.json',
                          'evaluation/ci/evidence/fixture105-loader-created.json','evaluation/ci/tmp/capture-fixture105-traversal'):
                 test.assertEqual(steps['upload-traversal'].count('${{ runner.temp }}/'+path),1)
             test.assertNotIn('*',steps['upload-traversal'])
-            for held_command in ('ci.py dbprobe','run-stage.sh prerequisite','ci.py check prerequisite','run-stage.sh focused','ci.py check focused'):
-                held_blocks=[block for block in job.split('      - ')[1:] if held_command in block]
-                test.assertEqual(len(held_blocks),1);assert_held(held_blocks[0])
-            assert_held(steps['upload-native'])
+            # success() includes every preceding guard/check and its exit status;
+            # source order above makes both validated predecessors mandatory.
+            for command in ('ci.py dbprobe','run-stage.sh prerequisite','ci.py check prerequisite','run-stage.sh focused','ci.py check focused'):
+                command_blocks=[block for block in job.split('      - ')[1:] if command in block]
+                test.assertEqual(len(command_blocks),1)
+                assert_condition(command_blocks[0],"success() && steps.init.outcome == 'success' && steps.semantic-identities.outcome == 'success'")
+            assert_condition(steps['upload-native'],"always() && steps.init.outcome == 'success' && steps.command-postgres.outcome != 'skipped'")
             test.assertIn('--signal=TERM --kill-after=20s 1200s',native)
             test.assertEqual(native.count('node --import tsx test/support/command-postgres-hosted.ts fixture105-unknown'),1)
             test.assertEqual(steps['upload-native'].count('name: ci-fixture105-unknown-rest-${{ github.run_id }}-${{ github.run_attempt }}'),1)
@@ -1183,7 +1190,6 @@ def _evaluation_workflow(test, text):
             test.assertEqual(job.count('node --import tsx test/support/command-postgres-hosted.ts fixture105-unknown'),1)
             test.assertLess(job.index('id: upload-controls'),job.index('id: command-postgres'))
             test.assertLess(job.index('id: command-postgres'),job.index('id: collect-full'))
-            assert_held(steps['upload-native'])
     test.assertIn('needs: [verify-writer, verify-rest, container]',text)
     test.assertIn('ci.py joint',text)
     test.assertEqual(text.count('GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}'),2)
@@ -1858,7 +1864,7 @@ class WorkflowShape(unittest.TestCase):
             self.assertEqual(native.count('DESK_CI_ROLE_TEMP: temporary,'),2)
             self.assertNotIn('RUNNER_TEMP: temporary,',native)
             _evaluation_workflow(self,raw)
-            self.assertEqual(hashlib.sha256(raw.encode()).hexdigest(),'1e30f211a61cddb742c0ddfa1288c4bc6dc79b18b2970d5dd7f09f0408897a28')
+            self.assertEqual(hashlib.sha256(raw.encode()).hexdigest(),'d41886f063c27baee76646dfc854b3f9db33894617d2a2f495bd477b8190ce65')
             held_media='if: ${{ false }} # Representative-first route; no media preparation.'
             self.assertEqual(raw.count(held_media),1)
             for condition in ('if: ${{ false }}','if: \t${{\tfalse\t}}\t# held media'):
@@ -1902,6 +1908,39 @@ class WorkflowShape(unittest.TestCase):
                 with self.subTest(evaluation_mutation=before):
                     self.assertIn(before,raw)
                     with self.assertRaises(AssertionError): _evaluation_workflow(self,raw.replace(before,after,1))
+            # Every native prerequisite remains success-gated; retention must
+            # remain available after failed checks or an attempted native child.
+            prefix,rest=raw.split('  verify-rest:\n',1)
+            for selector in ('ci.py dbprobe','run-stage.sh prerequisite','ci.py check prerequisite',
+                             'run-stage.sh focused','ci.py check focused','id: command-postgres',
+                             'id: collect-controls','id: upload-controls','id: upload-native'):
+                blocks=rest.split('      - ')
+                matches=[i for i,block in enumerate(blocks) if selector in block]
+                self.assertEqual(len(matches),1);index=matches[0];block=blocks[index]
+                conditions=[line for line in block.splitlines() if line.startswith('        if:')]
+                self.assertEqual(len(conditions),1);condition=conditions[0]
+                mutants=["        if: ${{ true }}", "        if: ${{ false }}"]
+                if 'success()' in condition:mutants.append(condition.replace('success()','always()'))
+                if 'always()' in condition:mutants.append(condition.replace('always()','success()'))
+                for gate in ('init','semantic-identities','collect-controls','upload-controls'):
+                    clause=" && steps."+gate+".outcome == 'success'"
+                    if clause in condition:mutants.append(condition.replace(clause,''))
+                if selector=='id: upload-native':
+                    mutants.extend(condition.replace("!= 'skipped'","== '"+outcome+"'") for outcome in ('success','failure'))
+                    mutants.append(condition.replace('steps.command-postgres.outcome','steps.traversal-proof.outcome'))
+                for mutated in mutants:
+                    changed=list(blocks);changed[index]=block.replace(condition,mutated,1)
+                    with self.subTest(native_gate=selector,mutation=mutated),self.assertRaises(AssertionError):
+                        _evaluation_workflow(self,prefix+'  verify-rest:\n'+'      - '.join(changed))
+            for left,right in (('ci.py dbprobe','run-stage.sh prerequisite'),
+                               ('ci.py check prerequisite','run-stage.sh focused'),
+                               ('ci.py check focused','id: collect-controls')):
+                blocks=rest.split('      - ')
+                first=next(i for i,block in enumerate(blocks) if left in block)
+                second=next(i for i,block in enumerate(blocks) if right in block)
+                blocks[first],blocks[second]=blocks[second],blocks[first]
+                with self.subTest(native_order=(left,right)),self.assertRaises(AssertionError):
+                    _evaluation_workflow(self,prefix+'  verify-rest:\n'+'      - '.join(blocks))
             for selector in ('id: command-postgres','id: traversal-proof'):
                 blocks=raw.split('      - ')
                 matches=[i for i,block in enumerate(blocks) if selector+'\n' in block]
@@ -1922,7 +1961,7 @@ class WorkflowShape(unittest.TestCase):
             # A false token in prose never makes a live runtime condition held.
             blocks=raw.split('      - ')
             for index,block in enumerate(blocks):
-                if '# Traversal-only first tranche;' not in block:continue
+                if '# Traversal-only first tranche;' not in block and not any(selector+'\n' in block for selector in ('id: traversal-proof','id: upload-traversal')):continue
                 conditions=[line for line in block.splitlines() if line.startswith('        if:')]
                 self.assertEqual(len(conditions),1)
                 for live in ('        if: ${{ true }} # if: ${{ false }}', '        if: ${{ false || true }} # held'):
@@ -2127,7 +2166,7 @@ class Fixture105Tooling(unittest.TestCase):
 
     def test_fixture_namespace_does_not_match_supervisor_prefix(self):
         with fixture_world() as (base, checkout, root, binding):
-            self.assertFalse(root.name.startswith('the-desk-p33-'))
+            self.assertFalse(root.name.startswith('p33-'))
             self.assertEqual(ci.fixture_validate(base, checkout), (binding, {'absent': True}))
 
     def test_fixture_preparation_is_exclusive(self):
@@ -2496,7 +2535,7 @@ class Fixture105Tooling(unittest.TestCase):
     def test_real_synthetic_preparation_to_both_collectors_and_final(self):
         with fixture_world() as (base, checkout, root, binding):
             ev = base / 'evidence'
-            runtime = base / 'tmp/the-desk-p33-1000-abc'
+            runtime = base / 'tmp/p33-1000-abc'
             runtime.mkdir(mode=0o700)
             for name in ('env.json', 'identity.json', 'db-probe.json', 'snapshot-pre.json', 'bind-pre.json', 'bind-build.json'):
                 write_json(ev / name, {'ok': True})

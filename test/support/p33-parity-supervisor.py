@@ -667,15 +667,15 @@ def case_owner(args):
 
 def runtime_basename(exclusive=False):
     key = hashlib.sha256(str(ROOT).encode()).hexdigest()[:24]
-    prefix = 'p33t-' if exclusive else 'the-desk-p33-'
+    prefix = 'p33t-' if exclusive else 'p33-'
     return f'{prefix}{os.getuid()}-{key}'
 
 
-def traversal_socket_path(folder):
+def guard_socket_path(folder):
     path=str(folder/'guard.sock')
     encoded=os.fsencode(path)
     if b'\0' in encoded or len(encoded)+1>108:
-        raise RuntimeError('traversal socket pathname bound')
+        raise RuntimeError('guard socket pathname bound')
     return path
 
 
@@ -701,7 +701,7 @@ def guard(args):
     os.set_inheritable(lease, False)
     st = os.fstat(lease)
     folder = Path(tempfile.mkdtemp(prefix='attempt-', dir=directory))
-    path = traversal_socket_path(folder) if args.profile=='fixture105-traversal' else str(folder/'guard.sock')
+    path = guard_socket_path(folder)
     def namespace_identity(path):
         value=path.lstat()
         if not stat_module.S_ISDIR(value.st_mode) or value.st_uid!=os.getuid() or stat_module.S_IMODE(value.st_mode)!=0o700:
