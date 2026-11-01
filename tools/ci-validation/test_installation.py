@@ -666,6 +666,130 @@ class EvaluationProvenance(unittest.TestCase):
             self.assertEqual(self.owner.SECONDARY[1]['phase'],'runtime_retention')
 
     def test_24_canonical_budgets_and_no_future_authority(self):
+        # Terminal-only BUILD diagnostics: synthetic cuts, no producer child or
+        # actual signal-handler installation. Keep the existing result contract.
+        import signal
+        result_keys={'schema','success','primary','secondary','attempted_preservation','cancelled','pending'}
+        def terminal(action, *, print_failure=None, render_failure=False, pending_expected=False):
+            emitted=[];original_dumps=json.dumps
+            def printing(value,**kwargs):
+                stream='stderr' if kwargs.get('file') is sys.stderr else 'stdout'
+                emitted.append((stream,json.loads(value),kwargs))
+                if stream==print_failure:raise OSError('postgresql://private:secret@host/path')
+            def rendering(value,**kwargs):
+                if render_failure and value.get('schema')=='ci-build-failure-diagnostic/1':
+                    raise ValueError('private-render-text')
+                return original_dumps(value,**kwargs)
+            with mock.patch.object(self.owner,'POISON',[]),mock.patch.object(self.owner,'PENDING_OBJECTS',[]), \
+                 mock.patch.object(self.owner,'LEASES',{}),mock.patch.object(self.owner,'SECONDARY',[]), \
+                 mock.patch.object(self.owner,'ATTEMPTS',[]),mock.patch.object(self.owner,'CANCELLED',None), \
+                 mock.patch.object(self.owner,'BUILD_DIAGNOSTIC_PHASE',None),mock.patch.object(self.owner,'entry'), \
+                 mock.patch.object(self.owner,'persist_pending') as pending,mock.patch.object(signal,'signal') as handlers, \
+                 mock.patch.object(ci,'ci_dir',return_value=self.base), \
+                 mock.patch('builtins.print',side_effect=printing),mock.patch.object(json,'dumps',side_effect=rendering):
+                status=self.owner.command(ci,action)
+                self.assertEqual(handlers.call_count,4)
+                if pending_expected:pending.assert_called_once_with(self.base)
+                else:pending.assert_not_called()
+            final=emitted[-1][1]
+            self.assertEqual(set(final),result_keys)
+            self.assertEqual(final['schema'],'ci-role-command/1')
+            for stream,value,kwargs in emitted:
+                self.assertTrue(kwargs['flush'])
+                if stream=='stderr':
+                    self.assertEqual(set(value),{'schema','operation','phase','code'})
+                    self.assertEqual(value['schema'],'ci-build-failure-diagnostic/1')
+                    self.assertEqual(value['operation'],'producer-build')
+                    self.assertLessEqual(len(original_dumps(value,separators=(',',':')).encode())+1,512)
+            return status,emitted,final
+        def fail(error, phase='ledger'):
+            self.owner.BUILD_DIAGNOSTIC_PHASE=phase
+            raise error
+        class HostileRuntimeError(RuntimeError):
+            def __getattribute__(self,name):raise AssertionError('exception attributes forbidden')
+            def __str__(self):raise AssertionError('exception text forbidden')
+        class HostileString(str):
+            def __hash__(self):raise AssertionError('subclass membership forbidden')
+            def __eq__(self,other):raise AssertionError('subclass equality forbidden')
+        known=RuntimeError('installation_private_creation_contract')
+        for error,code in ((known,'installation_private_creation_contract'),
+            (RuntimeError('postgresql://private:secret@host/path'),'unknown'),
+            (RuntimeError('installation_not_reviewed'),'unknown'),
+            (RuntimeError('installation_private_creation_contract','private-extra'),'unknown'),
+            (RuntimeError(),'unknown'),
+            (RuntimeError(HostileString('installation_private_creation_contract')),'unknown'),
+            (HostileRuntimeError('installation_private_creation_contract'),'unknown'),
+            (ValueError('installation_private_creation_contract'),'unknown')):
+            status,emitted,final=terminal(lambda:fail(error))
+            self.assertEqual(status,1);self.assertEqual([row[0] for row in emitted],['stderr','stdout'])
+            self.assertEqual(emitted[0][1]['code'],code);self.assertEqual(emitted[0][1]['phase'],'ledger')
+            self.assertEqual(final['primary'],type(error).__name__);self.assertEqual(final['secondary'],[])
+            self.assertFalse(final['success']);self.assertNotIn('private:secret',json.dumps([row[1] for row in emitted]))
+        for phase in ('private-path',HostileString('ledger')):
+            status,emitted,final=terminal(lambda:fail(known,phase))
+            self.assertEqual(emitted[0][1]['phase'],'unknown')
+        for cut,secondary in (('stderr',['OSError']),('render',['ValueError']),('stdout',[])):
+            status,emitted,final=terminal(lambda:fail(known),print_failure=cut,render_failure=cut=='render')
+            self.assertEqual(status,1);self.assertEqual(final['primary'],'RuntimeError')
+            self.assertEqual(final['secondary'],secondary)
+            self.assertEqual(emitted[-1][0],'stdout')  # Still attempted after diagnostic failure.
+        def first_failure():
+            self.owner.SECONDARY.append({'phase':'attempt:source','code':'OSError'})
+            fail(known)
+        status,emitted,final=terminal(first_failure,print_failure='stderr')
+        self.assertEqual(final['primary'],'RuntimeError')
+        self.assertEqual(final['secondary'],[{'phase':'attempt:source','code':'OSError'},'OSError'])
+        self.assertEqual(emitted[0][1]['code'],'installation_private_creation_contract')
+        for cut in ('cancelled','poison','pending','lease'):
+            def unsettled():
+                if cut=='cancelled':self.owner.CANCELLED=signal.SIGTERM
+                elif cut=='poison':self.owner.POISON.append({'pending':True})
+                elif cut=='pending':self.owner.PENDING_OBJECTS.append(object())
+                else:self.owner.LEASES[123]=object()
+                return 0
+            status,emitted,final=terminal(unsettled,pending_expected=True)
+            self.assertEqual(status,1);self.assertFalse(final['success']);self.assertEqual(final['pending'],1)
+            self.assertEqual(len(emitted),1);self.assertIsNone(final['primary'])
+            self.assertEqual(final['cancelled'],signal.SIGTERM if cut=='cancelled' else None)
+        for cut in (None,'stdout'):
+            def success():
+                self.owner.BUILD_DIAGNOSTIC_PHASE='build-quality'
+                return 0
+            status,emitted,final=terminal(success,print_failure=cut)
+            self.assertEqual(status,0 if cut is None else 1)
+            self.assertEqual(len(emitted),1);self.assertIsNone(final['primary'])
+            self.assertTrue(final['success'])  # Existing pre-print snapshot is unchanged.
+        status,emitted,final=terminal(lambda:0)
+        self.assertEqual(status,0);self.assertEqual(len(emitted),1)
+
+        # Exercise real phase assignments up to each cut with all external work
+        # replaced; capture and Git/event bodies must never execute.
+        for phase in ('envelope','source-snapshot','source-identity','ledger','install-policy',
+                      'install-pre-capture','install-capture','install-post-capture','build-quality'):
+            with self.subTest(build_diagnostic_phase=phase),tempfile.TemporaryDirectory() as directory:
+                world=Path(directory);checkout=world/'checkout';base=world/'ci';producer=base/'evidence/producer'
+                for path in (checkout,base,base/'tmp',base/'home',base/'evidence',producer,producer/'metadata'):
+                    path.mkdir(mode=0o700)
+                ctx=types.SimpleNamespace(ROOT=checkout,tracked_files=mock.Mock(return_value=[]),
+                    take_snapshot=mock.Mock(return_value={'members':{}}),snapshot_errors=mock.Mock(return_value=[]))
+                with contextlib.ExitStack() as stack:
+                    stack.enter_context(mock.patch.object(self.owner,'BUILD',checkout))
+                    seams={}
+                    for name,value in (('stage_envelope',None),('source_identity',{}),('prepare_ledger',None),
+                        ('policy',self.policies),('producer_paths',(base,producer,producer/'metadata')),
+                        ('graph',{}),('observed_directory',{}),('write',None),('after_attempt',{}),('strict_cache',None)):
+                        seams[name]=stack.enter_context(mock.patch.object(self.owner,name,return_value=value))
+                    captured=stack.enter_context(mock.patch.object(self.owner,'owned_capture',side_effect=AssertionError('no child')))
+                    target={'envelope':'stage_envelope','source-identity':'source_identity','ledger':'prepare_ledger',
+                        'install-policy':'policy','install-pre-capture':'producer_paths','install-capture':'after_attempt',
+                        'install-post-capture':'strict_cache','build-quality':'policy'}.get(phase)
+                    if phase=='source-snapshot':ctx.tracked_files.side_effect=known
+                    else:seams[target].side_effect=known
+                    if phase=='build-quality':stack.enter_context(mock.patch.object(self.owner,'admit_installation',return_value={}))
+                    status,emitted,final=terminal(lambda:self.owner.produce_build(ctx))
+                    self.assertEqual(status,1);self.assertEqual(emitted[0][1]['phase'],phase)
+                    self.assertEqual(emitted[0][1]['code'],'installation_private_creation_contract')
+                    self.assertEqual(final['primary'],'RuntimeError');captured.assert_not_called()
         for name,raw in self.raw.items():self.assertLessEqual(len(raw),self.owner.record_limit(name))
         p,q,l,q_hash=self.policies
         self.assertNotIn('source_sha256',p);self.assertNotIn('profile_policy_sha256',p)

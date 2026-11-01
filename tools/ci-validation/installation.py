@@ -956,7 +956,9 @@ def tools(ctx):
 
 def admit_installation(ctx, role, common_identity):
     """Ordinary complete npm installation; no copying, pruning or projected inventory."""
+    build_diagnostic_phase('install-policy')
     entry(); p, q, l, q_hash = policy(ctx)
+    build_diagnostic_phase('install-pre-capture')
     base, producer, destination = producer_paths(ctx)
     prefix = 'BUILD' if role == 'build' else 'EVAL'
     role_root = BUILD if role == 'build' else EVAL
@@ -973,8 +975,10 @@ def admit_installation(ctx, role, common_identity):
         '--strict-ssl=true', '--fetch-retries=0', '--maxsockets=1', '--fetch-timeout=15000',
         '--cache=' + str(cache), '--userconfig=' + str(base / 'home/user.npmrc'), '--globalconfig=' + str(base / 'home/global.npmrc')]
     before_source=graph(role_root,'source');before_root=observed_directory(role_root)
+    build_diagnostic_phase('install-capture')
     outcome=after_attempt(lambda:owned_capture(ctx,role,raw_dir,actual,600,common_identity),
         lambda:attempt_finalization(ctx,role,before_source,None,before_root,None,installing=True))
+    build_diagnostic_phase('install-post-capture')
     strict_cache(base)
     source = graph(role_root, 'source'); installed = graph(role_root / 'node_modules', 'tools')
     closure_raw = read(role_root / 'fixtures/ci-evaluation-installation' / (prefix + '-CLOSURE.json'), 262144, False)
@@ -1060,9 +1064,11 @@ def prepare_ledger(ctx, role):
 
 
 def admitted_identity(ctx):
+    build_diagnostic_phase('source-snapshot')
     tracked = ctx.tracked_files()
     snap = ctx.take_snapshot(tracked, allow_dist=False)
     need(not ctx.snapshot_errors(snap), 'preinstallation_source')
+    build_diagnostic_phase('source-identity')
     return source_identity(ctx, snap['members']), snap
 
 
@@ -1172,10 +1178,15 @@ def quality_check(ctx, expected, *, both=False, bootstrap=False):
 
 
 def produce_build(ctx):
+    global BUILD_DIAGNOSTIC_PHASE
+    BUILD_DIAGNOSTIC_PHASE = 'envelope'
     stage_envelope('producer-build')
     entry();need(ctx.ROOT == BUILD, 'build_cwd')
-    common, snap = admitted_identity(ctx);prepare_ledger(ctx, 'build')
+    common, snap = admitted_identity(ctx)
+    build_diagnostic_phase('ledger')
+    prepare_ledger(ctx, 'build')
     installation = admit_installation(ctx, 'build', common)
+    build_diagnostic_phase('build-quality')
     p, q, l, q_hash = policy(ctx)
     base, producer, records = producer_paths(ctx)
     need(ctx.cmd_init('build') == 0, 'build_context_initialization')
@@ -1604,6 +1615,51 @@ PENDING_OBJECTS = []
 SECONDARY = []
 ATTEMPTS = []
 
+# Failure-only job-log labels: no admission, resource or cleanup authority.
+BUILD_DIAGNOSTIC_PHASE = None
+BUILD_DIAGNOSTIC_PHASES = frozenset(('envelope', 'source-snapshot', 'source-identity',
+    'ledger', 'install-policy', 'install-pre-capture', 'install-capture',
+    'install-post-capture', 'build-quality'))
+BUILD_DIAGNOSTIC_CODES = frozenset((
+    'installation_envelope_mask_policy', 'installation_envelope_python_inheritance',
+    'installation_cancelled', 'installation_cleanup_pending', 'installation_persisted_cleanup_pending',
+    'installation_build_cwd', 'installation_preinstallation_source', 'installation_authenticated_source',
+    'installation_record_shape', 'installation_git_identity', 'installation_run_identity',
+    'installation_repository', 'installation_source_identity', 'installation_identity_bound',
+    'installation_private_creation_contract', 'installation_role', 'installation_runner_temp',
+    'installation_role_temp', 'installation_exclusive_role_ledger', 'installation_ancestor_modules',
+    'installation_absolute_path', 'installation_leaf_owner_bound', 'installation_leaf_stability',
+    'installation_record_bound', 'installation_duplicate_key', 'installation_nonfinite',
+    'installation_noncanonical', 'installation_policy_profile', 'installation_logical_policy',
+    'installation_literal_install_policy', 'installation_literal_root_roles', 'installation_quality_policy',
+    'installation_integer', 'installation_physical_pin', 'installation_reference',
+    'installation_path', 'installation_configuration_population', 'installation_fresh_installation',
+    'installation_write_bound', 'installation_output_parent_owner', 'installation_output_nlink',
+    'installation_short_write', 'installation_unowned_close', 'installation_directory_private',
+    'installation_directory_owner', 'installation_graph_root_path', 'installation_graph_limit',
+    'installation_graph_parent_owner', 'installation_graph_owner', 'installation_graph_link_shape',
+    'installation_graph_writable', 'installation_graph_special_or_hardlink', 'installation_graph_edge_descriptor',
+    'installation_graph_directory_bound', 'installation_graph_file_bound', 'installation_graph_file_length',
+    'installation_graph_descriptor_or_edge_changed', 'installation_graph_parent_changed', 'installation_graph_record_bound'))
+
+
+def build_diagnostic_phase(phase):
+    global BUILD_DIAGNOSTIC_PHASE
+    if BUILD_DIAGNOSTIC_PHASE is not None:
+        BUILD_DIAGNOSTIC_PHASE = phase if type(phase) is str and phase in BUILD_DIAGNOSTIC_PHASES else 'unknown'
+
+
+def build_failure_diagnostic(error):
+    """Only exact builtin exception args matching authored literals may leave here."""
+    code = 'unknown'
+    if type(error) is RuntimeError:
+        args = error.args
+        if type(args) is tuple and len(args) == 1 and type(args[0]) is str and args[0] in BUILD_DIAGNOSTIC_CODES:
+            code = args[0]
+    phase = BUILD_DIAGNOSTIC_PHASE
+    return {'schema': 'ci-build-failure-diagnostic/1', 'operation': 'producer-build',
+            'phase': phase if type(phase) is str and phase in BUILD_DIAGNOSTIC_PHASES else 'unknown', 'code': code}
+
 
 def open_fd(path, directory=False):
     lease = Owned()
@@ -1626,7 +1682,8 @@ def close_fd(fd):
 def command(ctx, operation):
     """One command boundary, retaining primary/secondary and late cancellation."""
     import signal
-    global CANCELLED
+    global CANCELLED, BUILD_DIAGNOSTIC_PHASE
+    BUILD_DIAGNOSTIC_PHASE = None
     def cancelled(signum, frame):
         global CANCELLED
         if CANCELLED is None:
@@ -1645,6 +1702,15 @@ def command(ctx, operation):
         if POISON or PENDING_OBJECTS or LEASES:
             try:
                 persist_pending(ctx.ci_dir())
+            except BaseException as error:
+                secondary.append(type(error).__name__)
+        if primary is not None and BUILD_DIAGNOSTIC_PHASE is not None:
+            try:
+                import sys
+                diagnostic = json.dumps(build_failure_diagnostic(primary), ensure_ascii=True, separators=(',', ':'))
+                if len(diagnostic) + 1 > 512:
+                    raise RuntimeError('diagnostic_bound')
+                print(diagnostic, file=sys.stderr, flush=True)
             except BaseException as error:
                 secondary.append(type(error).__name__)
         result = {'schema': 'ci-role-command/1', 'success': primary is None and not secondary and answer == 0 and
