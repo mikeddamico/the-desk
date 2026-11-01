@@ -862,6 +862,472 @@ def guard(args):
     return 1 if fatal or rejected or main_proc.returncode != 0 else 0
 
 
+# Fixed restored-stage adapter. No caller-selected executable, path or deadline.
+STAGE_PHASES = ('PREP', 'BIND', 'GUARD', 'CHECK')
+STAGE_STREAM_CAP = 67108864
+STAGE_SIGNALS = (signal.SIGINT, signal.SIGTERM, signal.SIGHUP)
+STAGE_READER = None
+
+
+def stage_read(path, limit):
+    global STAGE_READER
+    if STAGE_READER is None:
+        import runpy
+        STAGE_READER = runpy.run_path(str(ROOT/'tools/ci-validation/installation.py'),run_name='stage_reader_definitions')['read']
+    return STAGE_READER(path,limit)
+
+
+def stage_record(path, value):
+    # Existing partial-retention json-sort-spaces-lf/1 encoding; no new recipe.
+    raw = (json.dumps(value,sort_keys=True)+'\n').encode()
+    if len(raw)>OUTPUT_LIMIT:raise RuntimeError('stage record bound')
+    write_private(path,raw,sync=True)
+
+
+def stage_argv(stage, phase):
+    if stage not in ('prerequisite', 'focused') or phase not in STAGE_PHASES:
+        raise RuntimeError('stage command map')
+    if phase == 'GUARD':
+        return ['/usr/bin/timeout', '--signal=TERM', '--kill-after=20',
+                '30' if stage == 'prerequisite' else '120', '/usr/bin/python3',
+                'test/support/p33-parity-supervisor.py', 'guard', stage]
+    return ['/usr/bin/python3', '-I', '-B', 'tools/ci-validation/ci.py',
+            {'PREP':'precheck', 'BIND':'fixture-binding', 'CHECK':'check'}[phase], stage]
+
+
+def stage_private(path):
+    info = path.lstat()
+    if (path.resolve(strict=True) != path or not stat_module.S_ISDIR(info.st_mode)
+            or info.st_uid != os.getuid() or stat_module.S_IMODE(info.st_mode) != 0o700):
+        raise RuntimeError('stage private directory')
+    return {'path':str(path), 'dev':info.st_dev, 'ino':info.st_ino, 'uid':info.st_uid, 'mode':0o700}
+
+
+def stage_umask():
+    # Read without changing the inherited mask; only add restriction bits.
+    def current():
+        with Path('/proc/self/status').open('rb') as stream:raw = stream.read(65537)
+        if len(raw)>65536:raise RuntimeError('stage umask read bound')
+        rows = [line.split() for line in raw.splitlines() if line.startswith(b'Umask:')]
+        if (len(rows)!=1 or len(rows[0])!=2 or rows[0][0]!=b'Umask:' or len(rows[0][1])!=4
+                or rows[0][1][:1]!=b'0' or any(c not in b'01234567' for c in rows[0][1])):
+            raise RuntimeError('stage umask record')
+        return int(rows[0][1],8)
+    observed = current()
+    if observed & ~0o077:raise RuntimeError('stage umask restriction')
+    os.umask(0o077)
+    if current()!=0o077:raise RuntimeError('stage umask effective')
+
+
+def stage_parent(expected, death_signal):
+    """Register parent death and corroborate both sides of pidfd acquisition."""
+    import select
+    if type(expected) is not dict or set(expected) != {'pid','start'} or expected['pid'] <= 1:
+        raise RuntimeError('stage parent identity')
+    if ctypes.CDLL(None,use_errno=True).prctl(1,death_signal,0,0,0) != 0:
+        raise RuntimeError('stage parent death registration')
+    fd = os.pidfd_open(expected['pid'])
+    try:
+        if (os.getppid() != expected['pid'] or stat(expected['pid'])['start'] != expected['start']
+                or select.select([fd],[],[],0)[0]):
+            raise RuntimeError('stage parent registration race')
+    except BaseException as primary:
+        try:os.close(fd)
+        except BaseException as secondary:
+            PRIVATE_WRITE_PENDING.append(fd);PRIVATE_WRITE_SECONDARY.append(type(secondary).__name__)
+        raise primary
+    return fd
+
+
+def stage_parent_live(expected, fd):
+    import select
+    return (os.getppid() == expected['pid'] and not select.select([fd],[],[],0)[0]
+            and stat(expected['pid'])['start'] == expected['start'])
+
+
+def stage_child(args):
+    """An execed bootstrap waits for authorization; Popen preexec_fn never waits."""
+    stage_argv(args.stage,args.phase)
+    if len(args.nonce) != 48 or any(c not in '0123456789abcdef' for c in args.nonce):
+        raise RuntimeError('stage nonce')
+    parent = {'pid':args.parent,'start':args.start}
+    parent_fd = stage_parent(parent,signal.SIGKILL)
+    link = socket.socket(fileno=args.link)
+    os.set_inheritable(args.link,False)
+    primary = None
+    try:
+        row = stat(os.getpid())
+        ready = {'nonce':args.nonce,'phase':args.phase,'stage':args.stage,
+                 'pid':row['pid'],'start':row['start'],'ppid':row['ppid']}
+        link.sendall((json.dumps(ready,separators=(',',':'))+'\n').encode())
+        grant = receive_line(link,4096,time.monotonic()+5)
+        if (type(grant) is not dict or type(grant.get('grant')) is not bool
+                or grant != {'nonce':args.nonce,'phase':args.phase,'stage':args.stage,'grant':True}):
+            raise RuntimeError('stage grant framing')
+        # EOF after one complete grant excludes duplicate/trailing authorization.
+        link.settimeout(.25)
+        if link.recv(1) != b'' or not stage_parent_live(parent,parent_fd):
+            raise RuntimeError('stage grant parent or trailing data')
+    except BaseException as error:primary = error
+    finally:
+        for resource in (link,parent_fd):
+            try:
+                if type(resource) is int:os.close(resource)
+                else:resource.close()
+            except BaseException as error:
+                if primary is None:primary = error
+                else:PRIVATE_WRITE_SECONDARY.append(type(error).__name__)
+    if primary is not None:raise primary
+    os.execve(stage_argv(args.stage,args.phase)[0],stage_argv(args.stage,args.phase),dict(os.environ))
+
+
+class StageOwner:
+    """Three fixed grants (or one CHECK), one waiter, one total monotonic budget."""
+    def __init__(self, stage, checking, started):
+        self.stage = stage; self.checking = checking
+        self.deadline = started + (90 if checking else 150 if stage == 'prerequisite' else 240)
+        self.final_deadline = self.deadline + 20
+        self.cancelled = False; self.failed = False; self.grant_committed = False
+        self.errors = []; self.pending = []; self.actions = []
+        self.identity = stat(os.getpid())
+        self.parent = {'pid':os.getppid(),'start':stat(os.getppid())['start']}
+        self.parent_fd = stage_parent(self.parent,signal.SIGTERM)
+        self.directory = None; self.base = None; self.root_identity = None
+
+    def barrier(self):
+        try:
+            live = stage_parent_live(self.parent,self.parent_fd)
+        except BaseException:
+            live = False
+        if INTERRUPTED or not live:
+            self.cancelled = True
+        if self.root_identity is not None and stage_private(ROOT)!=self.root_identity:self.failed = True
+        if (self.cancelled or self.failed or self.errors or self.pending or PRIVATE_WRITE_PENDING
+                or time.monotonic() >= self.deadline):
+            raise RuntimeError('stage launch barrier')
+
+    def close(self, value, label):
+        try:
+            if type(value) is int:os.close(value)
+            else:value.close()
+        except BaseException as error:
+            self.errors.append(label+':'+type(error).__name__)
+            self.pending.append(value)  # No retry or destructor-based release proof.
+
+    def grant(self, link, ready, direct, phase, nonce):
+        expected = {'nonce':nonce,'phase':phase,'stage':self.stage,
+                    'pid':direct['pid'],'start':direct['start'],'ppid':os.getpid()}
+        if type(ready) is not dict or ready != expected:
+            raise RuntimeError('stage ready identity')
+        mask = signal.pthread_sigmask(signal.SIG_BLOCK,STAGE_SIGNALS)
+        primary = None
+        try:
+            if set(signal.sigpending()) & set(STAGE_SIGNALS):self.cancelled = True
+            self.barrier()
+            # Linearization: a concurrently arriving masked signal belongs to an
+            # already-owned committed phase. Restoring the mask observes it next.
+            grant = {'nonce':nonce,'phase':phase,'stage':self.stage,'grant':True}
+            self.grant_committed = True
+            link.sendall((json.dumps(grant,separators=(',',':'))+'\n').encode())
+            link.shutdown(socket.SHUT_WR)
+        except BaseException as error:primary = error
+        finally:
+            try:signal.pthread_sigmask(signal.SIG_SETMASK,mask)
+            except BaseException as error:
+                self.errors.append('signal-mask-restore:'+type(error).__name__)
+                if primary is None:primary = error
+        if primary is not None:raise primary
+
+    def phase(self, phase, env, output=None):
+        self.barrier()
+        if self.actions and not self.actions[-1]['settled']:
+            raise RuntimeError('stage predecessor unsettled')
+        self.grant_committed = False
+        directory = self.directory/phase
+        directory.mkdir(mode=0o700)
+        proc = None; direct = None; primary = None; settlement = None; granted = False
+        launch = None; spawn_attempted = False
+        links = []; streams = {}; raw_files = {}; selector = None
+        observed = {'stdout':0,'stderr':0}; eof = {'stdout':False,'stderr':False}
+        hashes = {name:hashlib.sha256() for name in observed}
+        nonce = secrets.token_hex(24)
+        try:
+            selector = selectors.DefaultSelector()
+            for name in observed:
+                path = (output if output is not None else directory)/name
+                fd = os.open(path,os.O_WRONLY|os.O_CREAT|os.O_EXCL|os.O_NOFOLLOW,0o600)
+                try:raw_files[name] = os.fdopen(fd,'wb',buffering=0)
+                except BaseException:
+                    self.close(fd,name+'-open-close')
+                    raise
+            left,right = socket.socketpair();links = [left,right]
+            self.barrier()
+            argv = ['/usr/bin/python3','-I','-B',str(SELF),'stage-child','--stage',self.stage,
+                    '--phase',phase,'--link',str(right.fileno()),'--parent',str(os.getpid()),
+                    '--start',str(stat(os.getpid())['start']),'--nonce',nonce]
+            spawn_attempted = True
+            proc = subprocess.Popen(argv,cwd=ROOT,env=env,stdin=subprocess.DEVNULL,
+                    stdout=subprocess.PIPE,stderr=subprocess.PIPE,close_fds=True,
+                    pass_fds=(right.fileno(),),start_new_session=True)
+            self.close(right,'control-child-close');links.remove(right)
+            # Bootstrap may have been forked concurrently with cancellation, but
+            # no command can exec until identity is retained and GRANT is sent.
+            direct = identity(proc)
+            if direct['pgid'] != proc.pid or direct['sid'] != proc.pid:
+                raise RuntimeError('stage direct session')
+            launch = {'pid':proc.pid,'pgid':proc.pid,'identity':direct,'argv':stage_argv(self.stage,phase)}
+            stage_record(directory/'process.json',launch)
+            for name in observed:
+                streams[name] = getattr(proc,name)
+                os.set_blocking(streams[name].fileno(),False)
+                selector.register(streams[name],selectors.EVENT_READ,name)
+            self.barrier()
+            ready = receive_line(left,4096,min(self.deadline,time.monotonic()+5))
+            self.grant(left,ready,direct,phase,nonce);granted = True
+            self.close(left,'control-owner-close');links.remove(left)
+            while True:
+                self.barrier()
+                self.pump(selector,raw_files,observed,hashes,eof,.025)
+                # Reserve the leader through the last group signal; only settle
+                # consumes waits. Popen.poll()/wait() would violate this contract.
+                status = os.waitid(os.P_PID,proc.pid,os.WEXITED|os.WNOHANG|os.WNOWAIT)
+                if status is not None and all(eof.values()):break
+        except BaseException as error:
+            primary = error
+        finally:
+            if spawn_attempted and proc is None:self.pending.append('spawn-outcome-uncertain')
+            if proc is not None:
+                if direct is None:
+                    try:direct = identity(proc)
+                    except BaseException as error:self.errors.append('direct-identity:'+type(error).__name__)
+                if direct is not None:
+                    try:
+                        settlement = settle(proc,direct,budget=min(10,max(0,self.final_deadline-time.monotonic())))
+                        if not settlement['settled']:self.pending.append(proc)
+                    except BaseException as error:
+                        settlement = None
+                        self.errors.append('settlement:'+type(error).__name__);self.pending.append(proc)
+                        if primary is None:primary = error
+                else:self.pending.append(proc)
+                # After identity-safe settlement, drain the retained pipes to EOF.
+                until = min(self.final_deadline,time.monotonic()+1)
+                try:
+                    while selector is not None and not all(eof.values()) and time.monotonic()<until:
+                        self.pump(selector,raw_files,observed,hashes,eof,.025)
+                except BaseException as error:self.errors.append('drain:'+type(error).__name__)
+                for name in observed:
+                    pipe = getattr(proc,name,None)
+                    if pipe is not None:self.close(pipe,name+'-pipe-close')
+            for link in links:self.close(link,'control-close')
+            if selector is not None:self.close(selector,'selector-close')
+            for name,stream in raw_files.items():
+                try:os.fsync(stream.fileno())
+                except BaseException as error:self.errors.append(name+'-sync:'+type(error).__name__)
+                self.close(stream,name+'-file-close')
+        clean = bool(settlement and settlement['settled'] and all(eof.values()) and not self.errors and not self.pending)
+        value = {'phase':phase,'argv':stage_argv(self.stage,phase),'granted':self.grant_committed,'launch':launch,
+                 'exit':None if proc is None else proc.returncode,
+                 'primary':None if primary is None else type(primary).__name__,
+                 'settled':clean,'settlement':settlement,'cleanupErrors':list(self.errors),
+                 'streams':{name:{'eof':eof[name],'bytes':observed[name],'sha256':hashes[name].hexdigest()} for name in observed}}
+        self.actions.append(value)
+        self.failed = primary is not None or not clean or proc is None or proc.returncode != 0
+        try:stage_record(directory/'owner.json',value)
+        except BaseException as error:
+            self.failed = True;self.errors.append('phase-record:'+type(error).__name__)
+            if primary is None:primary = error
+        if primary is not None:raise primary
+        if not clean or proc.returncode != 0:raise RuntimeError('stage phase failure')
+        self.barrier()
+        return value
+
+    def pump(self, selector, files, observed, hashes, eof, delay):
+        for key,_ in selector.select(delay):
+            name = key.data
+            try:block = os.read(key.fileobj.fileno(),65536)
+            except BlockingIOError:continue
+            if not block:
+                eof[name] = True;selector.unregister(key.fileobj);continue
+            observed[name] += len(block)
+            if observed[name] > STAGE_STREAM_CAP:raise RuntimeError('stage stream bound')
+            if files[name].write(block) != len(block):raise RuntimeError('stage short capture')
+            hashes[name].update(block)
+
+
+def stage_attempts(base):
+    names = []
+    for runtime in (base/'tmp').glob('p33-*'):
+        stage_private(runtime)
+        for attempt in runtime.glob('attempt-*'):
+            stage_private(attempt);names.append(attempt.name)
+            if len(names)>16:raise RuntimeError('stage attempt bound')
+    return ''.join(name+'\n' for name in sorted(names)).encode()
+
+
+def stage_snapshot(path):
+    # Supplemental only, like the former ps command; no argv or cleanup claim.
+    evidence = DiscoveryEvidence();now = time.monotonic()
+    scan = DiscoveryScan(evidence,'snapshot',now,now+.25,now+.25,None,now)
+    rows = pid_table(scan,4096);bad = scan.finish()
+    raw = ''.join(f"{r['pid']} {r['ppid']} {r['pgid']} {r['state']} process\n" for r in rows.values()).encode()
+    write_private(path,raw,sync=True)
+    return 1 if bad else 0
+
+
+def stage_owner(stage, checking=False):
+    import resource
+    started = time.monotonic()  # Includes setup, every grant and normal settlement.
+    stage_argv(stage,'CHECK' if checking else 'PREP')
+    handlers();owner = None;primary = None;directory = None
+    try:
+        owner = StageOwner(stage,checking,started)
+        owner.barrier()
+        if (ROOT != Path('/tmp/e') or Path.cwd()!=ROOT or os.environ.get('GITHUB_ACTIONS')!='true'
+                or os.environ.get('ImageOS')!='ubuntu24' or os.environ.get('DESK_CI_PARTITION') not in ('writer','rest')):
+            raise RuntimeError('stage hosted role')
+        runner = Path(os.environ['RUNNER_TEMP']);role = Path(os.environ['DESK_CI_ROLE_TEMP'])
+        if (not runner.is_absolute() or runner.resolve()!=runner or str(runner)!=os.environ['RUNNER_TEMP']
+                or str(role)!=os.environ['DESK_CI_ROLE_TEMP'] or role!=runner/'evaluation' or role.resolve()!=role):raise RuntimeError('stage role route')
+        base = role/'ci';owner.base = base;owner.root_identity = stage_private(ROOT)
+        for path in (base,base/'tmp',base/'home',base/'evidence'):stage_private(path)
+        stage_umask()
+        candidate = base/'evidence'/('stage-check' if checking else 'stage-owner')/stage
+        # Parent is a closed two-stage namespace; its exact role parent is private.
+        namespace = candidate.parent
+        try:namespace.mkdir(mode=0o700)
+        except FileExistsError:stage_private(namespace)
+        candidate.mkdir(mode=0o700);directory = candidate;owner.directory = directory
+        resource.setrlimit(resource.RLIMIT_CORE,(0,0));resource.setrlimit(resource.RLIMIT_FSIZE,(STAGE_STREAM_CAP,STAGE_STREAM_CAP))
+        if (resource.getrlimit(resource.RLIMIT_CORE)!=(0,0)
+                or resource.getrlimit(resource.RLIMIT_FSIZE)!=(STAGE_STREAM_CAP,STAGE_STREAM_CAP)):
+            raise RuntimeError('stage resource limits')
+        prerequisite()  # Capability/subreaper only; real PREP and GUARD still run.
+        env = dict(os.environ);env.pop('TEST_DATABASE_URL',None)
+        if checking:
+            stage_previous_owner(base,stage)
+            owner.phase('CHECK',env)
+        else:
+            owner.phase('PREP',env)
+            owner.phase('BIND',env)
+            binding_raw = stage_read(directory/'BIND/stdout',8192)
+            binding = json.loads(binding_raw)
+            if (type(binding) is not dict or set(binding)!={'root','root_sha256'}
+                    or binding['root']!=str(base/'tmp/desk-connected-fixture105')
+                    or type(binding['root_sha256']) is not str or len(binding['root_sha256'])!=64
+                    or any(c not in '0123456789abcdef' for c in binding['root_sha256'])):
+                raise RuntimeError('stage binding wire')
+            output = base/'evidence'/stage;output.mkdir(mode=0o700)
+            write_private(output/'limits.txt',b'core 0 0\nfsize 67108864 67108864\n',sync=True)
+            write_private(output/'pre-attempts',stage_attempts(base),sync=True)
+            write_private(output/'started-utc',(time.strftime('%Y-%m-%dT%H:%M:%SZ',time.gmtime())+'\n').encode(),sync=True)
+            pre = stage_snapshot(output/'ps-pre.txt')
+            node = shutil.which('node')
+            if node is None:raise RuntimeError('stage Node missing')
+            guard_env = {name:os.environ[name] for name in ('RUNNER_TEMP','DESK_CI_ROLE_TEMP','DESK_CI_PARTITION',
+                         'GITHUB_SHA','GITHUB_REPOSITORY','GITHUB_RUN_ID','GITHUB_RUN_ATTEMPT')}
+            guard_env.update(PATH=str(Path(node).parent)+':/usr/bin:/bin',HOME=str(base/'home'),TMPDIR=str(base/'tmp'),
+                             LANG='C.UTF-8',LC_ALL='C.UTF-8',TZ='UTC',CI='true',DESK_FIXTURE105_BINDING=json.dumps(binding,separators=(',',':')))
+            if 'RUNNER_TRACKING_ID' in os.environ:guard_env['RUNNER_TRACKING_ID']=os.environ['RUNNER_TRACKING_ID']
+            guard_error = None
+            try:owner.phase('GUARD',guard_env,output)
+            except BaseException as error:guard_error = error
+            # Post records are attempted without replacing the phase primary.
+            post = 1
+            try:post = stage_snapshot(output/'ps-post.txt')
+            except BaseException as error:owner.errors.append('post-snapshot:'+type(error).__name__)
+            action = owner.actions[-1] if owner.actions and owner.actions[-1]['phase']=='GUARD' else None
+            records = [('ended-utc',lambda:(time.strftime('%Y-%m-%dT%H:%M:%SZ',time.gmtime())+'\n').encode()),
+                       ('post-attempts',lambda:stage_attempts(base)),
+                       ('snapshot-status.txt',lambda:f'ps-pre {pre}\nps-post {post}\n'.encode())]
+            if action is not None and type(action['exit']) is int:records.append(('exit',lambda:(str(action['exit'])+'\n').encode()))
+            for name,raw in records:
+                try:write_private(output/name,raw(),sync=True)
+                except BaseException as error:owner.errors.append(name+':'+type(error).__name__)
+            if guard_error is not None:raise guard_error
+        owner.barrier()
+        if stage_private(ROOT)!=owner.root_identity:raise RuntimeError('stage source root changed')
+    except BaseException as error:primary = error
+    finally:
+        if owner is not None:
+            return stage_finish(owner,primary,directory)
+    return 1
+
+
+def stage_finish(owner, primary, directory):
+    # This durable record is provisional: final process exit and fresh CHECK
+    # remain necessary. Keep parent monitoring live through all reporting.
+    result = {'stage':owner.stage,'checking':owner.checking,
+              'success':primary is None and not owner.failed and not owner.errors and not owner.pending and not owner.cancelled and not INTERRUPTED and not PRIVATE_WRITE_PENDING,
+              'primary':None if primary is None else type(primary).__name__,'cleanupErrors':owner.errors,
+              'cancelled':owner.cancelled or INTERRUPTED,'pending':len(owner.pending)+len(PRIVATE_WRITE_PENDING),
+              'parent':owner.parent,'identity':owner.identity,'root':owner.root_identity,'actions':owner.actions}
+    def failed(label,error):
+        nonlocal primary
+        owner.errors.append(label+':'+type(error).__name__)
+        if primary is None:primary = error
+        result['success']=False;result['primary']=type(primary).__name__
+    try:
+        if directory is not None:write_record(directory/'owner.json',result)
+    except BaseException as error:failed('terminal-record',error)
+    result['pending']=len(owner.pending)+len(PRIVATE_WRITE_PENDING)
+    try:print(json.dumps(result),file=sys.stderr,flush=True)
+    except BaseException as error:failed('terminal-print',error)
+    # One fresh decision after reporting, with the parent pidfd still open.
+    try:live = stage_parent_live(owner.parent,owner.parent_fd)
+    except BaseException as error:
+        live = False;failed('final-parent',error)
+    try:
+        if stage_private(ROOT)!=owner.root_identity:raise RuntimeError('stage final root changed')
+    except BaseException as error:failed('final-root',error)
+    owner.cancelled = owner.cancelled or INTERRUPTED or not live
+    if time.monotonic()>=owner.final_deadline:owner.errors.append('final-deadline')
+    success = (primary is None and not owner.failed and not owner.cancelled and not owner.errors
+               and not owner.pending and not PRIVATE_WRITE_PENDING)
+    owner.close(owner.parent_fd,'parent-pidfd-close')
+    # Close cannot authorize success; late errors/cancellation only revoke it.
+    if time.monotonic()>=owner.final_deadline and 'final-deadline' not in owner.errors:owner.errors.append('final-deadline')
+    result['pending']=len(owner.pending)+len(PRIVATE_WRITE_PENDING)
+    result['cancelled']=owner.cancelled or INTERRUPTED
+    result['success']=success and not owner.errors and not result['pending'] and not INTERRUPTED
+    if result['pending']:
+        quarantine(directory,'stage_owner_pending',result)
+    return 0 if result['success'] else 1
+
+
+def stage_previous_owner(base, stage):
+    directory = base/'evidence/stage-owner'/stage
+    value = json.loads(stage_read(directory/'owner.json',65536))
+    keys = {'stage','checking','success','primary','cleanupErrors','cancelled','pending','parent','identity','root','actions'}
+    if (type(value) is not dict or set(value)!=keys or value['stage']!=stage or value['checking'] is not False
+            or value['success'] is not True or value['primary'] is not None or value['cleanupErrors']!=[]
+            or value['cancelled'] is not False or type(value['pending']) is not int or value['pending']!=0
+            or value['root']!=stage_private(ROOT) or type(value['actions']) is not list
+            or [a['phase'] for a in value['actions']]!=['PREP','BIND','GUARD']):
+        raise RuntimeError('stage owner not settled')
+    for action in value['actions']:
+        phase = action['phase'];settlement = action['settlement']
+        if (set(action)!={'phase','argv','granted','launch','exit','primary','settled','settlement','cleanupErrors','streams'}
+                or type(action['exit']) is not int or action['exit']!=0 or action['primary'] is not None
+                or action['cleanupErrors']!=[] or action['settled'] is not True or action['granted'] is not True
+                or action['argv']!=stage_argv(stage,phase) or set(action['streams'])!={'stdout','stderr'}
+                or any(set(v)!={'eof','bytes','sha256'} or v['eof'] is not True for v in action['streams'].values())
+                or any(settlement.get(k) is not True for k in ('settled','directReaped','noChildren','complete'))
+                or settlement.get('errors')!=[] or settlement.get('residual')!=[]):
+            raise RuntimeError('stage phase not settled')
+        recorded = json.loads(stage_read(directory/phase/'owner.json',65536))
+        process = json.loads(stage_read(directory/phase/'process.json',65536))
+        if (recorded!=action or process!=action['launch'] or set(process)!={'pid','pgid','identity','argv'} or process['argv']!=action['argv']
+                or process['pid']!=process['pgid'] or process['identity']['pid']!=process['pid']
+                or process['identity']['pgid']!=process['pid'] or process['identity']['sid']!=process['pid']
+                or process['identity']['ppid']!=value['identity']['pid']):
+            raise RuntimeError('stage process identity')
+        for name,pin in action['streams'].items():
+            raw = stage_read((base/'evidence'/stage if phase=='GUARD' else directory/phase)/name,STAGE_STREAM_CAP)
+            if type(pin['bytes']) is not int or pin['bytes']!=len(raw) or pin['sha256']!=hashlib.sha256(raw).hexdigest():
+                raise RuntimeError('stage raw stream drift')
+    return value
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest='role', required=True)
@@ -876,7 +1342,17 @@ def main():
     o.add_argument('--mode', choices=['p33', 'complete', 'noncomplete'], required=True)
     c = sub.add_parser('control')
     c.add_argument('mode', choices=['complete', 'noncomplete'])
+    for name in ('stage-owner','stage-check'):
+        phase_owner = sub.add_parser(name)
+        phase_owner.add_argument('stage',choices=['prerequisite','focused'])
+    child = sub.add_parser('stage-child')
+    child.add_argument('--stage',choices=['prerequisite','focused'],required=True)
+    child.add_argument('--phase',choices=STAGE_PHASES,required=True)
+    for key in ('parent','start','link'):child.add_argument('--'+key,type=int,required=True)
+    child.add_argument('--nonce',required=True)
     args = parser.parse_args()
+    if args.role == 'stage-child':return stage_child(args)
+    if args.role in ('stage-owner','stage-check'):return stage_owner(args.stage,args.role=='stage-check')
     if args.role == 'control':
         return control(args.mode)
     if args.role == 'owner':

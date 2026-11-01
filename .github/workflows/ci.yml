@@ -416,35 +416,35 @@ jobs:
       - name: Guard P33 prerequisite
         if: ${{ success() && steps.init.outcome == 'success' && steps.semantic-identities.outcome == 'success' }}
         working-directory: /tmp/e
-        timeout-minutes: 1
-        env:
-          DESK_CI_ROLE_TEMP: ${{ runner.temp }}/evaluation
-        run: |
-          /bin/bash tools/ci-validation/run-stage.sh prerequisite
-      - name: Validate P33 prerequisite
-        if: ${{ success() && steps.init.outcome == 'success' && steps.semantic-identities.outcome == 'success' }}
-        working-directory: /tmp/e
-        timeout-minutes: 1
-        env:
-          DESK_CI_ROLE_TEMP: ${{ runner.temp }}/evaluation
-        run: |
-          /usr/bin/python3 -I -B tools/ci-validation/ci.py check prerequisite
-      - name: Guard P33 focused
-        if: ${{ success() && steps.init.outcome == 'success' && steps.semantic-identities.outcome == 'success' }}
-        working-directory: /tmp/e
         timeout-minutes: 3
         env:
           DESK_CI_ROLE_TEMP: ${{ runner.temp }}/evaluation
         run: |
-          /bin/bash tools/ci-validation/run-stage.sh focused
-      - name: Validate P33 focused
+          exec /bin/bash tools/ci-validation/run-stage.sh prerequisite
+      - name: Validate P33 prerequisite
         if: ${{ success() && steps.init.outcome == 'success' && steps.semantic-identities.outcome == 'success' }}
         working-directory: /tmp/e
-        timeout-minutes: 1
+        timeout-minutes: 2
         env:
           DESK_CI_ROLE_TEMP: ${{ runner.temp }}/evaluation
         run: |
-          /usr/bin/python3 -I -B tools/ci-validation/ci.py check focused
+          exec /usr/bin/python3 -I -B test/support/p33-parity-supervisor.py stage-check prerequisite
+      - name: Guard P33 focused
+        if: ${{ success() && steps.init.outcome == 'success' && steps.semantic-identities.outcome == 'success' }}
+        working-directory: /tmp/e
+        timeout-minutes: 5
+        env:
+          DESK_CI_ROLE_TEMP: ${{ runner.temp }}/evaluation
+        run: |
+          exec /bin/bash tools/ci-validation/run-stage.sh focused
+      - name: Validate P33 focused
+        if: ${{ success() && steps.init.outcome == 'success' && steps.semantic-identities.outcome == 'success' }}
+        working-directory: /tmp/e
+        timeout-minutes: 2
+        env:
+          DESK_CI_ROLE_TEMP: ${{ runner.temp }}/evaluation
+        run: |
+          exec /usr/bin/python3 -I -B test/support/p33-parity-supervisor.py stage-check focused
       - name: Collect controls evidence
         id: collect-controls
         if: ${{ always() && steps.init.outcome == 'success' }}

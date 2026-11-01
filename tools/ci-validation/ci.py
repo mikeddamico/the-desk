@@ -1896,6 +1896,33 @@ def fixture046_keep_runtime(keep, evidence, scope):
                 keep.problems['errors'].append('fixture046 runtime cleanup evidence is incomplete')
 
 
+def retain_stage_owner(keep, base, stage):
+    """Closed partial retention; presence is an attempt, never a stage verdict."""
+    present = False
+    if stage not in ('prerequisite','focused'):return present
+    for namespace,phases in (('stage-owner',('PREP','BIND','GUARD')),('stage-check',('CHECK',))):
+        directory = base/'evidence'/namespace/stage
+        if not os.path.lexists(directory):continue
+        present = True
+        try:
+            fixture_identity(directory.parent);fixture_identity(directory)
+            if set(os.listdir(directory))-({'owner.json','fatal.json'}|set(phases)):raise RuntimeError('stage owner population')
+            keep.copy(directory/'owner.json',Path(namespace)/stage/'owner.json',JSON_LIMIT,required=True)
+            keep.copy(directory/'fatal.json',Path(namespace)/stage/'fatal.json',JSON_LIMIT,required=False)
+            for phase in phases:
+                source = directory/phase
+                if not os.path.lexists(source):continue
+                fixture_identity(source)
+                allowed = {'process.json','owner.json'} | ({'stdout','stderr'} if phase!='GUARD' else set())
+                if set(os.listdir(source))-allowed:raise RuntimeError('stage phase population')
+                for name in sorted(allowed):
+                    keep.copy(source/name,Path(namespace)/stage/phase/name,
+                              COPY_LIMIT if name in ('stdout','stderr') else JSON_LIMIT,required=True)
+        except Exception as error:
+            keep.problems['errors'].append(namespace+'/'+stage+':'+type(error).__name__)
+    return present
+
+
 def cmd_collect(scope):
     stages = SCOPES[scope]
     base = ci_dir()
@@ -1919,7 +1946,8 @@ def cmd_collect(scope):
         keep.copy(ev / 'partition.json', Path('partition.json'), JSON_LIMIT, required=True)
     verdicts, successful, not_attempted = {}, {}, []
     for stage in stages:
-        attempted = (ev / stage).exists() or (ev / ('verdict-%s.json' % stage)).exists()
+        owner_attempted = retain_stage_owner(keep,base,stage)
+        attempted = owner_attempted or (ev / stage).exists() or (ev / ('verdict-%s.json' % stage)).exists()
         if not attempted:
             verdicts[stage] = None
             not_attempted.append(stage)
@@ -2300,6 +2328,8 @@ def main(argv=None):
         else: result = cmd_final()
         owner.outer(sys.modules[__name__], checkpoint if checkpoint in ('EF','EC') else 'E1')
         return result
+    if args.command == 'fixture-binding':
+        return installation_owner().command(sys.modules[__name__], consume, binding_stdout=True)
     return installation_owner().command(sys.modules[__name__], consume)
 
 

@@ -1091,9 +1091,10 @@ def _evaluation_workflow(test, text):
         test.assertIn('image: postgres:17',job)
         test.assertIn('node-version: 24.21.0',job)
         test.assertIn('npm install --global npm@11.19.0 --ignore-scripts',job)
+        check_prefix='p33-parity-supervisor.py stage-check' if label=='rest' else 'ci.py check'
         stages=['id: build-layout','run-stage.sh producer-build','id: eval-layout','run-stage.sh evaluation-init',
                 'run-stage.sh bind-build','ci.py identity-witness','ci.py dbprobe','run-stage.sh prerequisite',
-                'ci.py check prerequisite','run-stage.sh focused','ci.py check focused','id: collect-controls','id: upload-controls']
+                check_prefix+' prerequisite','run-stage.sh focused',check_prefix+' focused','id: collect-controls','id: upload-controls']
         for name in stages:test.assertIn(name,job)
         offsets=[job.index(name) for name in stages];test.assertEqual(offsets,sorted(offsets))
         steps={}
@@ -1178,10 +1179,16 @@ def _evaluation_workflow(test, text):
             test.assertNotIn('*',steps['upload-traversal'])
             # success() includes every preceding guard/check and its exit status;
             # source order above makes both validated predecessors mandatory.
-            for command in ('ci.py dbprobe','run-stage.sh prerequisite','ci.py check prerequisite','run-stage.sh focused','ci.py check focused'):
+            for command in ('ci.py dbprobe','run-stage.sh prerequisite',check_prefix+' prerequisite','run-stage.sh focused',check_prefix+' focused'):
                 command_blocks=[block for block in job.split('      - ')[1:] if command in block]
                 test.assertEqual(len(command_blocks),1)
                 assert_condition(command_blocks[0],"success() && steps.init.outcome == 'success' && steps.semantic-identities.outcome == 'success'")
+            for selector,minutes,execution in (('ci.py dbprobe',1,None),
+                    ('run-stage.sh prerequisite',3,'exec /bin/bash'),('run-stage.sh focused',5,'exec /bin/bash'),
+                    (check_prefix+' prerequisite',2,'exec /usr/bin/python3'),(check_prefix+' focused',2,'exec /usr/bin/python3')):
+                block=next(b for b in job.split('      - ')[1:] if selector in b)
+                test.assertEqual([line.strip() for line in block.splitlines() if line.startswith('        timeout-minutes:')],['timeout-minutes: '+str(minutes)])
+                if execution is not None:test.assertIn(execution,block)
             assert_condition(steps['upload-native'],"always() && steps.init.outcome == 'success' && steps.command-postgres.outcome != 'skipped'")
             test.assertIn('--signal=TERM --kill-after=20s 1200s',native)
             test.assertEqual(native.count('node --import tsx test/support/command-postgres-hosted.ts fixture105-unknown'),1)
@@ -1864,7 +1871,7 @@ class WorkflowShape(unittest.TestCase):
             self.assertEqual(native.count('DESK_CI_ROLE_TEMP: temporary,'),2)
             self.assertNotIn('RUNNER_TEMP: temporary,',native)
             _evaluation_workflow(self,raw)
-            self.assertEqual(hashlib.sha256(raw.encode()).hexdigest(),'d41886f063c27baee76646dfc854b3f9db33894617d2a2f495bd477b8190ce65')
+            self.assertEqual(hashlib.sha256(raw.encode()).hexdigest(),'d0736eae6789406d5a59a4cec67edea37962bd3302e20b72b6bea7c7cecd4534')
             held_media='if: ${{ false }} # Representative-first route; no media preparation.'
             self.assertEqual(raw.count(held_media),1)
             for condition in ('if: ${{ false }}','if: \t${{\tfalse\t}}\t# held media'):
@@ -1911,8 +1918,8 @@ class WorkflowShape(unittest.TestCase):
             # Every native prerequisite remains success-gated; retention must
             # remain available after failed checks or an attempted native child.
             prefix,rest=raw.split('  verify-rest:\n',1)
-            for selector in ('ci.py dbprobe','run-stage.sh prerequisite','ci.py check prerequisite',
-                             'run-stage.sh focused','ci.py check focused','id: command-postgres',
+            for selector in ('ci.py dbprobe','run-stage.sh prerequisite','p33-parity-supervisor.py stage-check prerequisite',
+                             'run-stage.sh focused','p33-parity-supervisor.py stage-check focused','id: command-postgres',
                              'id: collect-controls','id: upload-controls','id: upload-native'):
                 blocks=rest.split('      - ')
                 matches=[i for i,block in enumerate(blocks) if selector in block]
@@ -1932,9 +1939,20 @@ class WorkflowShape(unittest.TestCase):
                     changed=list(blocks);changed[index]=block.replace(condition,mutated,1)
                     with self.subTest(native_gate=selector,mutation=mutated),self.assertRaises(AssertionError):
                         _evaluation_workflow(self,prefix+'  verify-rest:\n'+'      - '.join(changed))
+            for selector,minutes in (('run-stage.sh prerequisite',3),('run-stage.sh focused',5),
+                    ('p33-parity-supervisor.py stage-check prerequisite',2),('p33-parity-supervisor.py stage-check focused',2),('ci.py dbprobe',1)):
+                blocks=rest.split('      - ');index=next(i for i,b in enumerate(blocks) if selector in b)
+                for new_limit in (minutes-1,minutes+1):
+                    changed=list(blocks);changed[index]=changed[index].replace('timeout-minutes: '+str(minutes),'timeout-minutes: '+str(new_limit))
+                    with self.subTest(stage_budget=selector,changed=new_limit),self.assertRaises(AssertionError):
+                        _evaluation_workflow(self,prefix+'  verify-rest:\n'+'      - '.join(changed))
+                if selector!='ci.py dbprobe':
+                    changed=list(blocks);changed[index]=changed[index].replace('exec /','/')
+                    with self.subTest(stage_exec=selector),self.assertRaises(AssertionError):
+                        _evaluation_workflow(self,prefix+'  verify-rest:\n'+'      - '.join(changed))
             for left,right in (('ci.py dbprobe','run-stage.sh prerequisite'),
-                               ('ci.py check prerequisite','run-stage.sh focused'),
-                               ('ci.py check focused','id: collect-controls')):
+                               ('p33-parity-supervisor.py stage-check prerequisite','run-stage.sh focused'),
+                               ('p33-parity-supervisor.py stage-check focused','id: collect-controls')):
                 blocks=rest.split('      - ')
                 first=next(i for i,block in enumerate(blocks) if left in block)
                 second=next(i for i,block in enumerate(blocks) if right in block)

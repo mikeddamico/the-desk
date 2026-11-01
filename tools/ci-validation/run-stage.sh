@@ -63,6 +63,10 @@ case "$STAGE" in
     exit $?
     ;;
 esac
+# Restored stages are owned before PREP; the held aggregate keeps its legacy route.
+case "$STAGE" in
+  prerequisite|focused) exec /usr/bin/python3 -I -B test/support/p33-parity-supervisor.py stage-owner "$STAGE" ;;
+esac
 umask 077 # Existing legacy stage envelope only; new producer routes returned above.
 case "$STAGE" in
   prerequisite) CEILING=30 ;;

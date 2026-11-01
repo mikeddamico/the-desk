@@ -968,6 +968,275 @@ class EvaluationProvenance(unittest.TestCase):
                     self.assertEqual(ctx.ROOT,original)
                     self.assertEqual(seen,[('EF',self.owner.EVAL,str(runner),str(runner/'evaluation'))]*(1 if failure else 2))
 
+        # Fixed-stage owner controls: definitions only; all launches/signals and
+        # waits are modeled. Real private capture files/pipes exercise EOF/close.
+        import signal,select
+        subject=runpy.run_path(str(ci.ROOT/'test/support/p33-parity-supervisor.py'),run_name='stage_owner_controls')
+        cls=subject['StageOwner'];ns=cls.barrier.__globals__
+        routed=(ci.ROOT/'tools/ci-validation/run-stage.sh').read_text()
+        self.assertEqual(routed.count('prerequisite|focused) exec /usr/bin/python3 -I -B test/support/p33-parity-supervisor.py stage-owner "$STAGE"'),1)
+        self.assertLess(routed.index('stage-owner "$STAGE"'),routed.index('precheck "$STAGE"'))
+        for stage,seconds in (('prerequisite','30'),('focused','120')):
+            self.assertEqual(subject['stage_argv'](stage,'GUARD'),['/usr/bin/timeout','--signal=TERM','--kill-after=20',seconds,
+                '/usr/bin/python3','test/support/p33-parity-supervisor.py','guard',stage])
+            for phase,command in (('PREP','precheck'),('BIND','fixture-binding'),('CHECK','check')):
+                self.assertEqual(subject['stage_argv'](stage,phase),['/usr/bin/python3','-I','-B','tools/ci-validation/ci.py',command,stage])
+        for stage,phase in (('all','GUARD'),('focused','arbitrary'),('fixture105-unknown','GUARD')):
+            with self.assertRaises(RuntimeError):subject['stage_argv'](stage,phase)
+        def modeled_owner(directory=None):
+            o=object.__new__(cls);o.stage='prerequisite';o.checking=False;o.deadline=10**12;o.final_deadline=10**12+20
+            o.cancelled=False;o.failed=False;o.grant_committed=False;o.errors=[];o.pending=[];o.actions=[]
+            o.parent={'pid':44,'start':88};o.parent_fd=999;o.root_identity=None;o.directory=directory
+            return o
+        direct={'pid':77,'start':99,'ppid':os.getpid(),'pgid':77,'sid':77,'state':'S'}
+        nonce='a'*48
+        ready={'nonce':nonce,'phase':'PREP','stage':'prerequisite','pid':77,'start':99,'ppid':os.getpid()}
+        for cut in ('success','cancelled','parent-loss','failed','pending','ready','pending-signal','committed-cancel'):
+            o=modeled_owner();link=mock.Mock()
+            def send(raw):
+                if cut=='committed-cancel':ns['INTERRUPTED']=True
+            link.sendall.side_effect=send
+            with mock.patch.dict(ns,INTERRUPTED=False,PRIVATE_WRITE_PENDING=[]), \
+                 mock.patch.dict(ns,stage_parent_live=mock.Mock(return_value=cut!='parent-loss')), \
+                 mock.patch.object(signal,'pthread_sigmask',return_value=set()), \
+                 mock.patch.object(signal,'sigpending',return_value={signal.SIGTERM} if cut=='pending-signal' else set()):
+                if cut=='cancelled':o.cancelled=True
+                if cut=='failed':o.failed=True
+                if cut=='pending':o.pending.append(object())
+                offered=dict(ready,pid=78) if cut=='ready' else ready
+                if cut in ('success','committed-cancel'):
+                    o.grant(link,offered,direct,'PREP',nonce);self.assertTrue(o.grant_committed)
+                    self.assertEqual(json.loads(link.sendall.call_args.args[0]),{'nonce':nonce,'phase':'PREP','stage':'prerequisite','grant':True})
+                    link.shutdown.assert_called_once_with(socket.SHUT_WR)
+                    if cut=='committed-cancel':
+                        with self.assertRaises(RuntimeError):o.barrier()
+                        self.assertTrue(o.cancelled)
+                else:
+                    with self.assertRaises(RuntimeError):o.grant(link,offered,direct,'PREP',nonce)
+                    link.sendall.assert_not_called();self.assertFalse(o.grant_committed)
+        for send_fault in (False,True):
+            o=modeled_owner();link=mock.Mock()
+            if send_fault:link.sendall.side_effect=ValueError('grant-primary')
+            with mock.patch.dict(ns,INTERRUPTED=False,PRIVATE_WRITE_PENDING=[],stage_parent_live=lambda *a:True), \
+                 mock.patch.object(signal,'pthread_sigmask',side_effect=[set(),OSError('restore-secondary')]), \
+                 mock.patch.object(signal,'sigpending',return_value=set()):
+                with self.assertRaises(ValueError if send_fault else OSError) as failure:o.grant(link,ready,direct,'PREP',nonce)
+                self.assertEqual(str(failure.exception),'grant-primary' if send_fault else 'restore-secondary')
+                self.assertTrue(o.grant_committed);self.assertEqual(o.errors,['signal-mask-restore:OSError'])
+                with self.assertRaises(RuntimeError):o.barrier()
+        # Inherited restrictions cannot be loosened; no real process mask changes.
+        for inherited in ('0022','0077','0177','0777'):
+            reads=[io.BytesIO(('Umask:\t'+inherited+'\n').encode()),io.BytesIO(b'Umask:\t0077\n')]
+            with mock.patch.object(Path,'open',side_effect=reads),mock.patch.object(os,'umask') as change:
+                if inherited in ('0022','0077'):
+                    subject['stage_umask']();change.assert_called_once_with(0o077)
+                else:
+                    with self.assertRaisesRegex(RuntimeError,'restriction'):subject['stage_umask']()
+                    change.assert_not_called()
+        with mock.patch.object(Path,'open',side_effect=[io.BytesIO(b'Umask:\t0022\n'),io.BytesIO(b'Umask:\t0022\n')]),mock.patch.object(os,'umask'):
+            with self.assertRaisesRegex(RuntimeError,'effective'):subject['stage_umask']()
+        # Final status rechecks after reporting while the parent pidfd is live.
+        # Durable snapshots are deliberately not rewritten or treated as exit0.
+        for cut in ('success','write','print','close','deadline','close-deadline','cancel','close-cancel','parent-loss','parent-error','root-change','root-refusal','primary-and-root','primary-and-print'):
+            o=modeled_owner();o.identity={'pid':77};clock=[1.0];o.final_deadline=10.0;events=[];snapshots=[]
+            primary=ValueError('first-primary') if cut in ('primary-and-print','primary-and-root') else None
+            def writing(path,value):
+                events.append('write');snapshots.append(copy.deepcopy(value))
+                if cut=='write':raise OSError('write-secondary')
+            def printing(*args,**kwargs):
+                events.append('print')
+                if cut in ('print','primary-and-print'):raise OSError('print-secondary')
+                if cut=='deadline':clock[0]=11.0
+                if cut=='cancel':ns['INTERRUPTED']=True
+            def living(*args):
+                events.append('parent')
+                if cut=='parent-error':raise OSError('parent-secondary')
+                return cut!='parent-loss'
+            def root_check(path):
+                events.append('root');self.assertEqual(path,ns['ROOT'])
+                if cut in ('root-refusal','primary-and-root'):raise OSError('root-secondary')
+                return {'changed':True} if cut=='root-change' else o.root_identity
+            def closing(fd):
+                events.append('close');self.assertEqual(fd,999)
+                if cut=='close':raise OSError('close-secondary')
+                if cut=='close-deadline':clock[0]=11.0
+                if cut=='close-cancel':ns['INTERRUPTED']=True
+            with mock.patch.dict(ns,INTERRUPTED=False,PRIVATE_WRITE_PENDING=[],write_record=writing,print=printing,
+                                 stage_parent_live=living,stage_private=root_check,quarantine=mock.Mock()) as patched, \
+                 mock.patch.object(ns['time'],'monotonic',side_effect=lambda:clock[0]),mock.patch.object(os,'close',side_effect=closing):
+                code=subject['stage_finish'](o,primary,Path('/modeled-only'))
+                self.assertEqual(code,0 if cut=='success' else 1)
+                self.assertEqual(events,['write','print','parent','root','close'])
+                self.assertEqual(len(snapshots),1)
+                if cut=='primary-and-print':
+                    self.assertEqual(snapshots[0]['primary'],'ValueError');self.assertEqual(o.errors,['terminal-print:OSError'])
+                if cut in ('root-change','root-refusal','primary-and-root'):
+                    self.assertEqual(o.errors,['final-root:'+('RuntimeError' if cut=='root-change' else 'OSError')])
+                    if cut=='primary-and-root':self.assertEqual(snapshots[0]['primary'],'ValueError')
+                if cut=='close':self.assertTrue(o.pending);ns['quarantine'].assert_called_once()
+                else:ns['quarantine'].assert_not_called()
+                if cut in ('deadline','close-deadline'):self.assertIn('final-deadline',o.errors)
+                if cut in ('cancel','parent-loss','parent-error'):self.assertTrue(o.cancelled)
+        # Parent registration fails closed across death/reuse/pidfd readiness.
+        for cut in ('success','reparent','recycle','exited','close'):
+            close_fault=OSError('close') if cut=='close' else None
+            with mock.patch.object(ns['ctypes'],'CDLL',return_value=types.SimpleNamespace(prctl=lambda *a:0)), \
+                 mock.patch.object(os,'pidfd_open',return_value=999),mock.patch.object(os,'getppid',return_value=45 if cut in ('reparent','close') else 44), \
+                 mock.patch.dict(ns,stat=lambda pid:{'start':89 if cut=='recycle' else 88},PRIVATE_WRITE_PENDING=[],PRIVATE_WRITE_SECONDARY=[]), \
+                 mock.patch.object(select,'select',return_value=([999] if cut=='exited' else [],[],[])), \
+                 mock.patch.object(os,'close',side_effect=close_fault) as close:
+                if cut=='success':self.assertEqual(subject['stage_parent']({'pid':44,'start':88},signal.SIGTERM),999);close.assert_not_called()
+                else:
+                    with self.assertRaisesRegex(RuntimeError,'registration race'):subject['stage_parent']({'pid':44,'start':88},signal.SIGTERM)
+                    close.assert_called_once_with(999)
+                    if cut=='close':self.assertEqual(ns['PRIVATE_WRITE_PENDING'],[999])
+        # The child cannot exec on malformed/duplicate/foreign grant, EOF, lost
+        # parent or descriptor-close uncertainty. No real descriptor is changed.
+        grant={'nonce':nonce,'phase':'PREP','stage':'prerequisite','grant':True}
+        for cut in ('success','foreign','extra','numeric-grant','eof','trailing','parent-loss','close'):
+            link=mock.Mock();link.recv.return_value=b'x' if cut=='trailing' else b''
+            if cut=='close':link.close.side_effect=OSError('close')
+            offered=dict(grant,nonce='b'*48) if cut=='foreign' else dict(grant,extra=True) if cut=='extra' else dict(grant,grant=1) if cut=='numeric-grant' else grant
+            args=types.SimpleNamespace(stage='prerequisite',phase='PREP',nonce=nonce,parent=44,start=88,link=999)
+            with mock.patch.dict(ns,stage_parent=mock.Mock(return_value=998),stage_parent_live=mock.Mock(return_value=cut!='parent-loss'),
+                                 stat=lambda pid:dict(direct,pid=pid),receive_line=mock.Mock(side_effect=RuntimeError('transport EOF') if cut=='eof' else None,return_value=offered)), \
+                 mock.patch.object(socket,'socket',return_value=link),mock.patch.object(os,'set_inheritable'), \
+                 mock.patch.object(os,'close') as close,mock.patch.object(os,'execve') as execute:
+                if cut=='success':subject['stage_child'](args);execute.assert_called_once()
+                else:
+                    with self.assertRaises((RuntimeError,OSError)):subject['stage_child'](args)
+                    execute.assert_not_called()
+                close.assert_called_once_with(998);link.close.assert_called_once()
+        # PPID closure includes GNU-timeout-like and P33-like separate sessions
+        # plus a subreaper-adopted orphan. Enumeration alone grants no signal.
+        rows={77:dict(direct,ppid=44),78:dict(direct,pid=78,ppid=77,pgid=78,sid=78,start=100),
+              79:dict(direct,pid=79,ppid=78,pgid=79,sid=79,start=101),80:dict(direct,pid=80,ppid=44,pgid=80,sid=80,start=102)}
+        with mock.patch.object(os,'getpid',return_value=44),mock.patch.dict(ns,pid_table=lambda *a:rows,stat=lambda pid:rows[pid]):
+            found,incomplete=subject['owned'](direct=rows[77]);self.assertFalse(incomplete);self.assertEqual({v['pid'] for v in found},set(rows))
+            with mock.patch.object(os,'pidfd_open',side_effect=lambda pid:pid+1000),mock.patch.object(os,'close') as close, \
+                 mock.patch.object(signal,'pidfd_send_signal') as send:
+                self.assertEqual(subject['signal_rows'](found,signal.SIGTERM,ns['time'].monotonic()+1),set())
+                self.assertEqual({x.args[0] for x in send.call_args_list},{pid+1000 for pid in rows});self.assertEqual(close.call_count,4)
+            with mock.patch.dict(ns,stat=lambda pid:dict(rows[pid],start=999)):
+                _,incomplete=subject['owned'](direct=rows[77]);self.assertTrue(incomplete)
+        clean={'settled':True,'directReaped':True,'noChildren':True,'complete':True,'reaped':[],
+               'residual':[],'errors':[],'discoveryDetails':{}}
+        for cut in ('success','spawn','cancel-before-grant','cancel-after-grant','wait','settlement','settlement-fault','record','close','eof'):
+            with tempfile.TemporaryDirectory() as directory:
+                o=modeled_owner(Path(directory));pipes=[];links=[mock.Mock(),mock.Mock()]
+                links[1].fileno.return_value=987
+                if cut=='close':links[0].close.side_effect=OSError('close')
+                def spawned(*args,**kwargs):
+                    if cut=='spawn':raise ValueError('first-primary')
+                    streams=[]
+                    for _ in range(2):
+                        read_fd,write_fd=os.pipe();os.close(write_fd);stream=os.fdopen(read_fd,'rb',buffering=0);streams.append(stream);pipes.append(stream)
+                    return types.SimpleNamespace(pid=77,stdout=streams[0],stderr=streams[1],returncode=None)
+                def receiving(*args):
+                    if cut=='cancel-before-grant':ns['INTERRUPTED']=True
+                    return ready
+                def sending(raw):
+                    if cut=='cancel-after-grant':ns['INTERRUPTED']=True
+                links[0].sendall.side_effect=sending
+                def settling(proc,identity,budget):
+                    if cut=='settlement-fault':raise OSError('secondary-settlement')
+                    proc.returncode=0
+                    return dict(clean,settled=False,complete=False,errors=['discovery_incomplete']) if cut=='settlement' else dict(clean)
+                real_record=ns['stage_record']
+                def recording(path,value,*args):
+                    if cut=='record' and path.name=='owner.json':raise OSError('record-secondary')
+                    return real_record(path,value,*args)
+                with contextlib.ExitStack() as stack:
+                    stack.enter_context(mock.patch.dict(ns,INTERRUPTED=False,PRIVATE_WRITE_PENDING=[],PRIVATE_WRITE_SECONDARY=[],
+                        stage_parent_live=lambda *a:True,identity=lambda proc:direct,receive_line=receiving,settle=settling,stage_record=recording))
+                    stack.enter_context(mock.patch.object(ns['secrets'],'token_hex',return_value=nonce))
+                    popen=stack.enter_context(mock.patch.object(subprocess,'Popen',side_effect=spawned))
+                    stack.enter_context(mock.patch.object(socket,'socketpair',return_value=tuple(links)))
+                    stack.enter_context(mock.patch.object(signal,'pthread_sigmask',return_value=set()))
+                    stack.enter_context(mock.patch.object(signal,'sigpending',return_value=set()))
+                    stack.enter_context(mock.patch.object(os,'waitid',side_effect=ValueError('first-primary') if cut in ('wait','record','settlement-fault') else None,return_value=object()))
+                    if cut=='eof':
+                        clock=iter(range(10000));stack.enter_context(mock.patch.object(ns['time'],'monotonic',side_effect=lambda:next(clock)))
+                        o.deadline=10**12;o.final_deadline=10**12+20
+                        o.barrier=mock.Mock(side_effect=[None,None,None,None,None,RuntimeError('EOF-primary')])
+                        o.pump=mock.Mock()  # No EOF can be asserted from empty callbacks.
+                    try:
+                        if cut=='success':self.assertEqual(o.phase('PREP',{} )['exit'],0)
+                        else:
+                            with self.assertRaises((RuntimeError,ValueError,OSError)) as failure:o.phase('PREP',{})
+                            if cut in ('spawn','wait','record','settlement-fault'):self.assertEqual(str(failure.exception),'first-primary')
+                        self.assertEqual(popen.call_count,1)
+                        if cut!='record':self.assertTrue((Path(directory)/'PREP/owner.json').is_file())
+                        if cut=='cancel-before-grant':links[0].sendall.assert_not_called();self.assertFalse(o.grant_committed)
+                        if cut=='cancel-after-grant':self.assertTrue(o.grant_committed)
+                        if cut=='eof':self.assertFalse(o.actions[-1]['settled']);self.assertFalse(o.actions[-1]['streams']['stdout']['eof'])
+                        if cut in ('settlement','settlement-fault','close'):self.assertTrue(o.pending)
+                        if cut!='success':
+                            self.assertTrue(o.failed)
+                            # Even a cleaned-up, exit0 committed child cannot
+                            # authorize BIND after cancellation or another fault.
+                            o.barrier=types.MethodType(cls.barrier,o)
+                            with self.assertRaises(RuntimeError):o.barrier()
+                    finally:
+                        for pipe in pipes:
+                            if not pipe.closed:pipe.close()
+        # CHECK consumes all three settled phase records and their actual raw
+        # bytes; no success flag, substituted identity or missing EOF can suffice.
+        for cut in ('success','failed','cancelled','pending','phase-order','argv','identity','eof','settlement','raw','phase-record','process-record'):
+            with tempfile.TemporaryDirectory() as directory:
+                base=Path(directory);slot=base/'evidence/stage-owner/prerequisite';slot.mkdir(parents=True,mode=0o700)
+                output=base/'evidence/prerequisite';output.mkdir(mode=0o700)
+                root_identity={'path':'fixed-model-root','dev':1,'ino':2,'uid':os.getuid(),'mode':0o700}
+                actions=[]
+                for phase in ('PREP','BIND','GUARD'):
+                    folder=slot/phase;folder.mkdir(mode=0o700)
+                    argv=subject['stage_argv']('prerequisite',phase)
+                    launch={'pid':77,'pgid':77,'identity':dict(direct),'argv':argv}
+                    pins={}
+                    for name in ('stdout','stderr'):
+                        raw=(phase+':'+name+'\n').encode();(output if phase=='GUARD' else folder).joinpath(name).write_bytes(raw)
+                        pins[name]={'eof':True,'bytes':len(raw),'sha256':ns['hashlib'].sha256(raw).hexdigest()}
+                    actions.append({'phase':phase,'argv':argv,'granted':True,'launch':launch,'exit':0,'primary':None,
+                                    'settled':True,'settlement':dict(clean),'cleanupErrors':[],'streams':pins})
+                value={'stage':'prerequisite','checking':False,'success':True,'primary':None,'cleanupErrors':[],
+                       'cancelled':False,'pending':0,'parent':{'pid':44,'start':88},'identity':{'pid':os.getpid()},
+                       'root':root_identity,'actions':actions}
+                if cut=='failed':value['success']=False
+                if cut=='cancelled':value['cancelled']=True
+                if cut=='pending':value['pending']=1
+                if cut=='phase-order':actions.reverse()
+                if cut=='argv':actions[0]['argv']=['unreviewed-command']
+                if cut=='identity':actions[0]['launch']['identity']['ppid']=0
+                if cut=='eof':actions[0]['streams']['stdout']['eof']=False
+                if cut=='settlement':actions[0]['settlement']['noChildren']=False
+                for action in actions:
+                    folder=slot/action['phase'];subject['stage_record'](folder/'owner.json',action);subject['stage_record'](folder/'process.json',action['launch'])
+                subject['stage_record'](slot/'owner.json',value)
+                if cut=='raw':(slot/'PREP/stdout').write_bytes(b'drift')
+                if cut=='phase-record':(slot/'PREP/owner.json').write_text('{}')
+                if cut=='process-record':(slot/'PREP/process.json').write_text('{}')
+                def bounded_read(path,limit):
+                    raw=path.read_bytes()
+                    if len(raw)>limit:raise RuntimeError('modeled bound')
+                    return raw
+                with mock.patch.dict(ns,stage_read=bounded_read,stage_private=lambda path:root_identity):
+                    if cut=='success':self.assertEqual(subject['stage_previous_owner'](base,'prerequisite'),value)
+                    else:
+                        with self.assertRaises(RuntimeError):subject['stage_previous_owner'](base,'prerequisite')
+        # Closed retention includes a PREP failure before legacy stage creation.
+        with tempfile.TemporaryDirectory() as directory:
+            base=Path(directory);owner=base/'evidence/stage-owner/prerequisite';owner.mkdir(parents=True,mode=0o700)
+            (owner/'PREP').mkdir(mode=0o700)
+            for name in ('owner.json','PREP/owner.json','PREP/process.json','PREP/stdout','PREP/stderr'):(owner/name).write_text('{}')
+            copied=[];keep=types.SimpleNamespace(problems={'errors':[]},copy=lambda src,rel,limit,required:copied.append(str(rel)))
+            with mock.patch.object(ci,'fixture_identity'):
+                self.assertTrue(ci.retain_stage_owner(keep,base,'prerequisite'))
+                self.assertIn('stage-owner/prerequisite/PREP/process.json',copied)
+                self.assertFalse((base/'evidence/prerequisite').exists())
+                (owner/'unreviewed').write_text('x');copied.clear()
+                self.assertTrue(ci.retain_stage_owner(keep,base,'prerequisite'));self.assertTrue(keep.problems['errors']);self.assertEqual(copied,[])
+                self.assertFalse(ci.retain_stage_owner(keep,base,'all'))
+
         # Terminal-only BUILD diagnostics: synthetic cuts, no producer child or
         # actual signal-handler installation. Keep the existing result contract.
         import signal
@@ -1063,6 +1332,65 @@ class EvaluationProvenance(unittest.TestCase):
             self.assertTrue(final['success'])  # Existing pre-print snapshot is unchanged.
         status,emitted,final=terminal(lambda:0)
         self.assertEqual(status,0);self.assertEqual(len(emitted),1)
+
+        # Real CLI dispatch and binding body: stdout is exactly the binding wire
+        # object. The unchanged terminal goes to stderr, including late refusal.
+        binding={'root':'/synthetic/fixture','root_sha256':'a'*64}
+        wire=json.dumps(binding,separators=(',',':'))+'\n'
+        for cut in ('success','E0','E1','terminal','E1-terminal','cancelled','poison','pending','lease'):
+            stdout=io.StringIO();stderr=io.StringIO();emitted=[];checkpoints=[]
+            original_print=print
+            def writing(value,**kwargs):
+                if kwargs.get('file') is sys.stderr:
+                    emitted.append(json.loads(value))
+                    if cut in ('terminal','E1-terminal'):raise OSError('private-terminal-failure')
+                return original_print(value,**kwargs)
+            def outer(ctx,checkpoint):
+                checkpoints.append(checkpoint)
+                if cut==checkpoint or cut=='E1-terminal' and checkpoint=='E1':
+                    raise RuntimeError('private-admission-failure')
+                if checkpoint=='E1':
+                    if cut=='cancelled':self.owner.CANCELLED=signal.SIGTERM
+                    elif cut=='poison':self.owner.POISON.append({'pending':True})
+                    elif cut=='pending':self.owner.PENDING_OBJECTS.append(object())
+                    elif cut=='lease':self.owner.LEASES[123]=object()
+            with contextlib.ExitStack() as stack:
+                for name,value in (('POISON',[]),('PENDING_OBJECTS',[]),('LEASES',{}),('SECONDARY',[]),
+                                   ('ATTEMPTS',[]),('CANCELLED',None),('BUILD_DIAGNOSTIC_PHASE',None)):
+                    stack.enter_context(mock.patch.object(self.owner,name,value))
+                stack.enter_context(mock.patch.object(self.owner,'entry'))
+                stack.enter_context(mock.patch.object(self.owner,'outer',side_effect=outer))
+                pending=stack.enter_context(mock.patch.object(self.owner,'persist_pending'))
+                stack.enter_context(mock.patch.object(signal,'signal'))
+                stack.enter_context(mock.patch.object(ci,'ci_dir',return_value=self.base))
+                stack.enter_context(mock.patch.object(ci,'check_partition_binding'))
+                validate=stack.enter_context(mock.patch.object(ci,'fixture_validate',return_value=(binding,{'absent':True})))
+                record=stack.enter_context(mock.patch.object(ci,'fixture_write'))
+                stack.enter_context(contextlib.redirect_stdout(stdout))
+                stack.enter_context(contextlib.redirect_stderr(stderr))
+                stack.enter_context(mock.patch('builtins.print',side_effect=writing))
+                status=ci.main(['fixture-binding','prerequisite'])
+                self.assertEqual(status,0 if cut=='success' else 1)
+                self.assertEqual(stdout.getvalue(),'' if cut=='E0' else wire)
+                if cut=='E0':validate.assert_not_called();record.assert_not_called()
+                else:
+                    self.assertEqual(json.loads(stdout.getvalue()),binding)
+                    validate.assert_called_once_with(self.base,ci.ROOT,True)
+                    record.assert_called_once_with(self.base/'evidence/fixture105-before-prerequisite.json',
+                                                  {'binding':binding,'temp':{'absent':True}})
+                if cut in ('cancelled','poison','pending','lease'):pending.assert_called_once_with(self.base)
+                else:pending.assert_not_called()
+                self.assertEqual(checkpoints,['E0'] if cut=='E0' else ['E0','E1'])
+                self.assertEqual(len(emitted),1);final=emitted[0]
+                self.assertEqual(set(final),result_keys);self.assertEqual(final['schema'],'ci-role-command/1')
+                self.assertEqual(final['primary'],'RuntimeError' if cut in ('E0','E1','E1-terminal') else None)
+                self.assertEqual(final['secondary'],[])
+                self.assertEqual(final['pending'],1 if cut in ('cancelled','poison','pending','lease') else 0)
+                self.assertEqual(final['cancelled'],signal.SIGTERM if cut=='cancelled' else None)
+                self.assertEqual(final['success'],cut in ('success','terminal'))  # Pre-print snapshot remains unchanged.
+                if cut in ('terminal','E1-terminal'):self.assertEqual(stderr.getvalue(),'')
+                else:self.assertEqual(json.loads(stderr.getvalue()),final)
+                self.assertNotIn('private-',stdout.getvalue()+stderr.getvalue())
 
         # Exercise real phase assignments up to each cut with all external work
         # replaced; capture and Git/event bodies must never execute.
@@ -1260,6 +1588,31 @@ class EvaluationProvenance(unittest.TestCase):
                 return index
             complete=inspect_retained(runner)
             self.assertEqual(len(complete['entries']),141);self.assertEqual(complete['physical_objects'],90)
+            # Poison-safe original-workspace retention keeps pre-stage owner
+            # failures without a guard directory and reuses the existing alias
+            # encoding/object caps rather than raising them.
+            staged=world/'stage-runner';staged.mkdir(mode=0o700)
+            for role in ('build','evaluation'):shutil.copytree(runner/role,staged/role)
+            slot=staged/'evaluation/ci/evidence/stage-owner/prerequisite'
+            (slot/'PREP').mkdir(parents=True,mode=0o700)
+            launch={'pid':77,'pgid':77,'identity':{'pid':77,'start':99},'argv':['fixed-model-only']}
+            action={'phase':'PREP','launch':launch,'primary':'RuntimeError','settled':False}
+            parent_raw=self.owner.canonical({'actions':[action],'success':False})
+            new_blobs=[parent_raw,b'stage model stdout\n',b'']
+            for name,raw in [('owner.json',parent_raw),('PREP/owner.json',(json.dumps(action,sort_keys=True)+'\n').encode()),
+                             ('PREP/process.json',(json.dumps(launch,sort_keys=True)+'\n').encode()),
+                             ('PREP/stdout',new_blobs[1]),('PREP/stderr',new_blobs[2])]:
+                (slot/name).write_bytes(raw)
+            stage_index=inspect_retained(staged)
+            self.assertEqual(len(stage_index['entries']),146)
+            previous={row['artifact']['sha256'] for row in complete['entries'] if row['representation']['kind']=='blob'}
+            self.assertEqual(stage_index['physical_objects'],90+len({self.owner.digest(raw) for raw in new_blobs}-previous))
+            aliases={row['logical_path']:row['representation'] for row in stage_index['entries']}
+            for name,pointer in [('owner.json',['actions',0]),('process.json',['actions',0,'launch'])]:
+                recipe=aliases['evaluation/stage-owner/prerequisite/PREP/'+name]
+                self.assertEqual(recipe['kind'],'derived');self.assertEqual(recipe['pointer'],pointer)
+                self.assertEqual(recipe['encoding'],'json-sort-spaces-lf/1')
+            self.assertFalse((staged/'evaluation/ci/evidence/prerequisite').exists())
             later=world/'late-runner';later.mkdir(mode=0o700)
             for role in ('build','evaluation'):shutil.copytree(runner/role,later/role)
             for name in ('owner.json','result.json'):(later/'evaluation/ci/evidence/identity-witness'/name).unlink()

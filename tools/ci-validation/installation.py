@@ -1687,9 +1687,10 @@ def close_fd(fd):
     lease.finish()
 
 
-def command(ctx, operation):
-    """One command boundary, retaining primary/secondary and late cancellation."""
+def command(ctx, operation, *, binding_stdout=False):
+    """One command boundary; fixture-binding alone reserves stdout for its wire object."""
     import signal
+    import sys
     global CANCELLED, BUILD_DIAGNOSTIC_PHASE
     BUILD_DIAGNOSTIC_PHASE = None
     def cancelled(signum, frame):
@@ -1727,7 +1728,7 @@ def command(ctx, operation):
                   'attempted_preservation':list(ATTEMPTS),
                   'cancelled': CANCELLED, 'pending': len(POISON) + len(PENDING_OBJECTS) + len(LEASES)}
         try:
-            print(json.dumps(result), flush=True)
+            print(json.dumps(result), file=sys.stderr if binding_stdout else sys.stdout, flush=True)
         except BaseException as error:
             if primary is None:
                 primary = error
@@ -1766,6 +1767,18 @@ def partial_specs(original):
         for name in ('copy-owner.json','owner.json','stdout','stderr'):
             specs.append((base/'evidence/producer/transfer'/name,Path(role)/'transfer'/name,262144 if name.endswith('.json') else 8388608))
         specs.append((base/'evidence/producer/POISON.json',Path(role)/'POISON.json',8192))
+        if role=='evaluation':
+            for stage in ('prerequisite','focused'):
+                for namespace,phases in (('stage-owner',('PREP','BIND','GUARD')),('stage-check',('CHECK',))):
+                    slot=base/'evidence'/namespace/stage;relative=Path(role)/namespace/stage
+                    specs.append((slot/'owner.json',relative/'owner.json',65536))
+                    specs.append((slot/'fatal.json',relative/'fatal.json',65536))
+                    for phase in phases:
+                        for name in ('owner.json','process.json','stdout','stderr'):
+                            source=(base/'evidence'/stage/name if phase=='GUARD' and name in ('stdout','stderr') else slot/phase/name)
+                            specs.append((source,relative/phase/name,8388608 if name in ('stdout','stderr') else 65536))
+                specs.append((base/'evidence'/('fixture105-before-'+stage+'.json'),Path(role)/('fixture105-before-'+stage+'.json'),262144))
+            specs.append((base/'evidence/fixture105-loader-created.json',Path(role)/'fixture105-loader-created.json',262144))
     return specs
 
 
@@ -1777,6 +1790,20 @@ def retain_partial(ctx):
     entries=[];objects={};owners={};problems=[];total=0
     def derived(relative,raw):
         parts=relative.parts
+        if (len(parts)==5 and parts[0]=='evaluation' and parts[1] in ('stage-owner','stage-check')
+                and parts[2] in ('prerequisite','focused') and parts[3] in ('PREP','BIND','GUARD','CHECK')
+                and parts[4] in ('owner.json','process.json')):
+            parent=owners.get(str(Path(*parts[:3])/'owner.json'))
+            if parent is None:return None
+            value,parent_blob=parent;rows=value.get('actions');pointer=None
+            if type(rows) is list:
+                matches=[i for i,row in enumerate(rows) if type(row) is dict and row.get('phase')==parts[3]]
+                if len(matches)==1:
+                    pointer=['actions',matches[0]];candidate=rows[matches[0]]
+                    if parts[4]=='process.json':pointer.append('launch');candidate=candidate.get('launch')
+                    if candidate is not None and (json.dumps(candidate,sort_keys=True)+'\n').encode()==raw:
+                        return {'kind':'derived','parent_blob':parent_blob,'pointer':pointer,'encoding':'json-sort-spaces-lf/1'}
+            return None
         if len(parts)!=4 or parts[1]!='captures':return None
         role,_,label,filename=parts;parent=owners.get(str(Path(role)/label/'owner.json'))
         if parent is None:return None
@@ -1810,7 +1837,8 @@ def retain_partial(ctx):
                     need(len(objects)<94 and total+len(artifact)<=167772160-524288,'partial_bundle_cap')
                     write(target/name,artifact,8388608);objects[key]=artifact_pin;total+=len(artifact)
                 recipe={'kind':'blob','path':name}
-                if relative.name=='owner.json' and len(relative.parts)==3 and artifact==raw:
+                if (relative.name=='owner.json' and artifact==raw and (len(relative.parts)==3 or
+                        len(relative.parts)==4 and relative.parts[0]=='evaluation' and relative.parts[1] in ('stage-owner','stage-check'))):
                     try:
                         value=parse(raw,262144,False)
                         if type(value) is dict:owners[str(relative)]=(value,name)
