@@ -3735,7 +3735,7 @@ class FixtureTargetObserverShapeTests(unittest.TestCase):
             self.assertIn(exact, case)
         ordered = [
             'holder.on("error", onHolderError);', 'await withTestCleanup(',
-            'expect(maintenanceLatch.used).toBe(false);', 'await holder.connect();',
+            'expect(controlMaintenanceLatch.used).toBe(false);', 'await holder.connect();',
             'const identity = await holder.query', 'await observer.around(',
             'await runConnectedFixture105();', 'expect(outer === original).toBe(true);',
             'expect(original.code === "fixture_target_isolation").toBe(true);',
@@ -3808,6 +3808,61 @@ class FixtureTargetObserverShapeTests(unittest.TestCase):
                 check_case_budgets(mutated, metadata)
         self.assertNotIn('native117', native)
         self.assertEqual(native.count('await new TargetObserver(\n          env.name,\n          "acquisition_cut",\n          maintenanceOwner(),\n        ).around(firstInvocation);'), 1)
+        def compact(source):
+            return re.sub(r',(?=[)\]}])', '', re.sub(r'\s+', '', source))
+        def fragment(source):
+            # A snippet lacks the closing delimiter that makes its final comma optional.
+            # Remove only that one boundary comma; never erase internal punctuation.
+            return compact(source).removesuffix(',')
+        def common_observation(source):
+            source = compact(source)
+            for token in (
+                'reconcileConnectedFixture105 as reconcileObservedConnectedFixture105,',
+                'observeNativeTarget("construction", runObservedConnectedFixture105)',
+                'observeNativeTarget("reconciliation", reconcileObservedConnectedFixture105)',
+                'return caseId === HELD_TARGET_CASE ? undefined : owner;',
+                'readonly operation: "construction" | "reconciliation";',
+                'case_id: owner.case_id,', 'ordinal: nativeTargetOrdinal++,',
+                'const binding = nativeTargetBinding();',
+                'database: current.name, maintenance: maintenanceOwner()',
+                'const controlMaintenanceLatch = { used: false };',
+                'latch: control ? controlMaintenanceLatch : maintenanceLatch,',
+                'this.maintenance.latch.used = true;',
+                'this.maintenanceCoverage = "reserved";',
+                '"already_reserved"', '"ineligible"',
+                'fixture-target-diagnostic-summary/3', 'fixture-target-diagnostic/3',
+                'fixture-target-maintenance/2',
+                'async around<T>(work: () => Promise<T>): Promise<T>',
+            ):
+                self.assertIn(fragment(token), source)
+            common = source[source.index(compact('async function observeNativeTarget<T>')):source.index(compact('function caseBody('))]
+            self.assertIn(compact('CASE_EXPECTATIONS.some((entry) => entry.case_id === owner.case_id)'), common)
+            self.assertIn(compact('nativeMaintenance(owner.case_id, binding.maintenance)'), common)
+            self.assertNotIn('process.env', common)
+            self.assertNotIn(compact('new pg.'), common)
+            self.assertEqual(source.count(compact('await runObservedConnectedFixture105()')), 0)
+            self.assertEqual(source.count(compact('await reconcileObservedConnectedFixture105()')), 0)
+            self.assertEqual(source.count('maintenanceOwner(true)'), 1)
+            held = source[source.index(compact('const observer = new TargetObserver('), source.index(compact('let cleanupComplete = false;'))):]
+            self.assertIn(fragment('"held_client_control", maintenanceOwner(true),'), held)
+        common_observation(native)
+        for before, after in (
+            ('observeNativeTarget("construction", runObservedConnectedFixture105)', 'runObservedConnectedFixture105()'),
+            ('observeNativeTarget("reconciliation", reconcileObservedConnectedFixture105)', 'reconcileObservedConnectedFixture105()'),
+            ('return caseId === HELD_TARGET_CASE ? undefined : owner;', 'return owner;'),
+            ('latch: control ? controlMaintenanceLatch : maintenanceLatch,', 'latch: maintenanceLatch,'),
+            ('maintenanceOwner(true)', 'maintenanceOwner()'),
+            ('this.maintenance.latch.used = true;', 'this.maintenance.latch.used = false;'),
+            ('database: current.name, maintenance: maintenanceOwner()', 'database: "foreign", maintenance: maintenanceOwner()'),
+        ):
+            source = compact(native)
+            original, replacement = fragment(before), fragment(after)
+            self.assertEqual(source.count(original), 1, before)
+            self.assertNotEqual(original, replacement)
+            mutated = source.replace(original, replacement, 1)
+            self.assertNotEqual(mutated, source)
+            with self.subTest(common=before), self.assertRaises(AssertionError):
+                common_observation(mutated)
         self.assertIn('const TARGET_OBSERVER_CAP = 64;', native)
         observer = native[native.index('class TargetObserver'):native.index('  /** All 20 groups')]
         selftest = native[native.index('  static async selftest()'):native.index('// pg-pool attaches release')]
@@ -3821,7 +3876,7 @@ class FixtureTargetObserverShapeTests(unittest.TestCase):
         self.assertLess(selftest.rindex('capture.mockRestore();'), selftest.index("process.stderr.write(\n      'FIXTURE_TARGET_DIAGNOSTIC_SELFTEST"))
         self.assertNotIn('runConnectedFixture105(', selftest)
         self.assertNotIn('.query(', selftest)
-        around = observer[observer.index('  async around('):observer.index('  /** Failure vectors')]
+        around = observer[observer.index('  async around<T>('):observer.index('  /** Failure vectors')]
         cleanup = around[around.rindex('      async () => {'):]
         restore = 'Object.defineProperty(pg.Client.prototype, "query", descriptor);'
         self.assertEqual(cleanup.count(restore), 1)
