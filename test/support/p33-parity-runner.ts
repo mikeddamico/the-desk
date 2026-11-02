@@ -1,4 +1,6 @@
-import { canonicalJson } from "../../src/identity/canonical-json.js";
+const { canonicalJson } = (await import(
+  new URL("../../src/identity/canonical-json.ts", import.meta.url).href
+)) as typeof import("../../src/identity/canonical-json.js");
 import * as fixtureFs from "node:fs";
 import * as fixturePath from "node:path";
 import * as fixtureCrypto from "node:crypto";
