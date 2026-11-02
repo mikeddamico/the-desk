@@ -1,0 +1,137 @@
+{
+  "schema": "durable-pair-signing-reference-inputs/1",
+  "provenance": {
+    "published_signer_vectors": "https://raw.githubusercontent.com/smithy-lang/smithy-typescript/main/packages/signature-v4/src/SignatureV4.spec.ts",
+    "published_hmac_vectors": "https://www.rfc-editor.org/rfc/rfc4231.html#section-4.2",
+    "expectation_owner": "independent Python hashlib/hmac oracle, never the application signer",
+    "generation_scope": "input-only; calculation execution and review receipts are separate"
+  },
+  "published": [
+    {
+      "id": "empty",
+      "service": "foo",
+      "region": "us-bar-1",
+      "host": "foo.us-bar-1.amazonaws.com",
+      "method": "POST",
+      "path": "/",
+      "date": "20000101T000000Z",
+      "access_key": "foo",
+      "secret_key": "bar",
+      "body_hex": "",
+      "token": null,
+      "signature": "1e3b24fcfd7655c0c245d99ba7b6b5ca6174eab903ebfbda09ce457af062ad30"
+    },
+    {
+      "id": "utf8",
+      "service": "foo",
+      "region": "us-bar-1",
+      "host": "foo.us-bar-1.amazonaws.com",
+      "method": "POST",
+      "path": "/",
+      "date": "20000101T000000Z",
+      "access_key": "foo",
+      "secret_key": "bar",
+      "body_utf8": "It was the best of times, it was the worst of times",
+      "token": null,
+      "signature": "cf22a0befff359388f136b158f0b1b43db7b18d2ca65ce4112bc88a16815c4b6"
+    },
+    {
+      "id": "binary",
+      "service": "foo",
+      "region": "us-bar-1",
+      "host": "foo.us-bar-1.amazonaws.com",
+      "method": "POST",
+      "path": "/",
+      "date": "20000101T000000Z",
+      "access_key": "foo",
+      "secret_key": "bar",
+      "body_hex": "deadbeef",
+      "token": null,
+      "signature": "89f092f52faedb8a6be1890b2a511b88e7998389d62bd7d72915e2f4ee271a64"
+    },
+    {
+      "id": "token",
+      "service": "foo",
+      "region": "us-bar-1",
+      "host": "foo.us-bar-1.amazonaws.com",
+      "method": "POST",
+      "path": "/",
+      "date": "20000101T000000Z",
+      "access_key": "foo",
+      "secret_key": "bar",
+      "body_hex": "",
+      "token": "baz",
+      "signature": "4fd09a8cf3b28a62a9c6c424f03ababcd703528578bc6ec9184fc585f18c3fbb"
+    },
+    {
+      "id": "s3_escaped_path",
+      "service": "foo",
+      "region": "us-bar-1",
+      "host": "foo.us-bar-1.amazonaws.com",
+      "method": "POST",
+      "path": "/foo%3Dbar",
+      "date": "20000101T000000Z",
+      "access_key": "foo",
+      "secret_key": "bar",
+      "body_hex": "",
+      "token": null,
+      "signature": "0d859e5a74374efc2c9f14ba9352df14c68e411a1f44bd639fdd024e5f7b7ef1"
+    }
+  ],
+  "fixed": {
+    "service": "s3",
+    "region": "auto",
+    "host": "00000000000000000000000000000000.r2.cloudflarestorage.com",
+    "path": "/the-desk-development/development/proof/operations/b6200001-0000-4000-8000-000000000001/assessment.json",
+    "date": "20261029T000000Z",
+    "access_key": "TESTONLYID",
+    "secret_key": "test-only-not-a-credential",
+    "body_hex": "00017f80ff0a",
+    "content_type": "application/json"
+  },
+  "crypto": {
+    "plain_empty": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "plain_abc": "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad",
+    "rfc4231_case1_key_hex": "0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b",
+    "rfc4231_case1_message": "Hi There",
+    "rfc4231_case1_expected": "b0344c61d8db38535ca8afceaf0bf12b881dc200c9833da726e9376c2e32cff7"
+  },
+  "rfc4231": [
+    {
+      "id": "case1",
+      "key_hex": "0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b",
+      "data_utf8": "Hi There",
+      "sha256": "b0344c61d8db38535ca8afceaf0bf12b881dc200c9833da726e9376c2e32cff7"
+    },
+    {
+      "id": "case2",
+      "key_hex": "4a656665",
+      "data_utf8": "what do ya want for nothing?",
+      "sha256": "5bdcc146bf60754e6a042426089575c75a003f089d2739839dec58b964ec3843"
+    },
+    {
+      "id": "case3",
+      "key_hex": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "data_hex": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+      "sha256": "773ea91e36800e46854db8ebd09181a72959098b3ef8c122d9635514ced565fe"
+    },
+    {
+      "id": "case4",
+      "key_hex": "0102030405060708090a0b0c0d0e0f10111213141516171819",
+      "data_hex": "cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd",
+      "sha256": "82558a389a443c0ea4cc819899f2083a85f0faa3e578f8077a2e3ff46729665b"
+    },
+    {
+      "id": "case6",
+      "key_hex": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "data_utf8": "Test Using Larger Than Block-Size Key - Hash Key First",
+      "sha256": "60e431591ee0b67f0d8a26aacbf5b77f8e0bc6213728c5140546040f0ee37f54"
+    },
+    {
+      "id": "case7",
+      "key_hex": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "data_utf8": "This is a test using a larger than block-size key and a larger than block-size data. The key needs to be hashed before being used by the HMAC algorithm.",
+      "sha256": "9b09ffa71b942fcb27635fbcd5b0e944bfdc63644f0713938a7f51535c3a35e2"
+    }
+  ]
+}

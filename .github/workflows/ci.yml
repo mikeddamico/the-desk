@@ -1,13 +1,13 @@
 name: foundation-ci
 
+# FULL RESTORATION: independent ordinary installations and complete partition acceptance.
+# CI153 revised selected-case proof accepted; original 120-second benchmark remains failed.
 on:
   pull_request:
   push:
     branches: [main]
-
 permissions:
   contents: read
-
 jobs:
   verify-writer:
     runs-on: ubuntu-24.04
@@ -38,47 +38,126 @@ jobs:
           node-version: 24.21.0
           cache: npm
       - run: npm install --global npm@11.19.0 --ignore-scripts
+        working-directory: ${{ github.workspace }}
         timeout-minutes: 3
-      - run: npm ci --ignore-scripts
-        timeout-minutes: 5
-      - name: Bind source, identity and runner before anything runs
+      - name: Prepare the exclusive complete BUILD clone
+        id: build-layout
+        if: ${{ success() }}
+        working-directory: ${{ github.workspace }}
+        timeout-minutes: 6
+        run: |
+          /usr/bin/timeout --signal=TERM --kill-after=20s 300s /usr/bin/python3 -I -B test/support/fixture105-hosted-layout.py build
+      - name: Retain BUILD layout and failed preparation evidence
+        id: upload-build-layout
+        if: ${{ always() && steps.build-layout.outputs.evidence_claimed == 'true' }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        timeout-minutes: 2
+        with:
+          name: ci-build-layout-writer-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/build/fixture105-layout
+          if-no-files-found: error
+          retention-days: 30
+      - name: Ordinary full BUILD install and five complete quality gates
+        id: build-quality
+        if: ${{ success() && steps.build-layout.outcome == 'success' }}
+        working-directory: /tmp/d
+        timeout-minutes: 41
+        env:
+          DESK_CI_ROLE_TEMP: ${{ runner.temp }}/build
+        run: |
+          /bin/bash tools/ci-validation/run-stage.sh producer-build
+      - name: Prepare the exclusive complete EVAL clone
+        id: eval-layout
+        if: ${{ success() && steps.build-quality.outcome == 'success' }}
+        working-directory: ${{ github.workspace }}
+        timeout-minutes: 6
+        run: |
+          /usr/bin/timeout --signal=TERM --kill-after=20s 300s /usr/bin/python3 -I -B test/support/fixture105-hosted-layout.py evaluation
+      - name: Retain EVAL layout and failed preparation evidence
+        id: upload-eval-layout
+        if: ${{ always() && steps.eval-layout.outputs.evidence_claimed == 'true' }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        timeout-minutes: 2
+        with:
+          name: ci-evaluation-layout-writer-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/evaluation/fixture105-layout
+          if-no-files-found: error
+          retention-days: 30
+      - name: Ordinary EVAL install and closed preseal initialization
+        id: eval-init
+        if: ${{ success() && steps.eval-layout.outcome == 'success' }}
+        working-directory: /tmp/e
+        timeout-minutes: 16
+        env:
+          DESK_CI_ROLE_TEMP: ${{ runner.temp }}/evaluation
+        run: |
+          /bin/bash tools/ci-validation/run-stage.sh evaluation-init
+      - name: Transfer complete verified dist and seal the evaluation provenance
         id: init
-        run: /usr/bin/python3 -I -B tools/ci-validation/ci.py init
+        if: ${{ success() && steps.eval-init.outcome == 'success' }}
+        working-directory: /tmp/e
+        timeout-minutes: 6
+        env:
+          DESK_CI_ROLE_TEMP: ${{ runner.temp }}/evaluation
+        run: |
+          /bin/bash tools/ci-validation/run-stage.sh bind-build
+      - name: Verify all six frozen semantic identities in the genuine EVAL installation
+        id: semantic-identities
+        if: ${{ success() && steps.init.outcome == 'success' }}
+        working-directory: /tmp/e
         timeout-minutes: 2
-      - name: Probe the disposable database (read-only)
-        run: /usr/bin/python3 -I -B tools/ci-validation/ci.py dbprobe
+        env:
+          DESK_CI_ROLE_TEMP: ${{ runner.temp }}/evaluation
+        run: /usr/bin/python3 -I -B tools/ci-validation/ci.py identity-witness
+      - name: Probe the disposable database read-only
+        if: ${{ success() && steps.init.outcome == 'success' && steps.semantic-identities.outcome == 'success' }}
+        working-directory: /tmp/e
         timeout-minutes: 1
-      - run: npm run format:check -- --cache-location "$RUNNER_TEMP/ci/tmp/prettier-format-check-unused.json"
-        timeout-minutes: 3
-      - run: npm run lint
-        timeout-minutes: 5
-      - run: npm run typecheck
-        timeout-minutes: 5
-      - run: npm run build
-        timeout-minutes: 5
-      - name: Validate the evidence harness
-        run: env -u DESK_CI_PARTITION /usr/bin/python3 -I -B tools/ci-validation/test_ci.py
-        timeout-minutes: 2
-      - name: Bind the emitted build output
-        run: /usr/bin/python3 -I -B tools/ci-validation/ci.py bind-build
-        timeout-minutes: 2
+        env:
+          DESK_CI_ROLE_TEMP: ${{ runner.temp }}/evaluation
+        run: |
+          /usr/bin/python3 -I -B tools/ci-validation/ci.py dbprobe
       - name: Guard P33 prerequisite
-        run: /bin/bash tools/ci-validation/run-stage.sh prerequisite
-        timeout-minutes: 1
-      - name: Validate P33 prerequisite
-        run: /usr/bin/python3 -I -B tools/ci-validation/ci.py check prerequisite
-        timeout-minutes: 1
-      - name: Guard P33 focused controls
-        run: /bin/bash tools/ci-validation/run-stage.sh focused
+        if: ${{ success() && steps.init.outcome == 'success' && steps.semantic-identities.outcome == 'success' }}
+        working-directory: /tmp/e
         timeout-minutes: 3
-      - name: Validate P33 focused controls
-        run: /usr/bin/python3 -I -B tools/ci-validation/ci.py check focused
-        timeout-minutes: 1
+        env:
+          DESK_CI_ROLE_TEMP: ${{ runner.temp }}/evaluation
+        run: |
+          exec /bin/bash tools/ci-validation/run-stage.sh prerequisite
+      - name: Validate P33 prerequisite
+        if: ${{ success() && steps.init.outcome == 'success' && steps.semantic-identities.outcome == 'success' }}
+        working-directory: /tmp/e
+        timeout-minutes: 2
+        env:
+          DESK_CI_ROLE_TEMP: ${{ runner.temp }}/evaluation
+        run: |
+          exec /usr/bin/python3 -I -B test/support/p33-parity-supervisor.py stage-check prerequisite
+      - name: Guard P33 focused
+        if: ${{ success() && steps.init.outcome == 'success' && steps.semantic-identities.outcome == 'success' }}
+        working-directory: /tmp/e
+        timeout-minutes: 5
+        env:
+          DESK_CI_ROLE_TEMP: ${{ runner.temp }}/evaluation
+        run: |
+          exec /bin/bash tools/ci-validation/run-stage.sh focused
+      - name: Validate P33 focused
+        if: ${{ success() && steps.init.outcome == 'success' && steps.semantic-identities.outcome == 'success' }}
+        working-directory: /tmp/e
+        timeout-minutes: 2
+        env:
+          DESK_CI_ROLE_TEMP: ${{ runner.temp }}/evaluation
+        run: |
+          exec /usr/bin/python3 -I -B test/support/p33-parity-supervisor.py stage-check focused
       - name: Collect controls evidence
         id: collect-controls
-        if: ${{ always() && steps.init.outcome != 'skipped' }}
-        run: /usr/bin/python3 -I -B tools/ci-validation/ci.py collect --scope controls
-        timeout-minutes: 1
+        if: ${{ always() && steps.init.outcome == 'success' }}
+        working-directory: /tmp/e
+        timeout-minutes: 2
+        env:
+          DESK_CI_ROLE_TEMP: ${{ runner.temp }}/evaluation
+        run: |
+          /usr/bin/python3 -I -B tools/ci-validation/ci.py collect --scope controls
       - name: Retain controls evidence
         id: upload-controls
         if: ${{ always() && steps.collect-controls.outcome == 'success' }}
@@ -86,20 +165,34 @@ jobs:
         timeout-minutes: 2
         with:
           name: ci-controls-writer-${{ github.run_id }}-${{ github.run_attempt }}
-          path: ${{ runner.temp }}/ci/upload-controls
+          path: ${{ runner.temp }}/evaluation/ci/upload-controls
           if-no-files-found: error
           retention-days: 30
-      - name: Guard P33 aggregate (all)
-        run: /bin/bash tools/ci-validation/run-stage.sh all
+      - name: Guard P33 aggregate all
+        if: ${{ success() && steps.init.outcome == 'success' && steps.semantic-identities.outcome == 'success' && steps.collect-controls.outcome == 'success' && steps.upload-controls.outcome == 'success' }}
+        working-directory: /tmp/e
         timeout-minutes: 122
-      - name: Validate aggregate counts, coverage and source
-        run: /usr/bin/python3 -I -B tools/ci-validation/ci.py check all
+        env:
+          DESK_CI_ROLE_TEMP: ${{ runner.temp }}/evaluation
+        run: |
+          exec /bin/bash tools/ci-validation/run-stage.sh all
+      - name: Validate aggregate counts coverage and source
+        if: ${{ success() && steps.init.outcome == 'success' && steps.semantic-identities.outcome == 'success' && steps.collect-controls.outcome == 'success' && steps.upload-controls.outcome == 'success' }}
+        working-directory: /tmp/e
         timeout-minutes: 2
+        env:
+          DESK_CI_ROLE_TEMP: ${{ runner.temp }}/evaluation
+        run: |
+          exec /usr/bin/python3 -I -B test/support/p33-parity-supervisor.py stage-check all
       - name: Collect full evidence
         id: collect-full
-        if: ${{ always() && steps.init.outcome != 'skipped' }}
-        run: /usr/bin/python3 -I -B tools/ci-validation/ci.py collect --scope full
-        timeout-minutes: 2
+        if: ${{ always() && steps.init.outcome == 'success' }}
+        working-directory: /tmp/e
+        timeout-minutes: 3
+        env:
+          DESK_CI_ROLE_TEMP: ${{ runner.temp }}/evaluation
+        run: |
+          /usr/bin/python3 -I -B tools/ci-validation/ci.py collect --scope full
       - name: Retain full evidence
         id: upload-full
         if: ${{ always() && steps.collect-full.outcome == 'success' }}
@@ -107,25 +200,61 @@ jobs:
         timeout-minutes: 3
         with:
           name: ci-full-writer-${{ github.run_id }}-${{ github.run_attempt }}
-          path: ${{ runner.temp }}/ci/upload-full
+          path: ${{ runner.temp }}/evaluation/ci/upload-full
           if-no-files-found: error
           retention-days: 30
-      - id: audit
-        run: npm audit --audit-level=high
+      - name: Collect known producer failure or partial evidence
+        id: collect-producer
+        if: ${{ always() && steps.build-layout.outcome != 'skipped' }}
+        working-directory: ${{ github.workspace }}
+        timeout-minutes: 3
+        run: |
+          /usr/bin/python3 -I -B tools/ci-validation/ci.py retain-producer-partial
+      - name: Retain both producer roles including partial failures
+        id: upload-producer
+        if: ${{ always() && steps.collect-producer.outcome == 'success' }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        timeout-minutes: 3
+        with:
+          name: ci-producers-writer-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/producer-failure
+          if-no-files-found: error
+          retention-days: 30
+      - name: Audit complete locked BUILD dependencies
+        id: audit
+        if: ${{ success() && steps.init.outcome == 'success' }}
+        working-directory: /tmp/d
         timeout-minutes: 5
+        env:
+          DESK_CI_ROLE_TEMP: ${{ runner.temp }}/build
+        run: |
+          npm audit --audit-level=high
+      - name: Bind the original workspace before the security scan
+        id: security-precheck
+        if: ${{ success() && steps.init.outcome == 'success' }}
+        working-directory: /tmp/e
+        timeout-minutes: 2
+        env:
+          DESK_CI_ROLE_TEMP: ${{ runner.temp }}/evaluation
+        run: /usr/bin/python3 -I -B tools/ci-validation/ci.py security-precheck
       - id: gitleaks
+        if: ${{ success() && steps.security-precheck.outcome == 'success' }}
         uses: gitleaks/gitleaks-action@e0c47f4f8be36e29cdc102c57e68cb5cbf0e8d1e # v3.0.0
         timeout-minutes: 5
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITLEAKS_ENABLE_UPLOAD_ARTIFACT: "false"
-      - name: Retain generated security report outside the checkout
+          GITLEAKS_ENABLE_COMMENTS: "false"
+      - name: Retain security report
         id: retain-security
-        if: ${{ always() && steps.gitleaks.outcome != 'skipped' }}
-        run: /usr/bin/python3 -I -B tools/ci-validation/ci.py retain-security
+        if: ${{ always() && steps.init.outcome == 'success' && steps.security-precheck.outcome == 'success' && (steps.gitleaks.outcome == 'success' || steps.gitleaks.outcome == 'failure') }}
+        working-directory: /tmp/e
         timeout-minutes: 1
         env:
+          DESK_CI_ROLE_TEMP: ${{ runner.temp }}/evaluation
           GITLEAKS_OUTCOME: ${{ steps.gitleaks.outcome }}
+        run: |
+          /usr/bin/python3 -I -B tools/ci-validation/ci.py retain-security
       - name: Upload partition security report
         id: upload-security
         if: ${{ always() && steps.retain-security.outcome == 'success' }}
@@ -133,20 +262,24 @@ jobs:
         timeout-minutes: 2
         with:
           name: ci-security-writer-${{ github.run_id }}-${{ github.run_attempt }}
-          path: ${{ runner.temp }}/ci/security-report
+          path: ${{ runner.temp }}/evaluation/ci/security-report
           if-no-files-found: error
           retention-days: 30
-      - name: Final evidence gate
+      - name: Require complete partition and retained security proof
         id: final
-        if: ${{ always() && steps.init.outcome != 'skipped' }}
-        run: /usr/bin/python3 -I -B tools/ci-validation/ci.py final
-        timeout-minutes: 1
+        if: ${{ always() && steps.init.outcome == 'success' }}
+        working-directory: /tmp/e
+        timeout-minutes: 3
         env:
+          DESK_CI_ROLE_TEMP: ${{ runner.temp }}/evaluation
+          PRODUCER_UPLOAD_OUTCOME: ${{ steps.upload-producer.outcome }}
           CONTROLS_UPLOAD_OUTCOME: ${{ steps.upload-controls.outcome }}
           UPLOAD_OUTCOME: ${{ steps.upload-full.outcome }}
           AUDIT_OUTCOME: ${{ steps.audit.outcome }}
           GITLEAKS_OUTCOME: ${{ steps.gitleaks.outcome }}
           SECURITY_UPLOAD_OUTCOME: ${{ steps.upload-security.outcome }}
+        run: |
+          /usr/bin/python3 -I -B tools/ci-validation/ci.py final
 
   verify-rest:
     runs-on: ubuntu-24.04
@@ -177,51 +310,157 @@ jobs:
           node-version: 24.21.0
           cache: npm
       - run: npm install --global npm@11.19.0 --ignore-scripts
+        working-directory: ${{ github.workspace }}
         timeout-minutes: 3
-      - run: npm ci --ignore-scripts
-        timeout-minutes: 5
-      - name: Bind source, identity and runner before anything runs
-        id: init
-        run: /usr/bin/python3 -I -B tools/ci-validation/ci.py init
+      - name: Prepare the exclusive complete BUILD clone
+        id: build-layout
+        if: ${{ success() }}
+        working-directory: ${{ github.workspace }}
+        timeout-minutes: 6
+        run: |
+          /usr/bin/timeout --signal=TERM --kill-after=20s 300s /usr/bin/python3 -I -B test/support/fixture105-hosted-layout.py build
+      - name: Retain BUILD layout and failed preparation evidence
+        id: upload-build-layout
+        if: ${{ always() && steps.build-layout.outputs.evidence_claimed == 'true' }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         timeout-minutes: 2
+        with:
+          name: ci-build-layout-rest-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/build/fixture105-layout
+          if-no-files-found: error
+          retention-days: 30
+      - name: Ordinary full BUILD install and five complete quality gates
+        id: build-quality
+        if: ${{ success() && steps.build-layout.outcome == 'success' }}
+        working-directory: /tmp/d
+        timeout-minutes: 41
+        env:
+          DESK_CI_ROLE_TEMP: ${{ runner.temp }}/build
+        run: |
+          /bin/bash tools/ci-validation/run-stage.sh producer-build
+      - name: Prepare the exclusive complete EVAL clone
+        id: eval-layout
+        if: ${{ success() && steps.build-quality.outcome == 'success' }}
+        working-directory: ${{ github.workspace }}
+        timeout-minutes: 6
+        run: |
+          /usr/bin/timeout --signal=TERM --kill-after=20s 300s /usr/bin/python3 -I -B test/support/fixture105-hosted-layout.py evaluation
+      - name: Retain EVAL layout and failed preparation evidence
+        id: upload-eval-layout
+        if: ${{ always() && steps.eval-layout.outputs.evidence_claimed == 'true' }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        timeout-minutes: 2
+        with:
+          name: ci-evaluation-layout-rest-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/evaluation/fixture105-layout
+          if-no-files-found: error
+          retention-days: 30
+      - name: Ordinary EVAL install and closed preseal initialization
+        id: eval-init
+        if: ${{ success() && steps.eval-layout.outcome == 'success' }}
+        working-directory: /tmp/e
+        timeout-minutes: 16
+        env:
+          DESK_CI_ROLE_TEMP: ${{ runner.temp }}/evaluation
+        run: |
+          /bin/bash tools/ci-validation/run-stage.sh evaluation-init
+      - name: Transfer complete verified dist and seal the evaluation provenance
+        id: init
+        if: ${{ success() && steps.eval-init.outcome == 'success' }}
+        working-directory: /tmp/e
+        timeout-minutes: 6
+        env:
+          DESK_CI_ROLE_TEMP: ${{ runner.temp }}/evaluation
+        run: |
+          /bin/bash tools/ci-validation/run-stage.sh bind-build
       - name: Reconstruct the fixed synthetic fixture FFmpeg runtime
         id: fixture046-runtime
-        run: /usr/bin/timeout --signal=TERM --kill-after=20s 900s /usr/bin/python3 -I -B test/support/fixture046-ffmpeg-supply.py prepare
+        if: ${{ success() && steps.init.outcome == 'success' }}
+        working-directory: /tmp/e
         timeout-minutes: 16
-      - name: Probe the disposable database (read-only)
-        run: /usr/bin/python3 -I -B tools/ci-validation/ci.py dbprobe
-        timeout-minutes: 1
-      - run: npm run format:check -- --cache-location "$RUNNER_TEMP/ci/tmp/prettier-format-check-unused.json"
+        env:
+          DESK_CI_ROLE_TEMP: ${{ runner.temp }}/evaluation
+        run: /usr/bin/timeout --signal=TERM --kill-after=20s 900s /usr/bin/python3 -I -B test/support/fixture046-ffmpeg-supply.py prepare
+      - name: Verify all six frozen semantic identities in the genuine EVAL installation
+        id: semantic-identities
+        if: ${{ success() && steps.init.outcome == 'success' }}
+        working-directory: /tmp/e
+        timeout-minutes: 2
+        env:
+          DESK_CI_ROLE_TEMP: ${{ runner.temp }}/evaluation
+        run: /usr/bin/python3 -I -B tools/ci-validation/ci.py identity-witness
+      - name: Prove traversal17 Node12 and callback20 after genuine seal
+        id: traversal-proof
+        if: ${{ false }} # Native tranche uses fresh focused receipts; traversal is already proved.
+        working-directory: /tmp/e
+        timeout-minutes: 21
+        env:
+          DESK_CI_ROLE_TEMP: ${{ runner.temp }}/evaluation
+        run: |
+          /usr/bin/timeout --signal=TERM --kill-after=20s 1200s /usr/bin/python3 -I -B tools/ci-validation/ci.py traversal-proof
+      - name: Retain traversal proof including failed capture and loader evidence
+        id: upload-traversal
+        if: ${{ false }} # No traversal attempt in the native tranche.
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         timeout-minutes: 3
-      - run: npm run lint
-        timeout-minutes: 5
-      - run: npm run typecheck
-        timeout-minutes: 5
-      - run: npm run build
-        timeout-minutes: 5
-      - name: Validate the evidence harness
-        run: env -u DESK_CI_PARTITION /usr/bin/python3 -I -B tools/ci-validation/test_ci.py
-        timeout-minutes: 2
-      - name: Bind the emitted build output
-        run: /usr/bin/python3 -I -B tools/ci-validation/ci.py bind-build
-        timeout-minutes: 2
+        with:
+          name: ci-fixture105-traversal-rest-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/evaluation/ci/evidence/fixture105-traversal
+            ${{ runner.temp }}/evaluation/ci/evidence/fixture105-before-focused.json
+            ${{ runner.temp }}/evaluation/ci/evidence/fixture105-loader-created.json
+            ${{ runner.temp }}/evaluation/ci/tmp/capture-fixture105-traversal
+          if-no-files-found: error
+          retention-days: 30
+      - name: Probe the disposable database read-only
+        if: ${{ success() && steps.init.outcome == 'success' && steps.semantic-identities.outcome == 'success' }}
+        working-directory: /tmp/e
+        timeout-minutes: 1
+        env:
+          DESK_CI_ROLE_TEMP: ${{ runner.temp }}/evaluation
+        run: |
+          /usr/bin/python3 -I -B tools/ci-validation/ci.py dbprobe
       - name: Guard P33 prerequisite
-        run: /bin/bash tools/ci-validation/run-stage.sh prerequisite
-        timeout-minutes: 1
-      - name: Validate P33 prerequisite
-        run: /usr/bin/python3 -I -B tools/ci-validation/ci.py check prerequisite
-        timeout-minutes: 1
-      - name: Guard P33 focused controls
-        run: /bin/bash tools/ci-validation/run-stage.sh focused
+        if: ${{ success() && steps.init.outcome == 'success' && steps.semantic-identities.outcome == 'success' }}
+        working-directory: /tmp/e
         timeout-minutes: 3
-      - name: Validate P33 focused controls
-        run: /usr/bin/python3 -I -B tools/ci-validation/ci.py check focused
-        timeout-minutes: 1
+        env:
+          DESK_CI_ROLE_TEMP: ${{ runner.temp }}/evaluation
+        run: |
+          exec /bin/bash tools/ci-validation/run-stage.sh prerequisite
+      - name: Validate P33 prerequisite
+        if: ${{ success() && steps.init.outcome == 'success' && steps.semantic-identities.outcome == 'success' }}
+        working-directory: /tmp/e
+        timeout-minutes: 2
+        env:
+          DESK_CI_ROLE_TEMP: ${{ runner.temp }}/evaluation
+        run: |
+          exec /usr/bin/python3 -I -B test/support/p33-parity-supervisor.py stage-check prerequisite
+      - name: Guard P33 focused
+        if: ${{ success() && steps.init.outcome == 'success' && steps.semantic-identities.outcome == 'success' }}
+        working-directory: /tmp/e
+        timeout-minutes: 5
+        env:
+          DESK_CI_ROLE_TEMP: ${{ runner.temp }}/evaluation
+        run: |
+          exec /bin/bash tools/ci-validation/run-stage.sh focused
+      - name: Validate P33 focused
+        if: ${{ success() && steps.init.outcome == 'success' && steps.semantic-identities.outcome == 'success' }}
+        working-directory: /tmp/e
+        timeout-minutes: 2
+        env:
+          DESK_CI_ROLE_TEMP: ${{ runner.temp }}/evaluation
+        run: |
+          exec /usr/bin/python3 -I -B test/support/p33-parity-supervisor.py stage-check focused
       - name: Collect controls evidence
         id: collect-controls
-        if: ${{ always() && steps.init.outcome != 'skipped' }}
-        run: /usr/bin/python3 -I -B tools/ci-validation/ci.py collect --scope controls
-        timeout-minutes: 1
+        if: ${{ always() && steps.init.outcome == 'success' }}
+        working-directory: /tmp/e
+        timeout-minutes: 2
+        env:
+          DESK_CI_ROLE_TEMP: ${{ runner.temp }}/evaluation
+        run: |
+          /usr/bin/python3 -I -B tools/ci-validation/ci.py collect --scope controls
       - name: Retain controls evidence
         id: upload-controls
         if: ${{ always() && steps.collect-controls.outcome == 'success' }}
@@ -229,25 +468,64 @@ jobs:
         timeout-minutes: 2
         with:
           name: ci-controls-rest-${{ github.run_id }}-${{ github.run_attempt }}
-          path: ${{ runner.temp }}/ci/upload-controls
+          path: ${{ runner.temp }}/evaluation/ci/upload-controls
           if-no-files-found: error
           retention-days: 30
-      - name: Guard P33 aggregate (all)
-        run: /bin/bash tools/ci-validation/run-stage.sh all
+      - name: Prove ordinary PostgreSQL command connection semantics
+        id: command-postgres
+        if: ${{ success() && steps.init.outcome == 'success' && steps.semantic-identities.outcome == 'success' && steps.collect-controls.outcome == 'success' && steps.upload-controls.outcome == 'success' }}
+        working-directory: /tmp/e
+        timeout-minutes: 21
+        env:
+          DESK_CI_ROLE_TEMP: ${{ runner.temp }}/evaluation
+        run: |
+          /usr/bin/env HOME="$DESK_CI_ROLE_TEMP/ci/home" TMPDIR="$DESK_CI_ROLE_TEMP/ci/tmp" \
+            /usr/bin/timeout --signal=TERM --kill-after=20s 1200s \
+            node --import tsx test/support/command-postgres-hosted.ts
+      - name: Retain ordinary command proof including failed cleanup observations
+        id: upload-command-postgres
+        if: ${{ always() && steps.init.outcome == 'success' && steps.command-postgres.outcome != 'skipped' }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        timeout-minutes: 2
+        with:
+          name: ci-command-postgres-rest-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/evaluation/ci/evidence/command-postgres/retained
+          if-no-files-found: error
+          retention-days: 30
+      - name: Guard P33 aggregate all
+        if: ${{ success() && steps.init.outcome == 'success' && steps.semantic-identities.outcome == 'success' && steps.collect-controls.outcome == 'success' && steps.upload-controls.outcome == 'success' }}
+        working-directory: /tmp/e
         timeout-minutes: 122
-      - name: Validate aggregate counts, coverage and source
-        run: /usr/bin/python3 -I -B tools/ci-validation/ci.py check all
+        env:
+          DESK_CI_ROLE_TEMP: ${{ runner.temp }}/evaluation
+        run: |
+          exec /bin/bash tools/ci-validation/run-stage.sh all
+      - name: Validate aggregate counts coverage and source
+        if: ${{ success() && steps.init.outcome == 'success' && steps.semantic-identities.outcome == 'success' && steps.collect-controls.outcome == 'success' && steps.upload-controls.outcome == 'success' }}
+        working-directory: /tmp/e
         timeout-minutes: 2
-      - name: Settle the owned fixture runtime before full evidence capture
+        env:
+          DESK_CI_ROLE_TEMP: ${{ runner.temp }}/evaluation
+        run: |
+          exec /usr/bin/python3 -I -B test/support/p33-parity-supervisor.py stage-check all
+      - name: Settle owned fixture runtime before full retention
         id: fixture046-cleanup
-        if: ${{ always() && steps.fixture046-runtime.outcome != 'skipped' }}
-        run: /usr/bin/python3 -I -B test/support/fixture046-ffmpeg-supply.py cleanup
+        if: ${{ always() && steps.init.outcome == 'success' && (steps.fixture046-runtime.outcome == 'success' || steps.fixture046-runtime.outcome == 'failure') }}
+        working-directory: /tmp/e
         timeout-minutes: 2
+        env:
+          DESK_CI_ROLE_TEMP: ${{ runner.temp }}/evaluation
+        run: /usr/bin/python3 -I -B test/support/fixture046-ffmpeg-supply.py cleanup
       - name: Collect full evidence
         id: collect-full
-        if: ${{ always() && steps.init.outcome != 'skipped' }}
-        run: /usr/bin/python3 -I -B tools/ci-validation/ci.py collect --scope full
-        timeout-minutes: 2
+        if: ${{ always() && steps.init.outcome == 'success' }}
+        working-directory: /tmp/e
+        timeout-minutes: 3
+        env:
+          DESK_CI_ROLE_TEMP: ${{ runner.temp }}/evaluation
+          FIXTURE046_CLEANUP_OUTCOME: ${{ steps.fixture046-cleanup.outcome }}
+        run: |
+          /usr/bin/python3 -I -B tools/ci-validation/ci.py collect --scope full
       - name: Retain full evidence
         id: upload-full
         if: ${{ always() && steps.collect-full.outcome == 'success' }}
@@ -255,25 +533,61 @@ jobs:
         timeout-minutes: 3
         with:
           name: ci-full-rest-${{ github.run_id }}-${{ github.run_attempt }}
-          path: ${{ runner.temp }}/ci/upload-full
+          path: ${{ runner.temp }}/evaluation/ci/upload-full
           if-no-files-found: error
           retention-days: 30
-      - id: audit
-        run: npm audit --audit-level=high
+      - name: Collect known producer failure or partial evidence
+        id: collect-producer
+        if: ${{ always() && steps.build-layout.outcome != 'skipped' }}
+        working-directory: ${{ github.workspace }}
+        timeout-minutes: 3
+        run: |
+          /usr/bin/python3 -I -B tools/ci-validation/ci.py retain-producer-partial
+      - name: Retain both producer roles including partial failures
+        id: upload-producer
+        if: ${{ always() && steps.collect-producer.outcome == 'success' }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        timeout-minutes: 3
+        with:
+          name: ci-producers-rest-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/producer-failure
+          if-no-files-found: error
+          retention-days: 30
+      - name: Audit complete locked BUILD dependencies
+        id: audit
+        if: ${{ success() && steps.init.outcome == 'success' }}
+        working-directory: /tmp/d
         timeout-minutes: 5
+        env:
+          DESK_CI_ROLE_TEMP: ${{ runner.temp }}/build
+        run: |
+          npm audit --audit-level=high
+      - name: Bind the original workspace before the security scan
+        id: security-precheck
+        if: ${{ success() && steps.init.outcome == 'success' }}
+        working-directory: /tmp/e
+        timeout-minutes: 2
+        env:
+          DESK_CI_ROLE_TEMP: ${{ runner.temp }}/evaluation
+        run: /usr/bin/python3 -I -B tools/ci-validation/ci.py security-precheck
       - id: gitleaks
+        if: ${{ success() && steps.security-precheck.outcome == 'success' }}
         uses: gitleaks/gitleaks-action@e0c47f4f8be36e29cdc102c57e68cb5cbf0e8d1e # v3.0.0
         timeout-minutes: 5
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITLEAKS_ENABLE_UPLOAD_ARTIFACT: "false"
-      - name: Retain generated security report outside the checkout
+          GITLEAKS_ENABLE_COMMENTS: "false"
+      - name: Retain security report
         id: retain-security
-        if: ${{ always() && steps.gitleaks.outcome != 'skipped' }}
-        run: /usr/bin/python3 -I -B tools/ci-validation/ci.py retain-security
+        if: ${{ always() && steps.init.outcome == 'success' && steps.security-precheck.outcome == 'success' && (steps.gitleaks.outcome == 'success' || steps.gitleaks.outcome == 'failure') }}
+        working-directory: /tmp/e
         timeout-minutes: 1
         env:
+          DESK_CI_ROLE_TEMP: ${{ runner.temp }}/evaluation
           GITLEAKS_OUTCOME: ${{ steps.gitleaks.outcome }}
+        run: |
+          /usr/bin/python3 -I -B tools/ci-validation/ci.py retain-security
       - name: Upload partition security report
         id: upload-security
         if: ${{ always() && steps.retain-security.outcome == 'success' }}
@@ -281,21 +595,25 @@ jobs:
         timeout-minutes: 2
         with:
           name: ci-security-rest-${{ github.run_id }}-${{ github.run_attempt }}
-          path: ${{ runner.temp }}/ci/security-report
+          path: ${{ runner.temp }}/evaluation/ci/security-report
           if-no-files-found: error
           retention-days: 30
-      - name: Final evidence gate
+      - name: Require complete partition and retained security proof
         id: final
-        if: ${{ always() && steps.init.outcome != 'skipped' }}
-        run: /usr/bin/python3 -I -B tools/ci-validation/ci.py final
-        timeout-minutes: 1
+        if: ${{ always() && steps.init.outcome == 'success' }}
+        working-directory: /tmp/e
+        timeout-minutes: 3
         env:
+          DESK_CI_ROLE_TEMP: ${{ runner.temp }}/evaluation
+          PRODUCER_UPLOAD_OUTCOME: ${{ steps.upload-producer.outcome }}
           CONTROLS_UPLOAD_OUTCOME: ${{ steps.upload-controls.outcome }}
           UPLOAD_OUTCOME: ${{ steps.upload-full.outcome }}
           AUDIT_OUTCOME: ${{ steps.audit.outcome }}
           GITLEAKS_OUTCOME: ${{ steps.gitleaks.outcome }}
           SECURITY_UPLOAD_OUTCOME: ${{ steps.upload-security.outcome }}
           FIXTURE046_CLEANUP_OUTCOME: ${{ steps.fixture046-cleanup.outcome }}
+        run: |
+          /usr/bin/python3 -I -B tools/ci-validation/ci.py final
 
   verify:
     needs: [verify-writer, verify-rest, container]

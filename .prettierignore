@@ -13,3 +13,9 @@ fixtures/technical-master-admission/policy.json
 fixtures/technical-master-admission/profile.json
 fixtures/technical-master-admission/recipe.json
 fixtures/technical-master-admission/SOURCE.json
+
+# Canonical source-owned installation policies and complete locked closures.
+fixtures/ci-evaluation-installation/INSTALL-POLICY.json
+fixtures/ci-evaluation-installation/QUALITY-POLICY.json
+fixtures/ci-evaluation-installation/BUILD-CLOSURE.json
+fixtures/ci-evaluation-installation/EVAL-CLOSURE.json

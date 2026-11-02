@@ -1,0 +1,41 @@
+{
+  "schema": "durable-pair-signing-reference-expected/1",
+  "input_sha256": "5ae13dde848c5f9d71beb7c3760243482363b7401067e841a877187d3067928a",
+  "oracle_sha256": "151fa0785a78ad434452df1680accbc38f6c58355a1d672eeccd28bcd5b3bd3a",
+  "published_checked": {
+    "empty": true,
+    "utf8": true,
+    "binary": true,
+    "token": true,
+    "s3_escaped_path": true
+  },
+  "rfc4231_checked": {
+    "case1": true,
+    "case2": true,
+    "case3": true,
+    "case4": true,
+    "case6": true,
+    "case7": true
+  },
+  "fixed": {
+    "GET": {
+      "method": "GET",
+      "canonical_request": "GET\n/the-desk-development/development/proof/operations/b6200001-0000-4000-8000-000000000001/assessment.json\n\nhost:00000000000000000000000000000000.r2.cloudflarestorage.com\nx-amz-content-sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855\nx-amz-date:20261029T000000Z\n\nhost;x-amz-content-sha256;x-amz-date\ne3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "string_to_sign": "AWS4-HMAC-SHA256\n20261029T000000Z\n20261029/auto/s3/aws4_request\n3c88739352cdad79e2248bfae200d65eec1e06e2406f5a3c295bde03cd5d5443",
+      "payload_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "signed_headers": "host;x-amz-content-sha256;x-amz-date",
+      "signature": "82c595a2e7b4e35a242dbd3461b1890d91ed45cfe8a0a271f08248d3336dc120",
+      "authorization": "AWS4-HMAC-SHA256 Credential=TESTONLYID/20261029/auto/s3/aws4_request, SignedHeaders=host;x-amz-content-sha256;x-amz-date, Signature=82c595a2e7b4e35a242dbd3461b1890d91ed45cfe8a0a271f08248d3336dc120"
+    },
+    "PUT": {
+      "method": "PUT",
+      "canonical_request": "PUT\n/the-desk-development/development/proof/operations/b6200001-0000-4000-8000-000000000001/assessment.json\n\ncache-control:private,no-store\ncontent-length:6\ncontent-type:application/json\nhost:00000000000000000000000000000000.r2.cloudflarestorage.com\nif-none-match:*\nx-amz-content-sha256:ba97f000c06284911e574645aa29b7b6890957382f1f7708309d443a380c40a4\nx-amz-date:20261029T000000Z\n\ncache-control;content-length;content-type;host;if-none-match;x-amz-content-sha256;x-amz-date\nba97f000c06284911e574645aa29b7b6890957382f1f7708309d443a380c40a4",
+      "string_to_sign": "AWS4-HMAC-SHA256\n20261029T000000Z\n20261029/auto/s3/aws4_request\n7c22acb0f88388fab7665ccd3fb5e17e907ef80fdcb2f6573270b2e498faa39e",
+      "payload_sha256": "ba97f000c06284911e574645aa29b7b6890957382f1f7708309d443a380c40a4",
+      "signed_headers": "cache-control;content-length;content-type;host;if-none-match;x-amz-content-sha256;x-amz-date",
+      "signature": "e9ef189d627db8dc5f11120dcb9a1ef797565de86df7fca2db7a166c21c2430f",
+      "authorization": "AWS4-HMAC-SHA256 Credential=TESTONLYID/20261029/auto/s3/aws4_request, SignedHeaders=cache-control;content-length;content-type;host;if-none-match;x-amz-content-sha256;x-amz-date, Signature=e9ef189d627db8dc5f11120dcb9a1ef797565de86df7fca2db7a166c21c2430f"
+    }
+  },
+  "empty_key_hmac_abc": "fd7adb152c05ef80dccf50a1fa4c05d5a3ec6da95575fc312ae7c5d091836351"
+}

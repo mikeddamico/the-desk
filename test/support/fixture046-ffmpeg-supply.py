@@ -441,9 +441,15 @@ def read_owner():
 
 
 def export_registration():
-    if os.environ.get('RUNNER_TEMP'):
-        destination = Path(os.environ['RUNNER_TEMP']) / 'ci/evidence/fixture046-runtime.json'
-        destination.write_bytes((ROOT / 'receipt.json').read_bytes())
+    original = os.environ.get('RUNNER_TEMP')
+    temporary = os.environ.get('DESK_CI_ROLE_TEMP')
+    require(type(original) is str and bool(original))
+    runner = Path(original)
+    require(runner.is_absolute() and str(runner) == original and runner.resolve() == runner)
+    require(temporary == str(runner / 'evaluation') and Path(temporary).resolve() == Path(temporary) and
+            Path(__file__).resolve().parents[2] == Path('/tmp/e'))
+    destination = Path(temporary) / 'ci/evidence/fixture046-runtime.json'
+    destination.write_bytes((ROOT / 'receipt.json').read_bytes())
 
 
 def prepare(local):
