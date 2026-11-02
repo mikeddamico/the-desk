@@ -47,6 +47,8 @@ async function nativeCallbackSelftest(): Promise<void> {
     "maintenanceStamp",
     "captureMaintenance",
     "observeMaintenance",
+    "nativeMaintenance",
+    "observeNativeTarget",
   ]);
   const constants = new Set([
     "cleanupFailures",
@@ -54,6 +56,11 @@ async function nativeCallbackSelftest(): Promise<void> {
     "TARGET_OBSERVER_CAP",
     "TARGET_SCOPES",
     "MAINTENANCE_SQL",
+    "activeCase",
+    "nativeTargetBinding",
+    "nativeTargetOrdinal",
+    "CASE_EXPECTATIONS",
+    "HELD_TARGET_CASE",
   ]);
   const declarations = syntax.statements.filter((node) => {
     if (ts.isFunctionDeclaration(node))

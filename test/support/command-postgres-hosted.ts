@@ -16,17 +16,22 @@ const isolationDiagnostic =
   process.argv.length === 3 && process.argv[2] === "fixture105-isolation";
 const wholeNativeDiagnostic =
   process.argv.length === 3 && process.argv[2] === "fixture105-native";
-const profile = nativeDiagnostic
-  ? "fixture105-unknown"
-  : isolationDiagnostic
-    ? "fixture105-isolation"
-    : wholeNativeDiagnostic
-      ? "fixture105-native"
-      : "command-postgres";
+const providerTimeoutDiagnostic =
+  process.argv.length === 3 && process.argv[2] === "provider-timeout";
+const profile = providerTimeoutDiagnostic
+  ? "provider-timeout"
+  : nativeDiagnostic
+    ? "fixture105-unknown"
+    : isolationDiagnostic
+      ? "fixture105-isolation"
+      : wholeNativeDiagnostic
+        ? "fixture105-native"
+        : "command-postgres";
 if (
   (!nativeDiagnostic &&
     !isolationDiagnostic &&
     !wholeNativeDiagnostic &&
+    !providerTimeoutDiagnostic &&
     process.argv.length !== 2) ||
   process.platform !== "linux" ||
   process.env.GITHUB_ACTIONS !== "true" ||
@@ -113,7 +118,7 @@ c=runpy.run_path('tools/ci-validation/ci.py',run_name='command_postgres_source_c
 import types
 owner_module=types.ModuleType('command_postgres_source_check');owner_module.__dict__.update(c);sys.modules['command_postgres_source_check']=owner_module
 base=c['ci_dir']();ev=base/'evidence';summary_evidence={}
-if sys.argv[2] not in ('command-postgres','fixture105-unknown','fixture105-isolation','fixture105-native'):raise RuntimeError('fixed profile required')
+if sys.argv[2] not in ('command-postgres','fixture105-unknown','fixture105-isolation','fixture105-native','provider-timeout'):raise RuntimeError('fixed profile required')
 stage=ev/sys.argv[2]
 if sys.argv[1]=='after':
   raw=c['fixture_read'](stage/'stdout',8*1024*1024)
@@ -586,25 +591,30 @@ try {
   ])
     if (canonicalJson(after[key]) !== canonicalJson(before[key]))
       throw new Error("source_tool_owner_changed");
-  const expectedSummary = nativeDiagnostic
+  const expectedSummary = providerTimeoutDiagnostic
     ? {
         files: { passed: 1, total: 1 },
-        tests: { passed: 1, skipped: 33, total: 34 },
+        tests: { passed: 2, skipped: 42, total: 44 },
       }
-    : isolationDiagnostic
+    : nativeDiagnostic
       ? {
           files: { passed: 1, total: 1 },
-          tests: { passed: 2, skipped: 32, total: 34 },
+          tests: { passed: 1, skipped: 33, total: 34 },
         }
-      : wholeNativeDiagnostic
+      : isolationDiagnostic
         ? {
             files: { passed: 1, total: 1 },
-            tests: { passed: 34, total: 34 },
+            tests: { passed: 2, skipped: 32, total: 34 },
           }
-        : {
-            files: { passed: 1, total: 1 },
-            tests: { passed: 7, total: 7 },
-          };
+        : wholeNativeDiagnostic
+          ? {
+              files: { passed: 1, total: 1 },
+              tests: { passed: 34, total: 34 },
+            }
+          : {
+              files: { passed: 1, total: 1 },
+              tests: { passed: 7, total: 7 },
+            };
   if (
     canonicalJson(after.summary) !== canonicalJson(expectedSummary) ||
     canonicalJson(after.summary_errors) !== "[]"
@@ -624,19 +634,23 @@ try {
     Object.keys(files).length !== 1 ||
     canonicalJson(
       files[
-        nativeDiagnostic || isolationDiagnostic || wholeNativeDiagnostic
-          ? "test/integration/connected-fixture105.test.ts"
-          : "test/integration/g2-command-connection.test.ts"
+        providerTimeoutDiagnostic
+          ? "test/integration/g1-provider-controls.test.ts"
+          : nativeDiagnostic || isolationDiagnostic || wholeNativeDiagnostic
+            ? "test/integration/connected-fixture105.test.ts"
+            : "test/integration/g2-command-connection.test.ts"
       ],
     ) !==
       canonicalJson([
-        nativeDiagnostic
-          ? { tests: 34, failed: 0, skipped: 33, todo: 0 }
-          : isolationDiagnostic
-            ? { tests: 34, failed: 0, skipped: 32, todo: 0 }
-            : wholeNativeDiagnostic
-              ? { tests: 34, failed: 0, skipped: 0, todo: 0 }
-              : { tests: 7, failed: 0, skipped: 0, todo: 0 },
+        providerTimeoutDiagnostic
+          ? { tests: 44, failed: 0, skipped: 42, todo: 0 }
+          : nativeDiagnostic
+            ? { tests: 34, failed: 0, skipped: 33, todo: 0 }
+            : isolationDiagnostic
+              ? { tests: 34, failed: 0, skipped: 32, todo: 0 }
+              : wholeNativeDiagnostic
+                ? { tests: 34, failed: 0, skipped: 0, todo: 0 }
+                : { tests: 7, failed: 0, skipped: 0, todo: 0 },
       ])
   )
     throw new Error("fixed_file_results_required");
@@ -743,22 +757,26 @@ for (const name of fs
 console.log(
   stripVTControlCharacters(
     JSON.stringify({
-      [nativeDiagnostic
-        ? "fixture105_unknown"
-        : isolationDiagnostic
-          ? "fixture105_isolation"
-          : wholeNativeDiagnostic
-            ? "fixture105_native"
-            : "command_postgres"]: ok ? "pass" : "hold",
+      [providerTimeoutDiagnostic
+        ? "provider_timeout"
+        : nativeDiagnostic
+          ? "fixture105_unknown"
+          : isolationDiagnostic
+            ? "fixture105_isolation"
+            : wholeNativeDiagnostic
+              ? "fixture105_native"
+              : "command_postgres"]: ok ? "pass" : "hold",
       evidence: retained,
       tests: ok
-        ? nativeDiagnostic
-          ? 1
-          : isolationDiagnostic
-            ? 2
-            : wholeNativeDiagnostic
-              ? 34
-              : 7
+        ? providerTimeoutDiagnostic
+          ? 2
+          : nativeDiagnostic
+            ? 1
+            : isolationDiagnostic
+              ? 2
+              : wholeNativeDiagnostic
+                ? 34
+                : 7
         : null,
     }),
   ),

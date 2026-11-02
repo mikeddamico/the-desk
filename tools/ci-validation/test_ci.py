@@ -1220,6 +1220,23 @@ def _restored_workflow(test, text):
     test.assertEqual(hashlib.sha256(text.encode()).hexdigest(),'48e018806108f57b5deaf23e81d55e96fcabf62465ea7e066f064db979d64651')
 
 
+def _provider_timeout_workflow(test, text):
+    """Fixed two-case PostgreSQL diagnostic, preserving the reviewed held routes."""
+    writer=text.split('  verify-rest:\n',1)[0]
+    for identifier in ('fixture046-runtime','fixture046-cleanup'):
+        test.assertNotIn(identifier,writer)
+    test.assertEqual(hashlib.sha256(text.encode()).hexdigest(), 'b032f1996d181e6b125fbc1f93d71aeac0a641483a84f37948f2b31b648b1824')
+    for after,before in (
+        ('# PROVIDER TIMEOUT DIAGNOSTIC: two fixed provider cases; full validation remains held.', '# ISOLATION DIAGNOSTIC: two fixed native cases; full validation remains held.'),
+        ('Prove the two deterministic provider timeout cases', 'Diagnose the two native isolation refusals'),
+        ('provider-timeout', 'fixture105-isolation'),
+        ('Hold after the bounded provider timeout diagnostic', 'Hold after the bounded isolation diagnostic'),
+    ):
+        test.assertEqual(text.count(after), 3 if after=='provider-timeout' else 1)
+        text=text.replace(after,before)
+    _isolation_workflow(test,text)
+
+
 def _whole_native_workflow(test, text):
     """One fixed native file, not an aggregate/full-CI acceptance route."""
     writer=text.split('  verify-rest:\n',1)[0]
@@ -1284,6 +1301,7 @@ def _isolation_workflow(test, text):
 
 def _evaluation_workflow(test, text):
     """Closed representative /2 route: no source-only or partial-layout consumer."""
+    if '# PROVIDER TIMEOUT DIAGNOSTIC:' in text:return _provider_timeout_workflow(test,text)
     if '# WHOLE NATIVE DIAGNOSTIC:' in text:return _whole_native_workflow(test,text)
     if '# ISOLATION DIAGNOSTIC:' in text:return _isolation_workflow(test,text)
     if '# FULL RESTORATION:' in text:return _restored_workflow(test,text)
@@ -2111,11 +2129,26 @@ class WorkflowShape(unittest.TestCase):
 
     def text(self):
         raw = (HERE.parents[1] / '.github' / 'workflows' / 'ci.yml').read_text()
-        return raw if '# REPRESENTATIVE FIRST:' in raw or '# FULL RESTORATION:' in raw or '# ISOLATION DIAGNOSTIC:' in raw or '# WHOLE NATIVE DIAGNOSTIC:' in raw else _short_layout_workflow(self, raw)
+        return raw if '# REPRESENTATIVE FIRST:' in raw or '# FULL RESTORATION:' in raw or '# ISOLATION DIAGNOSTIC:' in raw or '# WHOLE NATIVE DIAGNOSTIC:' in raw or '# PROVIDER TIMEOUT DIAGNOSTIC:' in raw else _short_layout_workflow(self, raw)
 
     def test_fixed_steps_and_ceilings(self):
         text = self.text()
         raw = (ci.ROOT / '.github/workflows/ci.yml').read_text()
+        if '# PROVIDER TIMEOUT DIAGNOSTIC:' in raw:
+            _provider_timeout_workflow(self,raw)
+            for before,after in (
+                ('provider-timeout','fixture105-isolation'),
+                ('    if: ${{ false }}','    if: ${{ always() }}'),
+                ('timeout-minutes: 21','timeout-minutes: 22'),('1200s','1201s'),
+                ("steps.upload-controls.outcome == 'success'",'true'),
+                ("steps.command-postgres.outcome != 'skipped'","steps.command-postgres.outcome == 'success'"),
+                ('stage-check prerequisite',''),('stage-check focused',''),('exit 78','exit 0'),
+            ):
+                self.assertIn(before,raw)
+                with self.subTest(provider_timeout=before),self.assertRaises(AssertionError):
+                    _provider_timeout_workflow(self,raw.replace(before,after,1))
+            _short_layout_controls(self,ci.ROOT/'test/support/fixture105-hosted-layout.py')
+            return
         if '# WHOLE NATIVE DIAGNOSTIC:' in raw:
             _whole_native_workflow(self,raw)
             for before,after in (
@@ -2425,7 +2458,7 @@ class WorkflowShape(unittest.TestCase):
 
     def test_partial_artifacts_are_still_uploaded_and_upload_failure_gates_the_aggregate(self):
         text = self.text()
-        if '# REPRESENTATIVE FIRST:' in text or '# FULL RESTORATION:' in text or '# ISOLATION DIAGNOSTIC:' in text or '# WHOLE NATIVE DIAGNOSTIC:' in text:
+        if '# REPRESENTATIVE FIRST:' in text or '# FULL RESTORATION:' in text or '# ISOLATION DIAGNOSTIC:' in text or '# WHOLE NATIVE DIAGNOSTIC:' in text or '# PROVIDER TIMEOUT DIAGNOSTIC:' in text:
             _evaluation_workflow(self,text)
             return
         self.assertNotIn('continue-on-error', text)
@@ -3608,7 +3641,7 @@ class FixtureTargetObserverShapeTests(unittest.TestCase):
         self.assertIsInstance(filters[0], ast.Dict)
         routes = {key.value: value for key, value in zip(filters[0].keys, filters[0].values)
                   if isinstance(key, ast.Constant)}
-        self.assertEqual(set(routes), {'focused', 'p33', 'parity', 'unit', 'integration', 'all', 'writer', 'rest', 'master046', 'technical-master', 'technical-master-pure', 'durable-pair-pure', 'command-postgres', 'fixture105-unknown', 'fixture105-isolation', 'fixture105-native', 'runtime-observe', 'fixture105-traversal'})
+        self.assertEqual(set(routes), {'focused', 'p33', 'parity', 'unit', 'integration', 'all', 'writer', 'rest', 'master046', 'technical-master', 'technical-master-pure', 'durable-pair-pure', 'command-postgres', 'fixture105-unknown', 'fixture105-isolation', 'fixture105-native', 'provider-timeout', 'runtime-observe', 'fixture105-traversal'})
         self.assertIn("    test = 'test/unit/p33-parity-harness.test.ts'", guard_source)
         self.assertEqual(ast.literal_eval(routes['writer']), ['test/unit/writer-fixture-input.test.ts'])
         self.assertEqual(ast.literal_eval(routes['master046']), ['test/unit/frozen-fixture046-master.test.ts'])
@@ -3617,7 +3650,66 @@ class FixtureTargetObserverShapeTests(unittest.TestCase):
         self.assertEqual(ast.literal_eval(routes['fixture105-unknown']), ['test/integration/connected-fixture105.test.ts', '--testNamePattern', '^connected fixture105 native ownership holds unknown construction commit without inventing its missing settlement receipt$'])
         self.assertEqual(ast.literal_eval(routes['fixture105-isolation']), ['test/integration/connected-fixture105.test.ts', '--testNamePattern', '^connected fixture105 native ownership (retains durable direction if the separate audit transaction fails|rolls back package creation when a foreign observation identity wins late)$'])
         self.assertEqual(ast.literal_eval(routes['fixture105-native']), ['test/integration/connected-fixture105.test.ts'])
+        self.assertEqual(ast.literal_eval(routes['provider-timeout']), ['test/integration/g1-provider-controls.test.ts', '--testNamePattern', '^G1-A real PostgreSQL controlled non-network execution actual elapsed timeout consumes late (resolve|reject) with no outcome/SQL/unhandled rejection$'])
+        traversal=(ci.ROOT/'test/unit/fixture105-traversal.test.ts').read_text()
+        def extraction_shape(source):
+            extraction=source[source.index('async function nativeCallbackSelftest'):source.index('function requiredValue')]
+            groups={kind:re.findall(r'"([A-Za-z_]+)"',extraction.split('const '+kind+' = new Set([',1)[1].split(']);',1)[0]) for kind in ('functions','constants')}
+            self.assertEqual(groups['functions'], ['retainTestCleanup','withTestCleanup','driverQuery','rawDriverQuery','observedPromiseCall','driverPromiseThen','commitWitness','targetUnknown','targetData','targetInt','targetSupplement','maintenanceStamp','captureMaintenance','observeMaintenance','nativeMaintenance','observeNativeTarget'])
+            self.assertEqual(groups['constants'], ['cleanupFailures','TARGET_PREFIX','TARGET_OBSERVER_CAP','TARGET_SCOPES','MAINTENANCE_SQL','activeCase','nativeTargetBinding','nativeTargetOrdinal','CASE_EXPECTATIONS','HELD_TARGET_CASE'])
+            self.assertIn('expect(declarations).toHaveLength(functions.size + constants.size + 1);',extraction)
+            self.assertIn('globalThis.callbackSelftest = () => TargetObserver.selftest();',extraction)
+            self.assertIn('await (selftest as () => Promise<void>)();',extraction)
+            self.assertIn(').toEqual(original);',extraction)
+        extraction_shape(traversal)
+        for declaration in ('nativeMaintenance','observeNativeTarget','activeCase','nativeTargetBinding','nativeTargetOrdinal','CASE_EXPECTATIONS','HELD_TARGET_CASE'):
+            token='    "'+declaration+'",'
+            self.assertEqual(traversal.count(token),1)
+            with self.subTest(omitted=declaration),self.assertRaises(AssertionError):extraction_shape(traversal.replace(token,'',1))
+        provider=(ci.ROOT/'test/integration/g1-provider-controls.test.ts').read_text()
+        def timeout_shape(source):
+            case=source[source.index('  it.each(["resolve", "reject"])('):]
+            case=case[:case.index('\n  );')]
+            flat=re.sub(r'\s+',' ',case)
+            for token in ('connectionString: pe.ownerUrl','max: 1','connectionTimeoutMillis: 1000','query_timeout: 2000',
+                          '-c statement_timeout=1000 -c lock_timeout=1000','/^g1-effect-[0-9a-f]{32}$/','/^g1-cleanup-[0-9a-f]{32}$/',
+                          'application_name: effectTag','application_name: cleanupTag','beforeEffect: () => effectGate',
+                          'ownedWork.push(work);','ownedWork.push(execution);','late = work.then(',
+                          'const queriesAtTimeout = sqlCount;','expect(sqlCount).toBe(queriesAtTimeout);',
+                          'expect(await invocationCount(cleanupPool)).toBe(0);','expect(await invocationCount(cleanupPool)).toBe(1);',
+                          'const timedOut = await snapshot(cleanupPool);','expect(await snapshot(pe.env.owner)).toBe(timedOut);',
+                          'if (!settled.ok && settled.error !== lateError) throw settled.error;',
+                          'expect(settled.ok).toBe(kind === "resolve");','nonNetworkControls({ PROVIDER_CALL_TIMEOUT_MS: 20 }),',
+                          'owner: cleanupPool','database: pe.env.name','apps: [effectTag]','pools: [effectPool]',
+                          'promises: ownedWork','settleMs: 5000','endMs: 5000','cleanupPool.end()',
+                          'expect(finishCalls).toBe(0);','expect(unhandled).toEqual([]);','() => pe.close()', '120000,'):
+                self.assertIn(token,flat)
+            ordered=['const result = await execution;','const queriesAtTimeout = sqlCount;',
+                     'const timedOut = await snapshot(cleanupPool);','releaseEffect();',
+                     'const settled = await timeoutWait( late, "late provider work pending", );']
+            ordered=[re.sub(r'\s+',' ',token).strip() for token in ordered]
+            for token in ordered:self.assertIn(token,flat)
+            offsets=[flat.index(token) for token in ordered];self.assertEqual(offsets,sorted(offsets))
+            self.assertEqual(case.count('await drain('),1);self.assertEqual(case.count('cleanupPool.end()'),1)
+            self.assertNotIn('pools: [pe.env.owner]',case);self.assertNotIn('durableAdapter(pe.env.owner',case)
+            self.assertIn('let failed = false;',source);self.assertIn('if (failed) throw primary;',source)
+            self.assertIn('[primary, error]',source);self.assertIn('clearTimeout(timer);',source)
+        timeout_shape(provider)
+        for before,after in (('beforeEffect: () => effectGate','beforeEffect: () => Promise.resolve()'),
+                             ('PROVIDER_CALL_TIMEOUT_MS: 20','PROVIDER_CALL_TIMEOUT_MS: 200'),
+                             ('apps: [effectTag]','apps: ["%"]'),('pools: [effectPool]','pools: [pe.env.owner]'),
+                             ('const queriesAtTimeout = sqlCount;','const queriesAtTimeout = 0;'),
+                             ('[primary, error]','[error, primary]'),('if (failed) throw primary;','if (primary) throw primary;')):
+            self.assertIn(before,provider)
+            with self.subTest(timeout_control=before),self.assertRaises(AssertionError):timeout_shape(provider.replace(before,after,1))
         hosted=(ci.ROOT/'test/support/command-postgres-hosted.ts').read_text()
+        for token in ('providerTimeoutDiagnostic','tests: { passed: 2, skipped: 42, total: 44 }',
+                      '{ tests: 44, failed: 0, skipped: 42, todo: 0 }','"test/integration/g1-provider-controls.test.ts"'):
+            self.assertIn(token,hosted)
+        expected,errors=ci.parse_summary(' Test Files  1 passed (1)\n      Tests  2 passed | 42 skipped (44)\n')
+        self.assertEqual(expected,{'files':{'passed':1,'total':1},'tests':{'passed':2,'skipped':42,'total':44}});self.assertEqual(errors,[])
+        for line in ('1 passed | 43 skipped','2 passed | 1 failed | 41 skipped','3 passed | 41 skipped','44 passed'):
+            actual,_=ci.parse_summary(' Test Files  1 passed (1)\n      Tests  '+line+' (44)\n');self.assertNotEqual(actual,expected)
         def hosted_budgets(text):
             self.assertEqual(re.findall(r'const guardWorkSeconds = ([^;]+);',text),['wholeNativeDiagnostic ? 1800 : 900'])
             self.assertEqual(re.findall(r'const guardCloseMilliseconds = ([^;]+);',text),['wholeNativeDiagnostic ? 1845000 : 945000'])
@@ -3710,7 +3802,7 @@ class FixtureTargetObserverShapeTests(unittest.TestCase):
                            for keyword in node.keywords if keyword.arg == 'choices']
         self.assertEqual(len(profile_choices), 1)
         self.assertEqual(ast.literal_eval(profile_choices[0]),
-                         ['prerequisite', 'focused', 'p33', 'parity', 'unit', 'integration', 'all', 'writer', 'rest', 'master046', 'technical-master', 'technical-master-pure', 'durable-pair-pure', 'command-postgres', 'fixture105-unknown', 'fixture105-isolation', 'fixture105-native', 'runtime-observe', 'fixture105-traversal'])
+                         ['prerequisite', 'focused', 'p33', 'parity', 'unit', 'integration', 'all', 'writer', 'rest', 'master046', 'technical-master', 'technical-master-pure', 'durable-pair-pure', 'command-postgres', 'fixture105-unknown', 'fixture105-isolation', 'fixture105-native', 'provider-timeout', 'runtime-observe', 'fixture105-traversal'])
         for profile, expression in (('all', "['--exclude', test]"),
                                     ('rest', "['--exclude', test, '--exclude', 'test/unit/writer-fixture-input.test.ts']")):
             self.assertEqual(ast.dump(routes[profile]), ast.dump(ast.parse(expression, mode='eval').body))

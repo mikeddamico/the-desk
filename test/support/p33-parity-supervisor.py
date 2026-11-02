@@ -736,6 +736,7 @@ def guard(args):
                'command-postgres': ['test/integration/g2-command-connection.test.ts'],
                'fixture105-unknown': ['test/integration/connected-fixture105.test.ts', '--testNamePattern', '^connected fixture105 native ownership holds unknown construction commit without inventing its missing settlement receipt$'],
                'fixture105-isolation': ['test/integration/connected-fixture105.test.ts', '--testNamePattern', '^connected fixture105 native ownership (retains durable direction if the separate audit transaction fails|rolls back package creation when a foreign observation identity wins late)$'],
+               'provider-timeout': ['test/integration/g1-provider-controls.test.ts', '--testNamePattern', '^G1-A real PostgreSQL controlled non-network execution actual elapsed timeout consumes late (resolve|reject) with no outcome/SQL/unhandled rejection$'],
                'fixture105-native': ['test/integration/connected-fixture105.test.ts'],
                'runtime-observe': ['test/runtime-observe.test.ts'],
                'fixture105-traversal': ['test/unit/fixture105-traversal.test.ts'],
@@ -1383,7 +1384,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest='role', required=True)
     g = sub.add_parser('guard')
-    g.add_argument('profile', choices=['prerequisite', 'focused', 'p33', 'parity', 'unit', 'integration', 'all', 'writer', 'rest', 'master046', 'technical-master', 'technical-master-pure', 'durable-pair-pure', 'command-postgres', 'fixture105-unknown', 'fixture105-isolation', 'fixture105-native', 'runtime-observe', 'fixture105-traversal'])
+    g.add_argument('profile', choices=['prerequisite', 'focused', 'p33', 'parity', 'unit', 'integration', 'all', 'writer', 'rest', 'master046', 'technical-master', 'technical-master-pure', 'durable-pair-pure', 'command-postgres', 'fixture105-unknown', 'fixture105-isolation', 'fixture105-native', 'provider-timeout', 'runtime-observe', 'fixture105-traversal'])
     o = sub.add_parser('owner')
     for key in ('lease', 'device', 'inode', 'link', 'guard'):
         o.add_argument('--'+key, type=int, required=True)

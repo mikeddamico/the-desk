@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 import { setTimeout as sleep } from "node:timers/promises";
-import type pg from "pg";
+import pg from "pg";
 import { afterAll, beforeAll, afterEach, describe, expect, it } from "vitest";
 import {
   executeProviderCall,
@@ -10,6 +10,7 @@ import {
 } from "../../src/runtime/provider.js";
 import {
   durableAdapter,
+  drain,
   finishSucceeded,
   invocationCount,
   nonNetworkControls,
@@ -119,6 +120,50 @@ function instrumentPool(
         : value;
     },
   });
+}
+
+// Finite waits consume rejection immediately and clear their watchdog on every outcome.
+async function timeoutWait<T>(work: Promise<T>, label: string): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      work,
+      new Promise<never>((_resolve, reject) => {
+        timer = setTimeout(() => {
+          reject(new Error(label));
+        }, 5000);
+      }),
+    ]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+// A thrown undefined remains a primary failure, including when cleanup also fails.
+async function timeoutCleanup(
+  body: () => Promise<void>,
+  cleanup: () => Promise<void>,
+): Promise<void> {
+  let failed = false;
+  let primary: unknown;
+  try {
+    await body();
+  } catch (error) {
+    failed = true;
+    primary = error;
+  }
+  try {
+    await cleanup();
+  } catch (error) {
+    if (failed)
+      throw new AggregateError(
+        [primary, error],
+        "provider timeout body and cleanup failed",
+        { cause: error },
+      );
+    throw error;
+  }
+  if (failed) throw primary;
 }
 
 suite("G1-A real PostgreSQL controlled non-network execution", () => {
@@ -321,95 +366,231 @@ suite("G1-A real PostgreSQL controlled non-network execution", () => {
   it.each(["resolve", "reject"])(
     "actual elapsed timeout consumes late %s with no outcome/SQL/unhandled rejection",
     async (kind) => {
-      await scenario(async (pe, pool) => {
-        const request = reservation(pe.attempt);
-        const adapter = durableAdapter(pe.env.owner, { lookup: true });
-        let completed = false;
-        let finishCalls = 0;
-        let sqlCount = 0;
-        const observedPool = instrumentPool(pool, async (_text, native) => {
-          sqlCount++;
-          return native();
-        });
-        const unhandled: unknown[] = [];
-        const onUnhandled = (error: unknown) => {
-          unhandled.push(error);
-        };
-        process.on("unhandledRejection", onUnhandled);
-        const protectedBefore = await snapshot(pe.env.owner, false);
-        try {
-          const start = performance.now();
-          const result = await executeProviderCall(
-            observedPool,
-            request,
-            {
-              ...adapter,
-              async perform(req) {
-                const value = await adapter.perform(req);
-                await sleep(90);
-                completed = true;
-                if (kind === "reject") throw new Error("LATE_PROVIDER_CANARY");
-                return value;
-              },
-            },
-            (value) => {
-              finishCalls++;
-              return finishSucceeded(request.provider_call_id)(value);
-            },
-            noopContext(),
-            nonNetworkControls({ PROVIDER_CALL_TIMEOUT_MS: 20 }),
-          );
-          expect(performance.now() - start).toBeGreaterThanOrEqual(20);
-          expect(result).toMatchObject({
-            status: "ambiguous",
-            code: "provider_observation_timeout",
+      if (!url || !cluster) throw new Error("real PG required");
+      const pe = await providerEnv(cluster, url);
+      const pool = pe.runtime();
+      await timeoutCleanup(
+        async () => {
+          const request = reservation(pe.attempt);
+          const suffix = randomUUID().replaceAll("-", "");
+          const effectTag = "g1-effect-" + suffix;
+          const cleanupTag = "g1-cleanup-" + suffix;
+          if (
+            !/^g1-effect-[0-9a-f]{32}$/.test(effectTag) ||
+            !/^g1-cleanup-[0-9a-f]{32}$/.test(cleanupTag)
+          )
+            throw new Error("exact timeout pool tags required");
+          const poolOptions = {
+            connectionString: pe.ownerUrl,
+            max: 1,
+            connectionTimeoutMillis: 1000,
+            query_timeout: 2000,
+            options: "-c statement_timeout=1000 -c lock_timeout=1000",
+          };
+          const effectPool = new pg.Pool({
+            ...poolOptions,
+            application_name: effectTag,
           });
-          expect(await invocationCount(pe.env.owner)).toBe(1);
-          const timedOut = await snapshot(pe.env.owner);
-          const queriesAtTimeout = sqlCount;
-          await sleep(150);
-          expect(sqlCount).toBe(queriesAtTimeout);
-          expect(completed).toBe(true);
-          expect(finishCalls).toBe(0);
-          expect(unhandled).toEqual([]);
-          expect(await snapshot(pe.env.owner)).toBe(timedOut);
-          expect(await snapshot(pe.env.owner, false)).toBe(protectedBefore);
-          expect(
-            (await lookupProviderCall(pool, request.provider_call_id))?.outcome,
-          ).toBeNull();
-          expect(
-            (
-              await executeProviderCall(
-                pool,
+          const cleanupPool = new pg.Pool({
+            ...poolOptions,
+            application_name: cleanupTag,
+          });
+          const cleanupErrors: unknown[] = [];
+          const onPoolError = (error: Error) => {
+            cleanupErrors.push(error);
+          };
+          effectPool.on("error", onPoolError);
+          cleanupPool.on("error", onPoolError);
+          let releaseEffect!: () => void;
+          const effectGate = new Promise<void>((resolve) => {
+            releaseEffect = resolve;
+          });
+          const adapter = durableAdapter(effectPool, {
+            lookup: true,
+            beforeEffect: () => effectGate,
+          });
+          const ownedWork: Promise<unknown>[] = [];
+          let late:
+            | Promise<
+                { ok: true; value: unknown } | { ok: false; error: unknown }
+              >
+            | undefined;
+          const lateError = new Error("LATE_PROVIDER_CANARY");
+          let completed = false;
+          let finishCalls = 0;
+          let sqlCount = 0;
+          const sqlEntries = { connect: 0, clientQuery: 0, poolQuery: 0 };
+          const observedPool = instrumentPool(
+            pool,
+            async (_text, native) => {
+              sqlCount++;
+              return native();
+            },
+            undefined,
+            sqlEntries,
+          );
+          const unhandled: unknown[] = [];
+          const onUnhandled = (error: unknown) => {
+            unhandled.push(error);
+          };
+          process.on("unhandledRejection", onUnhandled);
+          await timeoutCleanup(
+            async () => {
+              const protectedBefore = await snapshot(pe.env.owner, false);
+              const start = performance.now();
+              const execution = executeProviderCall(
+                observedPool,
                 request,
-                adapter,
-                finishSucceeded(request.provider_call_id),
-                noopContext(),
-                nonNetworkControls(),
-              )
-            ).status,
-          ).toBe("unfinished");
-          expect(await invocationCount(pe.env.owner)).toBe(1);
-          expect(JSON.stringify(result)).not.toContain("CANARY");
-          expect(
-            (
-              await reconcileProviderCall(
-                pool,
                 {
-                  providerCallId: request.provider_call_id,
-                  adapter,
-                  finish: finishSucceeded(request.provider_call_id),
+                  ...adapter,
+                  perform(req) {
+                    const work = (async () => {
+                      const value = await adapter.perform(req);
+                      await sleep(90);
+                      completed = true;
+                      if (kind === "reject") throw lateError;
+                      return value;
+                    })();
+                    ownedWork.push(work);
+                    late = work.then(
+                      (value) => ({ ok: true as const, value }),
+                      (error: unknown) => ({ ok: false as const, error }),
+                    );
+                    return work;
+                  },
+                },
+                (value) => {
+                  finishCalls++;
+                  return finishSucceeded(request.provider_call_id)(value);
                 },
                 noopContext(),
-              )
-            ).status,
-          ).toBe("performed");
-          expect(await pe.events()).toBe(1);
-          expect(await invocationCount(pe.env.owner)).toBe(1);
-        } finally {
-          process.off("unhandledRejection", onUnhandled);
-        }
-      });
+                nonNetworkControls({ PROVIDER_CALL_TIMEOUT_MS: 20 }),
+              );
+              ownedWork.push(execution);
+              const result = await execution;
+              const queriesAtTimeout = sqlCount;
+              const entriesAtTimeout = { ...sqlEntries };
+              expect(performance.now() - start).toBeGreaterThanOrEqual(20);
+              expect(result).toMatchObject({
+                status: "ambiguous",
+                code: "provider_observation_timeout",
+              });
+              expect(await invocationCount(cleanupPool)).toBe(0);
+              const timedOut = await snapshot(cleanupPool);
+              expect(completed).toBe(false);
+              releaseEffect();
+              if (!late) throw new Error("provider adapter never started");
+              const settled = await timeoutWait(
+                late,
+                "late provider work pending",
+              );
+              if (!settled.ok && settled.error !== lateError)
+                throw settled.error;
+              expect(settled.ok).toBe(kind === "resolve");
+              if (!settled.ok) expect(settled.error).toBe(lateError);
+              expect(await invocationCount(cleanupPool)).toBe(1);
+              await sleep(0);
+              expect(sqlCount).toBe(queriesAtTimeout);
+              expect(sqlEntries).toEqual(entriesAtTimeout);
+              expect(completed).toBe(true);
+              expect(finishCalls).toBe(0);
+              expect(unhandled).toEqual([]);
+              expect(await snapshot(pe.env.owner)).toBe(timedOut);
+              expect(await snapshot(pe.env.owner, false)).toBe(protectedBefore);
+              expect(
+                (await lookupProviderCall(pool, request.provider_call_id))
+                  ?.outcome,
+              ).toBeNull();
+              expect(
+                (
+                  await executeProviderCall(
+                    pool,
+                    request,
+                    adapter,
+                    finishSucceeded(request.provider_call_id),
+                    noopContext(),
+                    nonNetworkControls(),
+                  )
+                ).status,
+              ).toBe("unfinished");
+              expect(await invocationCount(pe.env.owner)).toBe(1);
+              expect(JSON.stringify(result)).not.toContain("CANARY");
+              expect(
+                (
+                  await reconcileProviderCall(
+                    pool,
+                    {
+                      providerCallId: request.provider_call_id,
+                      adapter,
+                      finish: finishSucceeded(request.provider_call_id),
+                    },
+                    noopContext(),
+                  )
+                ).status,
+              ).toBe("performed");
+              expect(await pe.events()).toBe(1);
+              expect(await invocationCount(pe.env.owner)).toBe(1);
+            },
+            async () => {
+              releaseEffect();
+              try {
+                const diagnostics = await drain({
+                  owner: cleanupPool,
+                  database: pe.env.name,
+                  apps: [effectTag],
+                  promises: ownedWork,
+                  pools: [effectPool],
+                  settleMs: 5000,
+                  endMs: 5000,
+                });
+                cleanupErrors.push(
+                  ...diagnostics.map((message) => new Error(message)),
+                );
+              } catch (error) {
+                cleanupErrors.push(error);
+              }
+              let workSettled = false;
+              try {
+                await timeoutWait(
+                  Promise.allSettled(ownedWork),
+                  "owned provider work still pending",
+                );
+                workSettled = true;
+              } catch (error) {
+                cleanupErrors.push(error);
+              }
+              let cleanupEnded = false;
+              try {
+                await timeoutWait(
+                  cleanupPool.end(),
+                  "cleanup pool end pending",
+                );
+                cleanupEnded = true;
+              } catch (error) {
+                cleanupErrors.push(error);
+              }
+              // Pending work remains a failure; keep its rejection/error listeners installed.
+              if (workSettled) process.off("unhandledRejection", onUnhandled);
+              if (workSettled && cleanupErrors.length === 0)
+                effectPool.off("error", onPoolError);
+              if (cleanupEnded) cleanupPool.off("error", onPoolError);
+              if (unhandled.length)
+                cleanupErrors.push(
+                  new AggregateError(
+                    unhandled,
+                    "late unhandled provider rejection",
+                  ),
+                );
+              if (cleanupErrors.length)
+                throw new AggregateError(
+                  cleanupErrors,
+                  "provider timeout cleanup incomplete",
+                );
+            },
+          );
+        },
+        () => pe.close(),
+      );
     },
     120000,
   );
