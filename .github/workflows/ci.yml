@@ -1,6 +1,6 @@
 name: foundation-ci
 
-# PROVIDER TIMEOUT DIAGNOSTIC: two fixed provider cases; full validation remains held.
+# FULL RESTORATION: independent ordinary installations and complete partition acceptance.
 # CI153 revised selected-case proof accepted; original 120-second benchmark remains failed.
 on:
   pull_request:
@@ -10,7 +10,6 @@ permissions:
   contents: read
 jobs:
   verify-writer:
-    if: ${{ false }}
     runs-on: ubuntu-24.04
     timeout-minutes: 190
     services:
@@ -376,7 +375,7 @@ jobs:
           /bin/bash tools/ci-validation/run-stage.sh bind-build
       - name: Reconstruct the fixed synthetic fixture FFmpeg runtime
         id: fixture046-runtime
-        if: ${{ false }}
+        if: ${{ success() && steps.init.outcome == 'success' }}
         working-directory: /tmp/e
         timeout-minutes: 16
         env:
@@ -472,7 +471,7 @@ jobs:
           path: ${{ runner.temp }}/evaluation/ci/upload-controls
           if-no-files-found: error
           retention-days: 30
-      - name: Prove the two deterministic provider timeout cases
+      - name: Prove ordinary PostgreSQL command connection semantics
         id: command-postgres
         if: ${{ success() && steps.init.outcome == 'success' && steps.semantic-identities.outcome == 'success' && steps.collect-controls.outcome == 'success' && steps.upload-controls.outcome == 'success' }}
         working-directory: /tmp/e
@@ -482,19 +481,19 @@ jobs:
         run: |
           /usr/bin/env HOME="$DESK_CI_ROLE_TEMP/ci/home" TMPDIR="$DESK_CI_ROLE_TEMP/ci/tmp" \
             /usr/bin/timeout --signal=TERM --kill-after=20s 1200s \
-            node --import tsx test/support/command-postgres-hosted.ts provider-timeout
-      - name: Retain the two-case diagnostic including failed cleanup observations
+            node --import tsx test/support/command-postgres-hosted.ts
+      - name: Retain ordinary command proof including failed cleanup observations
         id: upload-command-postgres
         if: ${{ always() && steps.init.outcome == 'success' && steps.command-postgres.outcome != 'skipped' }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         timeout-minutes: 2
         with:
-          name: ci-provider-timeout-rest-${{ github.run_id }}-${{ github.run_attempt }}
-          path: ${{ runner.temp }}/evaluation/ci/evidence/provider-timeout/retained
+          name: ci-command-postgres-rest-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/evaluation/ci/evidence/command-postgres/retained
           if-no-files-found: error
           retention-days: 30
       - name: Guard P33 aggregate all
-        if: ${{ false }}
+        if: ${{ success() && steps.init.outcome == 'success' && steps.semantic-identities.outcome == 'success' && steps.collect-controls.outcome == 'success' && steps.upload-controls.outcome == 'success' }}
         working-directory: /tmp/e
         timeout-minutes: 122
         env:
@@ -502,7 +501,7 @@ jobs:
         run: |
           exec /bin/bash tools/ci-validation/run-stage.sh all
       - name: Validate aggregate counts coverage and source
-        if: ${{ false }}
+        if: ${{ success() && steps.init.outcome == 'success' && steps.semantic-identities.outcome == 'success' && steps.collect-controls.outcome == 'success' && steps.upload-controls.outcome == 'success' }}
         working-directory: /tmp/e
         timeout-minutes: 2
         env:
@@ -519,7 +518,7 @@ jobs:
         run: /usr/bin/python3 -I -B test/support/fixture046-ffmpeg-supply.py cleanup
       - name: Collect full evidence
         id: collect-full
-        if: ${{ false }}
+        if: ${{ always() && steps.init.outcome == 'success' }}
         working-directory: /tmp/e
         timeout-minutes: 3
         env:
@@ -529,7 +528,7 @@ jobs:
           /usr/bin/python3 -I -B tools/ci-validation/ci.py collect --scope full
       - name: Retain full evidence
         id: upload-full
-        if: ${{ false }}
+        if: ${{ always() && steps.collect-full.outcome == 'success' }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         timeout-minutes: 3
         with:
@@ -556,7 +555,7 @@ jobs:
           retention-days: 30
       - name: Audit complete locked BUILD dependencies
         id: audit
-        if: ${{ false }}
+        if: ${{ success() && steps.init.outcome == 'success' }}
         working-directory: /tmp/d
         timeout-minutes: 5
         env:
@@ -565,14 +564,14 @@ jobs:
           npm audit --audit-level=high
       - name: Bind the original workspace before the security scan
         id: security-precheck
-        if: ${{ false }}
+        if: ${{ success() && steps.init.outcome == 'success' }}
         working-directory: /tmp/e
         timeout-minutes: 2
         env:
           DESK_CI_ROLE_TEMP: ${{ runner.temp }}/evaluation
         run: /usr/bin/python3 -I -B tools/ci-validation/ci.py security-precheck
       - id: gitleaks
-        if: ${{ false }}
+        if: ${{ success() && steps.security-precheck.outcome == 'success' }}
         uses: gitleaks/gitleaks-action@e0c47f4f8be36e29cdc102c57e68cb5cbf0e8d1e # v3.0.0
         timeout-minutes: 5
         env:
@@ -581,7 +580,7 @@ jobs:
           GITLEAKS_ENABLE_COMMENTS: "false"
       - name: Retain security report
         id: retain-security
-        if: ${{ false }}
+        if: ${{ always() && steps.init.outcome == 'success' && steps.security-precheck.outcome == 'success' && (steps.gitleaks.outcome == 'success' || steps.gitleaks.outcome == 'failure') }}
         working-directory: /tmp/e
         timeout-minutes: 1
         env:
@@ -591,7 +590,7 @@ jobs:
           /usr/bin/python3 -I -B tools/ci-validation/ci.py retain-security
       - name: Upload partition security report
         id: upload-security
-        if: ${{ false }}
+        if: ${{ always() && steps.retain-security.outcome == 'success' }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         timeout-minutes: 2
         with:
@@ -601,7 +600,7 @@ jobs:
           retention-days: 30
       - name: Require complete partition and retained security proof
         id: final
-        if: ${{ false }}
+        if: ${{ always() && steps.init.outcome == 'success' }}
         working-directory: /tmp/e
         timeout-minutes: 3
         env:
@@ -615,17 +614,10 @@ jobs:
           FIXTURE046_CLEANUP_OUTCOME: ${{ steps.fixture046-cleanup.outcome }}
         run: |
           /usr/bin/python3 -I -B tools/ci-validation/ci.py final
-      - name: Hold after the bounded provider timeout diagnostic
-        if: ${{ always() }}
-        working-directory: ${{ github.workspace }}
-        timeout-minutes: 1
-        run: |
-          printf '%s\n' 'HOLD: two-case diagnostic only; full validation remains held.'
-          exit 78
 
   verify:
     needs: [verify-writer, verify-rest, container]
-    if: ${{ false }}
+    if: ${{ always() }}
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
@@ -652,7 +644,6 @@ jobs:
           CONTAINER_OUTCOME: ${{ needs.container.result }}
 
   container:
-    if: ${{ false }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
