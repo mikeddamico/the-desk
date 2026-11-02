@@ -1660,15 +1660,40 @@ def _short_layout_controls(test, owner_path):
         'wrong_match_record', 'extra_match_record', 'capture_error',
         'cancel_match', 'bytes_drift', 'config_replaced', 'mode_drift',
         'git_root_replaced', 'names_drift', 'bounded_read')]
-    for fault, selected in config_cases:
-        with test.subTest(layout_config=fault, key=selected), tempfile.TemporaryDirectory() as directory:
+    config_cases = [(profile, fault, selected) for profile in ('pr', 'push')
+                    for fault, selected in config_cases]
+    config_cases += [('push', fault, key) for key in ('branch.main.remote', 'branch.main.merge')
+                     for fault in ('missing', 'wrong', 'duplicate')]
+    context_faults = ('event_missing', 'event_foreign', 'ref_missing', 'ref_foreign',
+                      'ref_pr_head', 'ref_pr_zero', 'ref_pr_suffix', 'ref_pr_newline',
+                      'symbolic_mismatch', 'symbolic_foreign', 'symbolic_duplicate', 'symbolic_missing_lf')
+    config_cases += [(profile, fault, None) for profile in ('pr', 'push') for fault in context_faults]
+    for profile, fault, selected in config_cases:
+        with test.subTest(layout_config=fault, key=selected, profile=profile), tempfile.TemporaryDirectory() as directory:
             g = realm()
             root = Path(directory)
             destination, evidence = root / 'd', root / 'evidence'
             destination.mkdir(mode=0o700); evidence.mkdir(mode=0o700)
             git = destination / '.git'; git.mkdir(mode=0o700)
             config = git / 'config'
-            actual = {key: [value] for key, value in config_expected.items()}
+            expected = dict(config_expected)
+            if profile == 'push':
+                expected.update({'branch.main.remote': 'origin', 'branch.main.merge': 'refs/heads/main'})
+            actual = {key: [value] for key, value in expected.items()}
+            environment = {'GITHUB_EVENT_NAME': 'push' if profile == 'push' else 'pull_request',
+                           'GITHUB_REF': 'refs/heads/main' if profile == 'push' else 'refs/pull/43/merge'}
+            symbolic = b'refs/heads/main\n' if profile == 'push' else b'HEAD\n'
+            if fault == 'event_missing': environment.pop('GITHUB_EVENT_NAME')
+            if fault == 'event_foreign': environment['GITHUB_EVENT_NAME'] = 'workflow_dispatch'
+            if fault == 'ref_missing': environment.pop('GITHUB_REF')
+            if fault.startswith('ref_') and fault != 'ref_missing':
+                environment['GITHUB_REF'] = {'ref_foreign':'refs/heads/other', 'ref_pr_head':'refs/pull/43/head',
+                    'ref_pr_zero':'refs/pull/0/merge', 'ref_pr_suffix':'refs/pull/43/merge/other',
+                    'ref_pr_newline':'refs/pull/43/merge\n'}[fault]
+            if fault == 'symbolic_mismatch': symbolic = b'HEAD\n' if profile == 'push' else b'refs/heads/main\n'
+            if fault == 'symbolic_foreign': symbolic = b'refs/heads/other\n'
+            if fault == 'symbolic_duplicate': symbolic += symbolic
+            if fault == 'symbolic_missing_lf': symbolic = symbolic[:-1]
             sentinel = 'DUMMY_UNEXPECTED_CREDENTIAL_7ac52'
             extras = {'extra_http': 'http.extraheader', 'extra_credential': 'credential.helper',
                       'extra_hook': 'core.hookspath', 'extra_include': 'include.path',
@@ -1681,7 +1706,9 @@ def _short_layout_controls(test, owner_path):
             if fault == 'wrong': actual[selected] = [sentinel]
             if fault == 'duplicate': actual[selected] *= 2
             if fault in extras: actual[extras[fault]] = [sentinel]
-            if fault == 'branch_pair': actual.update({'branch.main.remote': ['origin'], 'branch.main.merge': ['refs/heads/main']})
+            if fault == 'branch_pair':
+                branch = 'other' if profile == 'push' else 'main'
+                actual.update({'branch.' + branch + '.remote': ['origin'], 'branch.' + branch + '.merge': ['refs/heads/' + branch]})
             if fault == 'duplicate_mixed': actual['remote.origin.url'] += ['https://user:' + sentinel + '@example.invalid/']
             if fault in ('empty_value', 'multiline_value', 'boolean_alias'):
                 actual['core.bare'] = [{'empty_value': '', 'multiline_value': 'false\n' + sentinel, 'boolean_alias': '0'}[fault]]
@@ -1703,6 +1730,9 @@ def _short_layout_controls(test, owner_path):
             def query(label, argv, seconds):
                 test.assertEqual(seconds, 10)
                 calls.append((label, argv, seconds))
+                if label == 'source-symbolic-head':
+                    test.assertEqual(argv, ['/usr/bin/git', '-C', str(root), 'rev-parse', '--symbolic-full-name', 'HEAD'])
+                    return symbolic
                 if label in ('clone-config-names', 'clone-config-names-after'):
                     test.assertEqual(argv, ['/usr/bin/git', '-C', str(destination), 'config', 'list',
                                            '--local', '--no-includes', '--null', '--name-only'])
@@ -1713,8 +1743,8 @@ def _short_layout_controls(test, owner_path):
                     if fault == 'empty_names': result = b''
                     if fault == 'names_drift' and label.endswith('-after'): result += b'http.extraheader\0'
                 else:
-                    key = argv[-1]; value = config_expected[key]
-                    index = sorted(config_expected).index(key)
+                    key = argv[-1]; value = expected[key]
+                    index = sorted(expected).index(key)
                     test.assertEqual(label, 'clone-config-match-' + str(index))
                     test.assertEqual(argv, ['/usr/bin/git', '-C', str(destination), 'config', 'get',
                         '--local', '--no-includes', '--all', '--fixed-value', '--value=' + value,
@@ -1737,11 +1767,11 @@ def _short_layout_controls(test, owner_path):
                             git.rename(destination / 'retained-git'); git.mkdir(mode=0o700); config.write_bytes(b'fixed')
                 emitted.append((result, b''))
                 return result
-            with mock.patch.dict(g, {'capture': query}):
+            with mock.patch.dict(os.environ, environment, clear=True), mock.patch.dict(g, {'capture': query}):
                 if fault == 'success':
                     g['validate_clone_config'](g['STATE']['owned_root'])
-                    test.assertEqual([row[0] for row in calls], ['clone-config-names'] +
-                        ['clone-config-match-' + str(i) for i in range(7)] + ['clone-config-names-after'])
+                    test.assertEqual([row[0] for row in calls], ['source-symbolic-head', 'clone-config-names'] +
+                        ['clone-config-match-' + str(i) for i in range(len(expected))] + ['clone-config-names-after'])
                     test.assertTrue(json.loads((evidence / 'clone-config-proof.json').read_bytes())['stable'])
                 else:
                     with test.assertRaises(g['LayoutFailure']) as refused:
@@ -1752,6 +1782,8 @@ def _short_layout_controls(test, owner_path):
                     if fault in extras or fault in ('missing', 'duplicate', 'duplicate_mixed', 'branch_pair',
                                                    'no_terminal_nul', 'extra_terminal_nul', 'non_utf8', 'empty_names'):
                         test.assertFalse(any(row[0].startswith('clone-config-match-') for row in calls))
+                    if fault in context_faults:
+                        test.assertEqual([row[0] for row in calls], ['source-symbolic-head'])
                     test.assertFalse((evidence / 'clone-config-proof.json').exists())
                     test.assertNotIn(sentinel, str(refused.exception))
             test.assertNotIn(sentinel, repr(calls) + repr(emitted) +
@@ -1759,7 +1791,7 @@ def _short_layout_controls(test, owner_path):
             test.assertEqual(g['OWNED_FD_PENDING'], [])
             test.assertEqual(g['PENDING_RESOURCES'], [])
 
-    for fault in ('success', 'evaluation_success', 'missing_role', 'unknown_role', 'existing', 'symlink', 'source_uid', 'tmp_mode', 'wrong_head', 'wrong_sha',
+    for fault in ('success', 'evaluation_success', 'push_success', 'missing_role', 'unknown_role', 'existing', 'symlink', 'source_uid', 'tmp_mode', 'wrong_head', 'wrong_sha',
                   'wrong_tree', 'partial_clone', 'imported_config', 'alternates', 'replacement',
                   'source_mode', 'git_pointer', 'root_mode', 'preseed_modules', 'terminal_receipt',
                   'terminal_cancel', 'tool_drift', 'wrong_git_version', 'source_git_pointer',
@@ -1789,13 +1821,17 @@ def _short_layout_controls(test, owner_path):
                     value['uid'] += 1
                 return value
             calls = []
-            main_config = dict(config_expected)
+            main_expected = dict(config_expected)
+            if fault == 'push_success':
+                main_expected.update({'branch.main.remote': 'origin', 'branch.main.merge': 'refs/heads/main'})
+            main_config = dict(main_expected)
             main_sentinel = 'DUMMY_UNEXPECTED_CREDENTIAL_7ac52'
             if fault == 'config_wrong_url':
                 main_config['remote.origin.url'] = 'https://user:' + main_sentinel + '@example.invalid/'
             def action(label, _argv, _seconds):
                 calls.append(label)
                 if label == 'git-version': return b'not a version\n' if fault == 'wrong_git_version' else b'git version 2.56.0 synthetic-control\n'
+                if label == 'source-symbolic-head': return b'refs/heads/main\n' if fault == 'push_success' else b'HEAD\n'
                 if label == 'source-head': return (('c' if fault == 'wrong_head' else 'a') * 40 + '\n').encode()
                 if label in ('source-tree', 'clone-tree'):
                     return (('c' if fault == 'wrong_tree' and label == 'clone-tree' else 'b') * 40 + '\n').encode()
@@ -1829,8 +1865,8 @@ def _short_layout_controls(test, owner_path):
                     return result + b'remote.origin.url\0' if fault == 'config_duplicate' else result
                 if label.startswith('clone-config-match-'):
                     key = _argv[-1]
-                    test.assertEqual(_argv[-7:], ['--fixed-value', '--value=' + config_expected[key], '--null', '--show-names', '--name-only', '--', key])
-                    if main_config[key] != config_expected[key]:
+                    test.assertEqual(_argv[-7:], ['--fixed-value', '--value=' + main_expected[key], '--null', '--show-names', '--name-only', '--', key])
+                    if main_config[key] != main_expected[key]:
                         raise g['LayoutFailure']('git_action_or_settlement_failed')
                     if fault == 'config_drift' and label.endswith('-0'):
                         config = destination / '.git/config'
@@ -1840,7 +1876,9 @@ def _short_layout_controls(test, owner_path):
             output = root / 'github-output'
             output.write_bytes(b'')
             output.chmod(0o600)
-            environment = {'GITHUB_OUTPUT': str(output), 'GITHUB_ACTIONS': 'true', 'ImageOS': 'ubuntu24', 'DESK_CI_PARTITION': 'rest',
+            environment = {'GITHUB_EVENT_NAME': 'push' if fault == 'push_success' else 'pull_request',
+                           'GITHUB_REF': 'refs/heads/main' if fault == 'push_success' else 'refs/pull/43/merge',
+                           'GITHUB_OUTPUT': str(output), 'GITHUB_ACTIONS': 'true', 'ImageOS': 'ubuntu24', 'DESK_CI_PARTITION': 'rest',
                            'GITHUB_REPOSITORY': 'mikeddamico/the-desk',
                            'GITHUB_SHA': 'invalid' if fault == 'wrong_sha' else 'a' * 40,
                            'GITHUB_WORKSPACE': str(source), 'RUNNER_TEMP': str(runner),
@@ -1866,8 +1904,8 @@ def _short_layout_controls(test, owner_path):
                  mock.patch.object(g['signal'], 'signal'), \
                  mock.patch.object(g['ctypes'], 'CDLL', return_value=types.SimpleNamespace(prctl=lambda *_: 0)), \
                  contextlib.redirect_stdout(printed):
-                test.assertEqual(g['main'](), 0 if fault in ('success','evaluation_success') else 1)
-            if fault in ('success','evaluation_success'):
+                test.assertEqual(g['main'](), 0 if fault in ('success','evaluation_success','push_success') else 1)
+            if fault in ('success','evaluation_success','push_success'):
                 test.assertIsNone(g['STATE']['primary'])
                 test.assertTrue(json.loads((role_evidence / 'terminal.json').read_bytes())['ok'])
                 test.assertIn('evidence_claimed=true', output.read_text())

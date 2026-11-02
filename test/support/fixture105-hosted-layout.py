@@ -466,7 +466,7 @@ def capture(label, argv, seconds):
     return stable_read(EVIDENCE / (label + '.stdout'), CAP)[0]
 
 def validate_clone_config(owned):
-    """Admit one closed generated profile without capturing observed values."""
+    """Admit the closed event/HEAD-generated profile without observed values."""
     expected = {
         'core.repositoryformatversion': '0', 'core.filemode': 'true',
         'core.bare': 'false', 'core.logallrefupdates': 'true',
@@ -475,6 +475,16 @@ def validate_clone_config(owned):
         'remote.origin.tagopt': '--no-tags',
     }
     code = 'no_imported_git_credentials_or_hooks'
+    source_head = capture('source-symbolic-head', GIT + [
+        '-C', str(SOURCE), 'rev-parse', '--symbolic-full-name', 'HEAD'], 10)
+    event, ref = os.environ.get('GITHUB_EVENT_NAME'), os.environ.get('GITHUB_REF', '')
+    if event == 'push':
+        need(ref == 'refs/heads/main' and source_head == b'refs/heads/main\n', code)
+        expected.update({'branch.main.remote': 'origin',
+                         'branch.main.merge': 'refs/heads/main'})
+    else:
+        need(event == 'pull_request' and len(ref) <= 128 and
+             re.fullmatch(r'refs/pull/[1-9][0-9]*/merge', ref) and source_head == b'HEAD\n', code)
     git_root = identity(DESTINATION / '.git')
     need(git_root['uid'] == UID and git_root['mode'] & 0o022 == 0, code)
     def unchanged():
