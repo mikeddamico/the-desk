@@ -209,6 +209,8 @@ const TARGET_SCOPES = [
   "unknown_program_attempt",
   "unknown_package_binding",
   "acquisition_cut",
+  "audit_fault_cut",
+  "foreign_observation_cut",
 ] as const;
 type TargetScope = (typeof TARGET_SCOPES)[number];
 type TargetCategory = "client" | "autovacuum" | "other_backend" | "unknown";
@@ -2494,6 +2496,7 @@ suite("connected fixture105 native ownership", () => {
   beforeAll(async () => {
     await TargetObserver.selftest();
     await targetReadinessControls();
+    await faultCleanupControls();
     if (bootstrapUrl === undefined)
       throw new Error("TEST_DATABASE_URL required");
     const savedBinding = process.env.DESK_FIXTURE105_BINDING;
@@ -2761,16 +2764,104 @@ suite("connected fixture105 native ownership", () => {
         }
       },
     });
-    try {
-      return await work();
-    } finally {
+    return withTestCleanup(work, async () => {
       if (old === undefined) Reflect.deleteProperty(globalThis, HOOK);
       else Object.defineProperty(globalThis, HOOK, old);
       if (flag === undefined) delete process.env.DESK_TEST_FAULTS;
       else process.env.DESK_TEST_FAULTS = flag;
-      expect(seen).toBe(1); // A witness that never reaches its intended cut fails.
-    }
+      await withTestCleanup(
+        () => {
+          if (seen !== 1) {
+            const scope =
+              point === "fixture105_before_audit_commit"
+                ? "audit_fault_cut"
+                : point === "fixture105_after_package_before_observation"
+                  ? "foreign_observation_cut"
+                  : undefined;
+            if (scope !== undefined)
+              process.stderr.write(
+                JSON.stringify({
+                  schema: "fixture-fault-witness/1",
+                  scope,
+                  seen,
+                }) + "\n",
+              );
+          }
+          return Promise.resolve();
+        },
+        () => {
+          expect(seen).toBe(1); // A witness that never reaches its intended cut fails.
+          return Promise.resolve();
+        },
+      );
+    });
   }
+  async function faultCleanupControls(): Promise<void> {
+    const descriptor = Object.getOwnPropertyDescriptor(globalThis, HOOK);
+    const flag = process.env.DESK_TEST_FAULTS;
+    const point = "fixture105_test_fault_cleanup";
+    const restored = () => {
+      expect(Object.getOwnPropertyDescriptor(globalThis, HOOK)).toEqual(
+        descriptor,
+      );
+      expect(process.env.DESK_TEST_FAULTS).toBe(flag);
+    };
+    let effects = 0;
+    expect(
+      await fault(
+        point,
+        () => {
+          effects += 1;
+        },
+        async () => {
+          await faultPoint(point);
+          return "completed";
+        },
+      ),
+    ).toBe("completed");
+    expect(effects).toBe(1);
+    restored();
+    const primary = new Error("synthetic work failure");
+    for (const original of [primary, "primitive work failure", undefined]) {
+      let caught = false;
+      try {
+        await fault(
+          point,
+          () => {
+            effects += 1;
+          },
+          vi.fn<() => Promise<never>>().mockRejectedValue(original),
+        );
+      } catch (error) {
+        caught = true;
+        if (original === primary) {
+          expect(error).toBe(primary);
+          expect(cleanupFailures.get(primary)).toHaveLength(1);
+          expect(cleanupFailures.get(primary)?.[0]).toBeInstanceOf(Error);
+        } else {
+          expect(error).toBeInstanceOf(AggregateError);
+          const aggregate = error as AggregateError;
+          expect(aggregate.errors).toHaveLength(2);
+          expect(aggregate.errors[0]).toBe(original);
+          expect(aggregate.errors[1]).toBeInstanceOf(Error);
+        }
+      }
+      expect(caught).toBe(true);
+      restored();
+    }
+    await expect(
+      fault(
+        point,
+        () => {
+          effects += 1;
+        },
+        () => Promise.resolve("uncut"),
+      ),
+    ).rejects.toThrow();
+    expect(effects).toBe(1);
+    restored();
+  }
+
   afterEach(async () => {
     const env = current;
     current = undefined;
@@ -3171,9 +3262,15 @@ suite("connected fixture105 native ownership", () => {
             throw new Error("native audit cut");
           },
           async () => {
-            await expect(runConnectedFixture105()).rejects.toThrow(
-              "native audit cut",
-            );
+            await new TargetObserver(
+              env.name,
+              "audit_fault_cut",
+              maintenanceOwner(),
+            ).around(async () => {
+              await expect(runConnectedFixture105()).rejects.toThrow(
+                "native audit cut",
+              );
+            });
           },
         );
         expect(await counts(env)).toEqual({
@@ -3640,15 +3737,21 @@ suite("connected fixture105 native ownership", () => {
             });
           },
           async () => {
-            try {
-              await runConnectedFixture105();
-              throw new Error("expected observation collision");
-            } catch (error) {
-              expect(error).toMatchObject({
-                code: "23505",
-                constraint: "artifacts_pkey",
-              });
-            }
+            await new TargetObserver(
+              env.name,
+              "foreign_observation_cut",
+              maintenanceOwner(),
+            ).around(async () => {
+              try {
+                await runConnectedFixture105();
+                throw new Error("expected observation collision");
+              } catch (error) {
+                expect(error).toMatchObject({
+                  code: "23505",
+                  constraint: "artifacts_pkey",
+                });
+              }
+            });
           },
         );
         expect(await counts(env)).toEqual({

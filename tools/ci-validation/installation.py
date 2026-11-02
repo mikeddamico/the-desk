@@ -180,11 +180,11 @@ def directory(value, expected):
 
 def source_identity(ctx, members):
     event = ctx.load_event()
-    head = (event.get('pull_request') or {}).get('head', {}).get('sha')
-    errors, facts = ctx.check_identity(dict(os.environ), event, ctx.collect_git(head))
-    need(not errors and os.environ.get('GITHUB_EVENT_NAME') == 'pull_request', 'authenticated_source')
+    env = dict(os.environ)
+    errors, facts = ctx.check_identity(env, event, ctx.collect_git(ctx.event_commit(env, event)))
+    need(not errors, 'authenticated_source')
     value = {key: facts[key] for key in ('repository', 'run_id', 'run_attempt')}
-    value.update(checkout=facts['checkout_head'], head=facts['pr_head_sha'],
+    value.update(checkout=facts['checkout_head'], head=ctx.identity_head(facts),
                  tree=facts['checkout_tree'], source_sha256=digest(canonical(members)))
     identity(value)
     return value

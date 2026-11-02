@@ -301,6 +301,41 @@ def git_text(*args):
     return out.strip() if code == 0 else None
 
 
+def event_commit(env, event):
+    """Select only a shaped commit from the active event mode, before Git lookup."""
+    if type(event) is not dict:
+        return None
+    name = env.get('GITHUB_EVENT_NAME')
+    if name == 'pull_request':
+        pr = event.get('pull_request')
+        head = pr.get('head') if type(pr) is dict else None
+        value = head.get('sha') if type(head) is dict else None
+    elif name == 'push':
+        value = event.get('after')
+        if value == '0' * 40:
+            return None
+    else:
+        return None
+    return value if type(value) is str and HEX40.fullmatch(value) else None
+
+
+def identity_head(record):
+    """Project an authenticated event record; never infer its mode from fields."""
+    if record.get('errors', []) != []:
+        raise RuntimeError('source identity errors')
+    if record.get('event') == 'pull_request':
+        value = record['pr_head_sha']
+    elif record.get('event') == 'push':
+        value = record['push_after']
+        if value == '0' * 40 or value != record['checkout_head']:
+            raise RuntimeError('push source identity mismatch')
+    else:
+        raise RuntimeError('unknown source identity event')
+    if type(value) is not str or not HEX40.fullmatch(value):
+        raise RuntimeError('source identity head malformed')
+    return value
+
+
 def collect_git(event_head_sha):
     parents = (git_text('rev-list', '--parents', '-n1', 'HEAD') or '').split()
     facts = {'head': git_text('rev-parse', 'HEAD'), 'tree': git_text('rev-parse', 'HEAD^{tree}'),
@@ -370,10 +405,20 @@ def check_identity(env, event, facts):
         record['pr_head_tree'] = facts.get('event_head_tree')
     elif name == 'push':
         record.update({'push_after': event.get('after'), 'push_before': event.get('before')})
-        if event.get('after') != env.get('GITHUB_SHA'):
-            errors.append('push event "after" is not GITHUB_SHA')
-        if env.get('GITHUB_REF') != 'refs/heads/main':
+        after = event_commit(env, event)
+        repository = event.get('repository')
+        full_name = repository.get('full_name') if type(repository) is dict else None
+        if type(full_name) is not str or not REPO_NAME.fullmatch(full_name) or full_name != env.get('GITHUB_REPOSITORY'):
+            errors.append('push repository is not the workflow repository')
+        if event.get('ref') != 'refs/heads/main' or env.get('GITHUB_REF') != 'refs/heads/main':
             errors.append('push event is not for refs/heads/main')
+        if event.get('deleted') is not False:
+            errors.append('push event deletion flag is not false')
+        if after is None or after != env.get('GITHUB_SHA') or after != head:
+            errors.append('push event "after" is not the nonzero checkout GITHUB_SHA')
+        after_tree = facts.get('event_head_tree')
+        if type(after_tree) is not str or not HEX40.fullmatch(after_tree) or facts.get('tree') != after_tree:
+            errors.append('checkout tree differs from the push after tree')
     return errors, record
 
 
@@ -673,7 +718,7 @@ def partition_files(tracked, partition):
 def partition_identity(identity, members):
     owner = installation_owner()
     p, q, l, q_hash = owner.policy(sys.modules[__name__])
-    value = {'checkout': identity['checkout_head'], 'head': identity['pr_head_sha'],
+    value = {'checkout': identity['checkout_head'], 'head': identity_head(identity),
             'tree': identity['checkout_tree'], 'repository': identity['repository'],
             'run_id': identity['run_id'], 'run_attempt': identity['run_attempt'],
             'source_sha256': hashlib.sha256(fixture_bytes(members)).hexdigest(),
@@ -1554,12 +1599,11 @@ def cmd_init(role):
     if probes.get('git_status', {}).get('output') != '':
         errors.append('checkout is not clean')
     write_json_x(ev / 'env.json', record)
-    # Identity: PR head / target base / synthetic merge / tree / workflow, mapped without switching checkout semantics.
+    # Identity: explicit PR synthetic merge or push/main checkout, retaining each event meaning.
     identity_errors, identity = [], {}
     try:
         event = load_event()
-        pr_head = ((event.get('pull_request') or {}).get('head') or {}).get('sha') if isinstance(event, dict) else None
-        identity_errors, identity = check_identity(dict(env), event, collect_git(pr_head if isinstance(pr_head, str) and HEX40.fullmatch(pr_head) else None))
+        identity_errors, identity = check_identity(dict(env), event, collect_git(event_commit(env, event)))
     except Exception as error:
         identity_errors.append('identity evaluation failed: %s' % type(error).__name__)
     identity['errors'] = identity_errors
@@ -2164,8 +2208,8 @@ def final_verdict(finals, outcomes):
 
 def proof_identity_now(allow_dist):
     event = load_event()
-    head = ((event.get('pull_request') or {}).get('head') or {}).get('sha')
-    errors, identity = check_identity(dict(os.environ), event, collect_git(head if isinstance(head, str) and HEX40.fullmatch(head) else None))
+    env = dict(os.environ)
+    errors, identity = check_identity(env, event, collect_git(event_commit(env, event)))
     tracked = tracked_files()
     snapshot = take_snapshot(tracked, allow_dist=allow_dist)
     errors += snapshot_errors(snapshot)
