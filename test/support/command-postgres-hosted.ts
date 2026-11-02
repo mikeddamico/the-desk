@@ -1,4 +1,4 @@
-/** Two closed hosted PostgreSQL scopes: the seven-case precheck, or one native diagnostic; never a storage/deployment runner. */
+/** Closed hosted PostgreSQL precheck and native diagnostics; never a storage/deployment runner. */
 import * as fs from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -12,9 +12,27 @@ const runnerTemporary = process.env.RUNNER_TEMP;
 const temporary = process.env.DESK_CI_ROLE_TEMP;
 const nativeDiagnostic =
   process.argv.length === 3 && process.argv[2] === "fixture105-unknown";
-const profile = nativeDiagnostic ? "fixture105-unknown" : "command-postgres";
+const isolationDiagnostic =
+  process.argv.length === 3 && process.argv[2] === "fixture105-isolation";
+const wholeNativeDiagnostic =
+  process.argv.length === 3 && process.argv[2] === "fixture105-native";
+const providerTimeoutDiagnostic =
+  process.argv.length === 3 && process.argv[2] === "provider-timeout";
+const profile = providerTimeoutDiagnostic
+  ? "provider-timeout"
+  : nativeDiagnostic
+    ? "fixture105-unknown"
+    : isolationDiagnostic
+      ? "fixture105-isolation"
+      : wholeNativeDiagnostic
+        ? "fixture105-native"
+        : "command-postgres";
 if (
-  (!nativeDiagnostic && process.argv.length !== 2) ||
+  (!nativeDiagnostic &&
+    !isolationDiagnostic &&
+    !wholeNativeDiagnostic &&
+    !providerTimeoutDiagnostic &&
+    process.argv.length !== 2) ||
   process.platform !== "linux" ||
   process.env.GITHUB_ACTIONS !== "true" ||
   process.env.ImageOS !== "ubuntu24" ||
@@ -59,13 +77,48 @@ fs.mkdirSync(retained, { mode: 0o700 });
 
 // Reuse authentic CI source/build/partition and fixture owners. This does not create a hosted identity or a stage verdict.
 const sourceCheck = String.raw`
-import contextlib,io,json,os,runpy,sys
+import contextlib,io,json,os,re,runpy,sys
 from pathlib import Path
+def isolation_journal(root, record, read, digest):
+  fixed=(('retains durable direction if the separate audit transaction fails','construction_recorded','audit'),('rolls back package creation when a foreign observation identity wins late','refused_before_receipt','construction'))
+  if set(record)!={'schema','targets','pre_target_failures','tool_observations','suite_complete','cases'} or record['schema']!='fixture105-suite/1' or record['suite_complete'] is not False or record['pre_target_failures']!=[]:raise RuntimeError('isolation suite shape')
+  cases=record['cases'];targets=record['targets']
+  if type(cases) is not list or len(cases)!=2 or type(targets) is not list or len(targets)!=2:raise RuntimeError('isolation population')
+  release_bytes=read(root/'bindings/RELEASE.json',262144);release=json.loads(release_bytes)
+  subject=digest(json.dumps(release['subject_binding'],sort_keys=True,separators=(',',':')).encode())
+  seen=set();expectations=set();receipts=set()
+  for case,(name,state,phase) in zip(cases,fixed):
+    if set(case)!={'case_id','expected','completed','calls'} or case['case_id']!=name or case['expected']!=['expected_refusal'] or case['completed'] is not True or type(case['calls']) is not list or len(case['calls'])!=1:raise RuntimeError('isolation case')
+    call=case['calls'][0]
+    if set(call)!={'ordinal','expected','completed','returned','target_hash','pre_target_index'} or type(call['ordinal']) is not int or call['ordinal']!=0 or call['expected']!='expected_refusal' or call['completed'] is not True or call['returned'] is not False or call['pre_target_index'] is not None:raise RuntimeError('isolation call')
+    key=call['target_hash']
+    if type(key) is not str or not re.fullmatch('[0-9a-f]{64}',key) or key in seen:raise RuntimeError('isolation target identity')
+    seen.add(key)
+    matches=[row for row in targets if type(row) is dict and row.get('target_hash')==key]
+    if matches!=[{'target_hash':key,'construction_state':state,'later_phase':phase,'later_outcome':'refused'}]:raise RuntimeError('isolation target outcome')
+    intent_bytes=read(root/'expectations'/(key+'.intent.json'),16384);intent=json.loads(intent_bytes)
+    if intent!={'schema':'fixture105-receipt-intent/1','target_hash':key,'release_sha256':digest(release_bytes),'subject_sha256':subject,'expected_names':['CONSTRUCTION.json'],'state':'intent'}:raise RuntimeError('isolation intent')
+    terminal=json.loads(read(root/'expectations'/(key+'.terminal.json'),16384))
+    expected={'schema':'fixture105-receipt-terminal/1','target_hash':key,'intent_sha256':digest(intent_bytes),'state':state,'receipts':[]}
+    expectations.update((key+'.intent.json',key+'.terminal.json'))
+    if state=='refused_before_receipt':
+      expected['code']='work_rolled_back'
+      if terminal!=expected:raise RuntimeError('isolation refusal')
+    else:
+      rows=terminal.get('receipts')
+      if type(rows) is not list or len(rows)!=1 or set(rows[0])!={'name','bytes','sha256'} or rows[0]['name']!='CONSTRUCTION.json':raise RuntimeError('isolation receipt shape')
+      expected['receipts']=rows
+      if terminal!=expected:raise RuntimeError('isolation terminal')
+      data=read(root/'receipts'/key/'CONSTRUCTION.json',16384)
+      if type(rows[0]['bytes']) is not int or rows[0]['bytes']!=len(data) or rows[0]['sha256']!=digest(data) or os.listdir(root/'receipts'/key)!=['CONSTRUCTION.json']:raise RuntimeError('isolation receipt identity')
+      receipts.add(key)
+  if set(os.listdir(root/'expectations'))!=expectations or set(os.listdir(root/'receipts'))!=receipts:raise RuntimeError('isolation journal population')
+  return True
 c=runpy.run_path('tools/ci-validation/ci.py',run_name='command_postgres_source_check')
 import types
 owner_module=types.ModuleType('command_postgres_source_check');owner_module.__dict__.update(c);sys.modules['command_postgres_source_check']=owner_module
 base=c['ci_dir']();ev=base/'evidence';summary_evidence={}
-if sys.argv[2] not in ('command-postgres','fixture105-unknown'):raise RuntimeError('fixed profile required')
+if sys.argv[2] not in ('command-postgres','fixture105-unknown','fixture105-isolation','fixture105-native','provider-timeout'):raise RuntimeError('fixed profile required')
 stage=ev/sys.argv[2]
 if sys.argv[1]=='after':
   raw=c['fixture_read'](stage/'stdout',8*1024*1024)
@@ -88,6 +141,51 @@ if sys.argv[1]=='after':
     except Exception as error:
       summary_evidence['native_case_complete']=False
       summary_evidence['native_journal_error']=type(error).__name__
+  if sys.argv[2] in ('fixture105-isolation','fixture105-native'):
+    try:
+      root=base/'tmp'/c['FIXTURE_NAME']
+      retention_bytes=[0]
+      def retain_isolation(path,relative,limit):
+        data=c['fixture_read'](path,limit)
+        retention_bytes[0]+=len(data)
+        if retention_bytes[0]>64*1024*1024:raise RuntimeError('isolation retention bytes')
+        destination=stage/'retained'/relative
+        destination.parent.mkdir(mode=0o700,parents=True,exist_ok=True)
+        c['fixture_write_raw'](destination,c['redact'](data,(secret,)),limit)
+        if c['fixture_read'](path,limit)!=data:raise RuntimeError('isolation retention changed')
+        return data
+      journal=retain_isolation(ev/'fixture105-suite.json','fixture105-suite.json',c['SNAPSHOT_LIMIT'])
+      retain_isolation(root/'ROOT.json','fixture105/ROOT.json',262144)
+      for name in c['FIXTURE_BINDINGS']:
+        retain_isolation(root/'bindings'/name,'fixture105/bindings/'+name,c['SNAPSHOT_LIMIT'] if 'INVENTORY' in name else 262144)
+      for directory,cap in (('expectations',384),('receipts',128)):
+        entries=[]
+        c['fixture_identity'](root/directory)
+        with os.scandir(root/directory) as iterator:
+          for entry in iterator:
+            if len(entries)>=cap:raise RuntimeError('isolation retention population')
+            entries.append(entry.name)
+        for name in sorted(entries):
+          if directory=='expectations':
+            if not re.fullmatch(r'[0-9a-f]{64}\.(intent|terminal|claims-failure)\.json',name):raise RuntimeError('isolation retention name')
+            retain_isolation(root/directory/name,'fixture105/'+directory+'/'+name,16384)
+          else:
+            if not re.fullmatch('[0-9a-f]{64}',name):raise RuntimeError('isolation retention target')
+            c['fixture_identity'](root/directory/name)
+            leaves=[]
+            with os.scandir(root/directory/name) as iterator:
+              for entry in iterator:
+                if entry.name not in ('CONSTRUCTION.json','CLAIMS-FAILURE.json') or len(leaves)>=2:raise RuntimeError('isolation retention receipt')
+                leaves.append(entry.name)
+            for leaf in sorted(leaves):retain_isolation(root/directory/name/leaf,'fixture105/'+directory+'/'+name+'/'+leaf,16384 if leaf=='CONSTRUCTION.json' else 262144)
+      if sys.argv[2]=='fixture105-native':
+        c['fixture_journal'](root,json.loads(journal))
+        summary_evidence['native_suite_complete']=True
+      else:
+        summary_evidence['isolation_cases_complete']=isolation_journal(root,json.loads(journal),c['fixture_read'],c['fixture_hash'])
+    except Exception as error:
+      summary_evidence['native_suite_complete' if sys.argv[2]=='fixture105-native' else 'isolation_cases_complete']=False
+      summary_evidence['native_suite_journal_error' if sys.argv[2]=='fixture105-native' else 'isolation_journal_error']=type(error).__name__
 partition=c['installation_owner']().outer(owner_module, 'E0' if sys.argv[1]=='before' else 'E1')
 if partition['partition']!='rest':raise RuntimeError('rest binding required')
 pre=c['load_pre'](ev);build=c['load_json'](ev/'bind-build.json')
@@ -234,10 +332,13 @@ const environment = {
   TEST_DATABASE_URL: databaseUrl,
   DESK_FIXTURE105_BINDING: JSON.stringify(before.binding),
 };
+// Whole-file-only engineering allocation; case limits and settlement are unchanged.
+const guardWorkSeconds = wholeNativeDiagnostic ? 1800 : 900;
+const guardCloseMilliseconds = wholeNativeDiagnostic ? 1845000 : 945000;
 const command = [
   "--signal=TERM",
   "--kill-after=20s",
-  "900s",
+  `${String(guardWorkSeconds)}s`,
   "/usr/bin/python3",
   "-I",
   "-B",
@@ -245,7 +346,7 @@ const command = [
   "guard",
   "command-postgres",
 ];
-if (nativeDiagnostic) command[command.length - 1] = "fixture105-unknown";
+command[command.length - 1] = profile;
 record("invocation.json", {
   argv: ["/usr/bin/timeout", ...command],
   cwd: root,
@@ -254,7 +355,11 @@ record("invocation.json", {
   node_sha256: sha256(fs.readFileSync(process.execPath)),
   guard_invocations: 1,
   profile,
-  native_case_timeout_ms: nativeDiagnostic ? 180000 : null,
+  native_case_timeout_ms: nativeDiagnostic
+    ? 180000
+    : isolationDiagnostic
+      ? 120000
+      : null,
 });
 
 // One maintenance connection from the already-existing local bootstrap URL survives guard failure and observes cleanup independently.
@@ -415,7 +520,7 @@ try {
     });
   }
   record("process.json", { pid: child.pid, pgid: child.pid });
-  await bounded(close, 945000);
+  await bounded(close, guardCloseMilliseconds);
 } catch (error) {
   primary ??= error;
 } finally {
@@ -486,15 +591,30 @@ try {
   ])
     if (canonicalJson(after[key]) !== canonicalJson(before[key]))
       throw new Error("source_tool_owner_changed");
-  const expectedSummary = nativeDiagnostic
+  const expectedSummary = providerTimeoutDiagnostic
     ? {
         files: { passed: 1, total: 1 },
-        tests: { passed: 1, skipped: 33, total: 34 },
+        tests: { passed: 2, skipped: 42, total: 44 },
       }
-    : {
-        files: { passed: 1, total: 1 },
-        tests: { passed: 7, total: 7 },
-      };
+    : nativeDiagnostic
+      ? {
+          files: { passed: 1, total: 1 },
+          tests: { passed: 1, skipped: 33, total: 34 },
+        }
+      : isolationDiagnostic
+        ? {
+            files: { passed: 1, total: 1 },
+            tests: { passed: 2, skipped: 32, total: 34 },
+          }
+        : wholeNativeDiagnostic
+          ? {
+              files: { passed: 1, total: 1 },
+              tests: { passed: 34, total: 34 },
+            }
+          : {
+              files: { passed: 1, total: 1 },
+              tests: { passed: 7, total: 7 },
+            };
   if (
     canonicalJson(after.summary) !== canonicalJson(expectedSummary) ||
     canonicalJson(after.summary_errors) !== "[]"
@@ -502,6 +622,10 @@ try {
     throw new Error("fixed_complete_cases_required");
   if (nativeDiagnostic && after.native_case_complete !== true)
     throw new Error("native_case_journal_incomplete");
+  if (isolationDiagnostic && after.isolation_cases_complete !== true)
+    throw new Error("isolation_case_journal_incomplete");
+  if (wholeNativeDiagnostic && after.native_suite_complete !== true)
+    throw new Error("native_suite_journal_incomplete");
   const files = after.file_results as Record<
     string,
     { tests: number; failed: number; skipped: number; todo: number }[]
@@ -510,15 +634,23 @@ try {
     Object.keys(files).length !== 1 ||
     canonicalJson(
       files[
-        nativeDiagnostic
-          ? "test/integration/connected-fixture105.test.ts"
-          : "test/integration/g2-command-connection.test.ts"
+        providerTimeoutDiagnostic
+          ? "test/integration/g1-provider-controls.test.ts"
+          : nativeDiagnostic || isolationDiagnostic || wholeNativeDiagnostic
+            ? "test/integration/connected-fixture105.test.ts"
+            : "test/integration/g2-command-connection.test.ts"
       ],
     ) !==
       canonicalJson([
-        nativeDiagnostic
-          ? { tests: 34, failed: 0, skipped: 33, todo: 0 }
-          : { tests: 7, failed: 0, skipped: 0, todo: 0 },
+        providerTimeoutDiagnostic
+          ? { tests: 44, failed: 0, skipped: 42, todo: 0 }
+          : nativeDiagnostic
+            ? { tests: 34, failed: 0, skipped: 33, todo: 0 }
+            : isolationDiagnostic
+              ? { tests: 34, failed: 0, skipped: 32, todo: 0 }
+              : wholeNativeDiagnostic
+                ? { tests: 34, failed: 0, skipped: 0, todo: 0 }
+                : { tests: 7, failed: 0, skipped: 0, todo: 0 },
       ])
   )
     throw new Error("fixed_file_results_required");
@@ -625,11 +757,27 @@ for (const name of fs
 console.log(
   stripVTControlCharacters(
     JSON.stringify({
-      [nativeDiagnostic ? "fixture105_unknown" : "command_postgres"]: ok
-        ? "pass"
-        : "hold",
+      [providerTimeoutDiagnostic
+        ? "provider_timeout"
+        : nativeDiagnostic
+          ? "fixture105_unknown"
+          : isolationDiagnostic
+            ? "fixture105_isolation"
+            : wholeNativeDiagnostic
+              ? "fixture105_native"
+              : "command_postgres"]: ok ? "pass" : "hold",
       evidence: retained,
-      tests: ok ? (nativeDiagnostic ? 1 : 7) : null,
+      tests: ok
+        ? providerTimeoutDiagnostic
+          ? 2
+          : nativeDiagnostic
+            ? 1
+            : isolationDiagnostic
+              ? 2
+              : wholeNativeDiagnostic
+                ? 34
+                : 7
+        : null,
     }),
   ),
 );

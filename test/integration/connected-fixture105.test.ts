@@ -60,7 +60,7 @@ import {
   ConnectedFixture105ClaimsFailure,
   ConnectedFixture105Refusal,
   runConnectedFixture105 as runObservedConnectedFixture105,
-  reconcileConnectedFixture105,
+  reconcileConnectedFixture105 as reconcileObservedConnectedFixture105,
 } from "../../src/runtime/connected-fixture105.js";
 import type { DbEnv } from "../support/db-env.js";
 import { createMigrationPool, createRuntimePool } from "../../src/db/pool.js";
@@ -199,6 +199,7 @@ type TargetVector =
       otherSessions: number | null;
     };
 const TARGET_SCOPES = [
+  "native_call",
   "held_client_control",
   "preseed_foreign_claim",
   "preseed_missing_config",
@@ -209,6 +210,8 @@ const TARGET_SCOPES = [
   "unknown_program_attempt",
   "unknown_package_binding",
   "acquisition_cut",
+  "audit_fault_cut",
+  "foreign_observation_cut",
 ] as const;
 type TargetScope = (typeof TARGET_SCOPES)[number];
 type TargetCategory = "client" | "autovacuum" | "other_backend" | "unknown";
@@ -227,8 +230,14 @@ interface TargetSupplement {
   sample: TargetSample | null;
   truncated: boolean | null;
 }
+interface NativeTargetContext {
+  readonly case_id: string;
+  readonly operation: "construction" | "reconciliation";
+  readonly ordinal: number;
+}
 interface TargetEnvelope {
-  schema: "fixture-target-diagnostic/2";
+  schema: "fixture-target-diagnostic/2" | "fixture-target-diagnostic/3";
+  context?: NativeTargetContext;
   scope: TargetScope;
   vector: TargetVector;
   supplement: TargetSupplement;
@@ -630,11 +639,18 @@ class TargetObserver {
   private restorationFailed = false;
   private maintenanceCapture: MaintenanceCapture | undefined;
   private maintenanceRecord: MaintenanceRecord | undefined;
+  private maintenanceCoverage:
+    | "not_configured"
+    | "ineligible"
+    | "already_reserved"
+    | "reserved" = "not_configured";
   constructor(
     private readonly database: string,
     private readonly scope: TargetScope = "acquisition_cut",
     private readonly maintenance?: MaintenanceOwner,
+    private readonly context?: NativeTargetContext,
   ) {
+    if (maintenance) this.maintenanceCoverage = "ineligible";
     if (!TARGET_SCOPES.includes(scope))
       throw new Error("fixture target scope invalid");
   }
@@ -712,19 +728,27 @@ class TargetObserver {
       this.observationFailed = true;
       supplement = targetUnknown("observation_fault");
     }
+    if (this.maintenance && !this.maintenanceCapture)
+      this.maintenanceCoverage = this.maintenance.latch.used
+        ? "already_reserved"
+        : "ineligible";
     if (this.maintenance && !this.maintenance.latch.used) {
       try {
         const capture = captureMaintenance(vector, row, this.database);
         if (capture) {
           this.maintenance.latch.used = true; // Suite-wide reservation before any await.
           this.maintenanceCapture = capture;
+          this.maintenanceCoverage = "reserved";
         }
       } catch {
         this.observationFailed = true;
       }
     }
     this.vectors.push({
-      schema: "fixture-target-diagnostic/2",
+      schema: this.context
+        ? "fixture-target-diagnostic/3"
+        : "fixture-target-diagnostic/2",
+      ...(this.context ? { context: this.context } : {}),
       scope: this.scope,
       vector,
       supplement,
@@ -839,20 +863,20 @@ class TargetObserver {
    * Runs `work` with the wrapper installed. The exact original descriptor is restored first through the
    * cleanup-preserving pattern; only then is the bounded summary emitted. A primary failure of `work` is preserved.
    */
-  async around(work: () => Promise<void>): Promise<void> {
+  async around<T>(work: () => Promise<T>): Promise<T> {
     const descriptor = Object.getOwnPropertyDescriptor(
       pg.Client.prototype,
       "query",
     );
     if (descriptor === undefined) throw new Error("driver method unavailable");
     const original = rawDriverQuery(descriptor);
-    await withTestCleanup(
+    return withTestCleanup(
       async () => {
         Object.defineProperty(pg.Client.prototype, "query", {
           ...descriptor,
           value: this.wrap(original),
         });
-        await work();
+        return work();
       },
       async () => {
         Object.defineProperty(pg.Client.prototype, "query", descriptor);
@@ -883,7 +907,15 @@ class TargetObserver {
         process.stderr.write(line);
       }
       const line = `FIXTURE_TARGET_DIAGNOSTIC_SUMMARY ${JSON.stringify({
-        schema: "fixture-target-diagnostic-summary/2",
+        schema: this.context
+          ? "fixture-target-diagnostic-summary/3"
+          : "fixture-target-diagnostic-summary/2",
+        ...(this.context
+          ? {
+              context: this.context,
+              maintenanceCoverage: this.maintenanceCoverage,
+            }
+          : {}),
         scope: this.scope,
         observed: this.count,
         cap: TARGET_OBSERVER_CAP,
@@ -903,13 +935,22 @@ class TargetObserver {
       if (Buffer.byteLength(line) > 1024)
         throw new Error("fixture target summary bound");
       process.stderr.write(line);
-      if (this.maintenanceRecord) {
-        let extra = `FIXTURE_TARGET_MAINTENANCE ${JSON.stringify(this.maintenanceRecord)}\n`;
+      const maintenanceRecord = this.maintenanceRecord;
+      if (maintenanceRecord) {
+        const maintenanceOutput = (): object =>
+          this.context
+            ? {
+                ...maintenanceRecord,
+                schema: "fixture-target-maintenance/2",
+                context: this.context,
+              }
+            : maintenanceRecord;
+        let extra = `FIXTURE_TARGET_MAINTENANCE ${JSON.stringify(maintenanceOutput())}\n`;
         if (Buffer.byteLength(extra) > 2048) {
-          this.maintenanceRecord.status = "unknown";
-          this.maintenanceRecord.reason = "invalid";
-          this.maintenanceRecord.entries = [];
-          extra = `FIXTURE_TARGET_MAINTENANCE ${JSON.stringify(this.maintenanceRecord)}\n`;
+          maintenanceRecord.status = "unknown";
+          maintenanceRecord.reason = "invalid";
+          maintenanceRecord.entries = [];
+          extra = `FIXTURE_TARGET_MAINTENANCE ${JSON.stringify(maintenanceOutput())}\n`;
         }
         process.stderr.write(extra);
       }
@@ -1729,6 +1770,190 @@ class TargetObserver {
           .filter((line) => line.startsWith("FIXTURE_TARGET_MAINTENANCE "))
           .every((line) => Buffer.byteLength(line) <= 2048),
       ).toBe(true);
+      // Common adapters use the actual observation helper, with inert work only.
+      const savedCase = activeCase;
+      const savedBinding = nativeTargetBinding;
+      const savedOrdinal = nativeTargetOrdinal;
+      const fixedCase = CASE_EXPECTATIONS[0];
+      if (!fixedCase) throw new Error("fixed observer case missing");
+      const setCase = (caseId: string): void => {
+        activeCase = {
+          case_id: caseId,
+          expected: [],
+          completed: false,
+          calls: [],
+        };
+      };
+      try {
+        const commonOwner = { ...owner, latch: { used: false } };
+        nativeTargetBinding = () => ({
+          database: "fixed",
+          maintenance: commonOwner,
+        });
+        setCase(fixedCase.case_id);
+        delivered = result(row());
+        const returned = {};
+        for (const operation of ["construction", "reconciliation"] as const) {
+          const ordinal = nativeTargetOrdinal;
+          expect(
+            await observeNativeTarget(operation, async () => {
+              await callObserved();
+              return returned;
+            }),
+          ).toBe(returned);
+          const summary = JSON.parse(
+            lines.at(-1)?.slice("FIXTURE_TARGET_DIAGNOSTIC_SUMMARY ".length) ??
+              "null",
+          ) as Obj;
+          expect(summary).toMatchObject({
+            schema: "fixture-target-diagnostic-summary/3",
+            context: { case_id: fixedCase.case_id, operation, ordinal },
+            observed: 1,
+            maintenanceCoverage: "ineligible",
+            inconclusive: false,
+          });
+          for (const original of [new Error("fixed"), "fixed", undefined]) {
+            const reject = vi
+              .fn<() => Promise<never>>()
+              .mockRejectedValue(original);
+            await expect(observeNativeTarget(operation, reject)).rejects.toBe(
+              original,
+            );
+          }
+        }
+        // Bound database mismatch is observed, never rescued from the result row.
+        nativeTargetBinding = () => ({
+          database: "foreign",
+          maintenance: commonOwner,
+        });
+        const mismatchReads = reads;
+        await observeNativeTarget("construction", callObserved);
+        expect(reads).toBe(mismatchReads);
+        expect(commonOwner.latch.used).toBe(false);
+        expect(lines.at(-2)).toContain('"databaseMatches":false');
+        expect(lines.at(-1)).toContain('"maintenanceCoverage":"ineligible"');
+        nativeTargetBinding = undefined;
+        const missingWork = vi
+          .fn<() => Promise<void>>()
+          .mockResolvedValue(undefined);
+        await expect(
+          observeNativeTarget("construction", missingWork),
+        ).rejects.toThrow();
+        expect(missingWork).not.toHaveBeenCalled();
+        nativeTargetBinding = () => ({
+          database: "fixed",
+          maintenance: commonOwner,
+        });
+        setCase("foreign case");
+        const unopened = vi
+          .fn<() => Promise<void>>()
+          .mockResolvedValue(undefined);
+        await expect(
+          observeNativeTarget("construction", unopened),
+        ).rejects.toThrow("fixture native target binding unavailable");
+        expect(unopened).not.toHaveBeenCalled();
+        activeCase = undefined;
+        await expect(
+          observeNativeTarget("reconciliation", unopened),
+        ).rejects.toThrow();
+        expect(unopened).not.toHaveBeenCalled();
+        // Both slot orders; the outer specialized wrapper observes first, before inner continuation.
+        for (const order of [
+          ["unexpected", "control"],
+          ["control", "unexpected"],
+        ] as const) {
+          const unexpected = { ...owner, latch: { used: false } };
+          const control = { ...owner, latch: { used: false } };
+          nativeTargetBinding = () => ({
+            database: "fixed",
+            maintenance: unexpected,
+          });
+          delivered = result(origin);
+          reply = () => Promise.resolve(metadata([observedRow()]));
+          const startReads = reads;
+          for (const kind of order) {
+            setCase(kind === "control" ? HELD_TARGET_CASE : fixedCase.case_id);
+            const chosen = kind === "control" ? control : unexpected;
+            const priorUnexpected = unexpected.latch.used;
+            const beforeNested = reads;
+            await new TargetObserver(
+              "fixed",
+              kind === "control" ? "held_client_control" : "acquisition_cut",
+              chosen,
+            ).around(async () => {
+              const outer = Object.getOwnPropertyDescriptor(
+                pg.Client.prototype,
+                "query",
+              );
+              expectedOutputDriver = undefined;
+              try {
+                await observeNativeTarget("construction", callObserved);
+                expect(
+                  Object.getOwnPropertyDescriptor(pg.Client.prototype, "query"),
+                ).toEqual(outer);
+                expect(reads).toBe(beforeNested);
+              } finally {
+                expectedOutputDriver = diagnosticDriver;
+              }
+            });
+            expect(reads).toBe(beforeNested + 1);
+            expect(chosen.latch.used).toBe(true);
+            if (kind === "control")
+              expect(unexpected.latch.used).toBe(priorUnexpected);
+            expect(
+              Object.getOwnPropertyDescriptor(pg.Client.prototype, "query"),
+            ).toEqual(diagnosticDriver);
+          }
+          expect(reads).toBe(startReads + 2);
+          setCase(fixedCase.case_id);
+          await observeNativeTarget("reconciliation", callObserved);
+          expect(reads).toBe(startReads + 2);
+          expect(lines.at(-1)).toContain(
+            '"maintenanceCoverage":"already_reserved"',
+          );
+        }
+        // A failed common supplemental read consumes its single reservation permanently.
+        const failedOwner = { ...owner, latch: { used: false } };
+        nativeTargetBinding = () => ({
+          database: "fixed",
+          maintenance: failedOwner,
+        });
+        setCase(fixedCase.case_id);
+        reply = () => Promise.reject(new Error("fixed supplement failure"));
+        const failedReads = reads;
+        await observeNativeTarget("reconciliation", callObserved);
+        await observeNativeTarget("construction", callObserved);
+        expect(reads).toBe(failedReads + 1);
+        expect(failedOwner.latch.used).toBe(true);
+        // Other expected refusals must not be classified as the intentional isolation control.
+        expect(
+          nativeMaintenance(
+            "retains durable direction if the separate audit transaction fails",
+            failedOwner,
+          ),
+        ).toBe(failedOwner);
+        expect(
+          nativeMaintenance(HELD_TARGET_CASE, failedOwner),
+        ).toBeUndefined();
+        const cappedCommon = { ...owner, latch: { used: false } };
+        nativeTargetBinding = () => ({
+          database: "fixed",
+          maintenance: cappedCommon,
+        });
+        delivered = result(row());
+        await observeNativeTarget("construction", async () => {
+          for (let index = 0; index <= TARGET_OBSERVER_CAP; index++)
+            await callObserved();
+        });
+        expect(lines.at(-1)).toContain('"capReached":true');
+        expect(lines.at(-1)).toContain('"inconclusive":true');
+        expect(cappedCommon.latch.used).toBe(false);
+      } finally {
+        activeCase = savedCase;
+        nativeTargetBinding = savedBinding;
+        nativeTargetOrdinal = savedOrdinal;
+        expectedOutputDriver = diagnosticDriver;
+      }
       done(20);
     } catch {
       throw new Error(
@@ -1955,6 +2180,52 @@ interface HarnessCall {
 const harnessCases: HarnessCase[] = [];
 let activeCase: HarnessCase | undefined;
 let harnessCleanupFailed = false;
+const HELD_TARGET_CASE =
+  "identifies a held client while preserving target isolation refusal";
+interface NativeTargetBinding {
+  readonly database: string;
+  readonly maintenance: MaintenanceOwner;
+}
+let nativeTargetBinding: (() => NativeTargetBinding) | undefined;
+let nativeTargetOrdinal = 0;
+function nativeMaintenance(
+  caseId: string,
+  owner: MaintenanceOwner,
+): MaintenanceOwner | undefined {
+  return caseId === HELD_TARGET_CASE ? undefined : owner;
+}
+async function observeNativeTarget<T>(
+  operation: NativeTargetContext["operation"],
+  work: () => Promise<T>,
+): Promise<T> {
+  const owner = activeCase;
+  if (
+    !owner ||
+    !CASE_EXPECTATIONS.some((entry) => entry.case_id === owner.case_id) ||
+    !nativeTargetBinding
+  )
+    throw new Error("fixture native target binding unavailable");
+  const binding = nativeTargetBinding();
+  const context: NativeTargetContext = {
+    case_id: owner.case_id,
+    operation,
+    ordinal: nativeTargetOrdinal++,
+  };
+  return new TargetObserver(
+    binding.database,
+    "native_call",
+    nativeMaintenance(owner.case_id, binding.maintenance),
+    context,
+  ).around(work);
+}
+function reconcileConnectedFixture105(): ReturnType<
+  typeof reconcileObservedConnectedFixture105
+> {
+  return observeNativeTarget(
+    "reconciliation",
+    reconcileObservedConnectedFixture105,
+  );
+}
 function caseBody(
   name: string,
   body: () => Promise<void>,
@@ -2014,7 +2285,10 @@ async function runConnectedFixture105(): ReturnType<
   owner.calls.push(call); // Before host opening or any allocation; expectation is never inferred from the error.
   return withTestCleanup(
     async () => {
-      const value = await runObservedConnectedFixture105();
+      const value = await observeNativeTarget(
+        "construction",
+        runObservedConnectedFixture105,
+      );
       call.returned = true;
       return value;
     },
@@ -2479,21 +2753,27 @@ suite("connected fixture105 native ownership", () => {
     return cluster;
   }
   const maintenanceLatch = { used: false };
-  function maintenanceOwner(): MaintenanceOwner {
+  const controlMaintenanceLatch = { used: false };
+  function maintenanceOwner(control = false): MaintenanceOwner {
     if (bootstrapUrl === undefined)
       throw new Error("maintenance binding missing");
     return {
       admin: requireCluster().admin,
       database: decodeURIComponent(new URL(bootstrapUrl).pathname.slice(1)),
-      latch: maintenanceLatch,
+      latch: control ? controlMaintenanceLatch : maintenanceLatch,
     };
   }
   let current: DbEnv | undefined;
+  nativeTargetBinding = () => {
+    if (!current) throw new Error("fixture native owned allocation missing");
+    return { database: current.name, maintenance: maintenanceOwner() };
+  };
   const isolatedClusters: TrackedFixtureCluster[] = [];
 
   beforeAll(async () => {
     await TargetObserver.selftest();
     await targetReadinessControls();
+    await faultCleanupControls();
     if (bootstrapUrl === undefined)
       throw new Error("TEST_DATABASE_URL required");
     const savedBinding = process.env.DESK_FIXTURE105_BINDING;
@@ -2761,16 +3041,104 @@ suite("connected fixture105 native ownership", () => {
         }
       },
     });
-    try {
-      return await work();
-    } finally {
+    return withTestCleanup(work, async () => {
       if (old === undefined) Reflect.deleteProperty(globalThis, HOOK);
       else Object.defineProperty(globalThis, HOOK, old);
       if (flag === undefined) delete process.env.DESK_TEST_FAULTS;
       else process.env.DESK_TEST_FAULTS = flag;
-      expect(seen).toBe(1); // A witness that never reaches its intended cut fails.
-    }
+      await withTestCleanup(
+        () => {
+          if (seen !== 1) {
+            const scope =
+              point === "fixture105_before_audit_commit"
+                ? "audit_fault_cut"
+                : point === "fixture105_after_package_before_observation"
+                  ? "foreign_observation_cut"
+                  : undefined;
+            if (scope !== undefined)
+              process.stderr.write(
+                JSON.stringify({
+                  schema: "fixture-fault-witness/1",
+                  scope,
+                  seen,
+                }) + "\n",
+              );
+          }
+          return Promise.resolve();
+        },
+        () => {
+          expect(seen).toBe(1); // A witness that never reaches its intended cut fails.
+          return Promise.resolve();
+        },
+      );
+    });
   }
+  async function faultCleanupControls(): Promise<void> {
+    const descriptor = Object.getOwnPropertyDescriptor(globalThis, HOOK);
+    const flag = process.env.DESK_TEST_FAULTS;
+    const point = "fixture105_test_fault_cleanup";
+    const restored = () => {
+      expect(Object.getOwnPropertyDescriptor(globalThis, HOOK)).toEqual(
+        descriptor,
+      );
+      expect(process.env.DESK_TEST_FAULTS).toBe(flag);
+    };
+    let effects = 0;
+    expect(
+      await fault(
+        point,
+        () => {
+          effects += 1;
+        },
+        async () => {
+          await faultPoint(point);
+          return "completed";
+        },
+      ),
+    ).toBe("completed");
+    expect(effects).toBe(1);
+    restored();
+    const primary = new Error("synthetic work failure");
+    for (const original of [primary, "primitive work failure", undefined]) {
+      let caught = false;
+      try {
+        await fault(
+          point,
+          () => {
+            effects += 1;
+          },
+          vi.fn<() => Promise<never>>().mockRejectedValue(original),
+        );
+      } catch (error) {
+        caught = true;
+        if (original === primary) {
+          expect(error).toBe(primary);
+          expect(cleanupFailures.get(primary)).toHaveLength(1);
+          expect(cleanupFailures.get(primary)?.[0]).toBeInstanceOf(Error);
+        } else {
+          expect(error).toBeInstanceOf(AggregateError);
+          const aggregate = error as AggregateError;
+          expect(aggregate.errors).toHaveLength(2);
+          expect(aggregate.errors[0]).toBe(original);
+          expect(aggregate.errors[1]).toBeInstanceOf(Error);
+        }
+      }
+      expect(caught).toBe(true);
+      restored();
+    }
+    await expect(
+      fault(
+        point,
+        () => {
+          effects += 1;
+        },
+        () => Promise.resolve("uncut"),
+      ),
+    ).rejects.toThrow();
+    expect(effects).toBe(1);
+    restored();
+  }
+
   afterEach(async () => {
     const env = current;
     current = undefined;
@@ -3171,9 +3539,15 @@ suite("connected fixture105 native ownership", () => {
             throw new Error("native audit cut");
           },
           async () => {
-            await expect(runConnectedFixture105()).rejects.toThrow(
-              "native audit cut",
-            );
+            await new TargetObserver(
+              env.name,
+              "audit_fault_cut",
+              maintenanceOwner(),
+            ).around(async () => {
+              await expect(runConnectedFixture105()).rejects.toThrow(
+                "native audit cut",
+              );
+            });
           },
         );
         expect(await counts(env)).toEqual({
@@ -3640,15 +4014,21 @@ suite("connected fixture105 native ownership", () => {
             });
           },
           async () => {
-            try {
-              await runConnectedFixture105();
-              throw new Error("expected observation collision");
-            } catch (error) {
-              expect(error).toMatchObject({
-                code: "23505",
-                constraint: "artifacts_pkey",
-              });
-            }
+            await new TargetObserver(
+              env.name,
+              "foreign_observation_cut",
+              maintenanceOwner(),
+            ).around(async () => {
+              try {
+                await runConnectedFixture105();
+                throw new Error("expected observation collision");
+              } catch (error) {
+                expect(error).toMatchObject({
+                  code: "23505",
+                  constraint: "artifacts_pkey",
+                });
+              }
+            });
           },
         );
         expect(await counts(env)).toEqual({
@@ -4788,7 +5168,7 @@ suite("connected fixture105 native ownership", () => {
         // Cleanup is registered before connect; the holder stays live through the supplemental read.
         await withTestCleanup(
           async () => {
-            expect(maintenanceLatch.used).toBe(false);
+            expect(controlMaintenanceLatch.used).toBe(false);
             await holder.connect();
             const identity = await holder.query<{ pid: number }>(
               "SELECT pg_backend_pid() AS pid",
@@ -4801,7 +5181,7 @@ suite("connected fixture105 native ownership", () => {
             const observer = new TargetObserver(
               env.name,
               "held_client_control",
-              maintenanceOwner(),
+              maintenanceOwner(true),
             );
             let original: unknown;
             let refused = false;

@@ -603,11 +603,93 @@ class IdentityMapping(unittest.TestCase):
         self.assertFalse(record['workflow_sha_env_equals_checkout_head'])
 
     def test_push_rules(self):
-        env = {'GITHUB_EVENT_NAME': 'push', 'GITHUB_REF': 'refs/heads/main'}
-        event = {'after': MERGE, 'before': '7' * 40}
+        env = {**GOOD_ENV, 'GITHUB_EVENT_NAME': 'push', 'GITHUB_REF': 'refs/heads/main',
+               'GITHUB_RUN_ID': '123', 'GITHUB_RUN_ATTEMPT': '1'}
+        event = {'after': MERGE, 'before': '7' * 40, 'ref': 'refs/heads/main',
+                 'deleted': False, 'repository': {'full_name': 'o/r'}}
         self.assertEqual(self.run_identity(env=env, event=event)[0], [])
-        self.assertTrue(any('after' in e for e in self.run_identity(env=env, event={'after': '8' * 40})[0]))
-        self.assertTrue(any('main' in e for e in self.run_identity(env={**env, 'GITHUB_REF': 'refs/heads/x'}, event=event)[0]))
+        for key, value in [('after', '8' * 40), ('after', '0' * 40), ('after', None),
+                           ('after', ['a' * 40]), ('after', '--all'), ('after', 'A' * 40),
+                           ('deleted', True), ('deleted', 0), ('deleted', None),
+                           ('ref', 'refs/heads/x'), ('ref', 'refs/tags/main'), ('ref', None),
+                           ('repository', None), ('repository', 'o/r'), ('repository', []),
+                           ('repository', {}), ('repository', {'full_name': 'x/r'}),
+                           ('repository', {'full_name': 7}), ('repository', {'full_name': 'o/r '})]:
+            with self.subTest(key=key, value=value):
+                bad = {**event, key: value, 'pull_request': GOOD_EVENT['pull_request']}
+                self.assertTrue(self.run_identity(env=env, event=bad)[0])
+        for key in ('after', 'deleted', 'ref', 'repository'):
+            bad = dict(event); del bad[key]
+            self.assertTrue(self.run_identity(env=env, event=bad)[0])
+        for key, value in [('GITHUB_REF', 'refs/heads/x'), ('GITHUB_REPOSITORY', 'x/r'),
+                           ('GITHUB_SHA', '8' * 40), ('GITHUB_EVENT_NAME', 'workflow_dispatch')]:
+            self.assertTrue(self.run_identity(env={**env, key: value}, event=event)[0])
+        for facts in ({'head': '8' * 40}, {'tree': '8' * 40}, {'event_head_tree': None},
+                      {'event_head_tree': '8' * 40}, {'tree': 'bad', 'event_head_tree': 'bad'}):
+            self.assertTrue(self.run_identity(env=env, event=event, facts=facts)[0])
+        # before is informational, never a substitute for after or replay authority.
+        self.assertEqual(self.run_identity(env=env, event={**event, 'before': '0' * 40})[0], [])
+        # A malformed active PR cannot be rescued by an otherwise valid push payload.
+        for bad in (None, [], 'bad', {}, {'head': None}, {'head': []}, {'head': 'bad'},
+                    {'head': {'sha': MERGE}}, {'head': {'sha': None}}, {'head': {'sha': '--all'}}):
+            mixed = {**event, 'pull_request': bad}
+            self.assertTrue(self.run_identity(event=mixed)[0])
+            selected = ci.event_commit(GOOD_ENV, mixed)
+            self.assertEqual(selected, MERGE if bad == {'head': {'sha': MERGE}} else None)
+        for mode in ('pull_request', 'push', 'workflow_dispatch'):
+            for bad in (None, [], 'bad', 1):
+                self.assertIsNone(ci.event_commit({'GITHUB_EVENT_NAME': mode}, bad))
+        self.assertIsNone(ci.event_commit({'GITHUB_EVENT_NAME': 'push'}, GOOD_EVENT))
+        self.assertIsNone(ci.event_commit({'GITHUB_EVENT_NAME': 'workflow_dispatch'}, event))
+        for active, payload, selected in ((GOOD_ENV, GOOD_EVENT, HEAD), (env, event, MERGE)):
+            with mock.patch.object(ci, 'git_text', return_value=TREE) as git:
+                facts = ci.collect_git(ci.event_commit(active, payload))
+                self.assertEqual(facts['event_head_tree'], TREE)
+                self.assertEqual(git.call_args_list[-1], mock.call('rev-parse', selected + '^{tree}'))
+        for malformed in (None, ['a' * 40], '--all', '0' * 40):
+            with mock.patch.object(ci, 'git_text', return_value=TREE) as git:
+                facts = ci.collect_git(ci.event_commit(env, {**event, 'after': malformed}))
+                self.assertIsNone(facts['event_head_tree'])
+                self.assertEqual(git.call_count, 6)  # Only the six fixed local observations.
+        for record in ({}, {'event': 'workflow_dispatch', 'push_after': MERGE, 'pr_head_sha': HEAD},
+                       {'event': 'pull_request', 'pr_head_sha': None, 'push_after': MERGE},
+                       {'event': 'push', 'push_after': HEAD, 'checkout_head': MERGE},
+                       {'event': 'push', 'push_after': MERGE, 'checkout_head': MERGE, 'errors': ['bad']}):
+            with self.assertRaises(RuntimeError): ci.identity_head(record)
+        # Synthetic integration: real producer mapping, fresh proof mapping and closed
+        # partition/summary readers. No sealed ROOT or hosted admission is manufactured.
+        owner = ci.installation_owner()
+        members = {'src/index.ts': [1, 'f' * 64]}
+        snapshot = {'members': members, 'missing': [], 'links': [], 'extra': [], 'problems': [], 'dist': None}
+        for mode, payload, expected_head in [('pull_request', GOOD_EVENT, HEAD), ('push', event, MERGE)]:
+            active = {**env, 'GITHUB_EVENT_NAME': mode,
+                      'GITHUB_REF': 'refs/pull/28/merge' if mode == 'pull_request' else 'refs/heads/main'}
+            with mock.patch.dict(os.environ, active), mock.patch.object(ci, 'load_event', return_value=payload), \
+                 mock.patch.object(ci, 'collect_git', return_value=GOOD_FACTS) as collect, \
+                 mock.patch.object(ci, 'tracked_files', return_value=list(members)), \
+                 mock.patch.object(ci, 'take_snapshot', return_value=snapshot):
+                source = owner.source_identity(ci, members)
+                current, observed = ci.proof_identity_now(False)
+                common = ci.partition_identity(current, observed)
+                self.assertEqual(source, {key: common[key] for key in owner.IDENTITY_KEYS})
+                self.assertEqual((source['checkout'], source['head'], source['tree']), (MERGE, expected_head, TREE))
+                self.assertEqual(collect.call_args_list, [mock.call(expected_head), mock.call(expected_head)])
+                execution = installation_model.execution(ci, common, 'writer')
+                owner.validate_summary(ci, execution, common, 'writer')
+                for key, value in [('run_id', '124'), ('run_attempt', '2'), ('repository', 'x/r'),
+                                   ('checkout', '8' * 40), ('head', '8' * 40), ('tree', '8' * 40),
+                                   ('source_sha256', '8' * 64)]:
+                    with self.subTest(mode=mode, substitution=key), self.assertRaises(RuntimeError):
+                        owner.validate_summary(ci, execution, {**common, key: value}, 'writer')
+                changed = json.loads(json.dumps(execution)); changed['summary']['job'] = 'verify-rest'
+                with self.assertRaises(RuntimeError): owner.validate_summary(ci, changed, common, 'writer')
+                # A same-tree foreign commit in the event must fail fresh admission.
+                foreign = json.loads(json.dumps(payload))
+                if mode == 'push': foreign['after'] = '8' * 40
+                else: foreign['pull_request']['head']['sha'] = '8' * 40
+                with mock.patch.object(ci, 'load_event', return_value=foreign):
+                    with self.assertRaises(RuntimeError): owner.source_identity(ci, members)
+                    with self.assertRaises(RuntimeError): ci.proof_identity_now(False)
 
 
 class FailClosedStages(unittest.TestCase):
@@ -1072,11 +1154,17 @@ def _restored_workflow(test, text):
     rest=text.split('  verify-rest:\n',1)[1].split('\n  verify:',1)[0]
     for identifier in ('fixture046-runtime','fixture046-cleanup'):
         test.assertNotIn(identifier,writer)
-    test.assertNotIn('fixture105-unknown',text)
+    for profile in ('fixture105-unknown', 'fixture105-isolation', 'fixture105-native', 'provider-timeout'):
+        test.assertNotIn(profile, text)
+    test.assertNotIn('exit 78', text)
+    test.assertNotIn('HOLD:', text)
     test.assertNotIn('ci.py diagnostic-final',text)
     test.assertIn('needs: [verify-writer, verify-rest, container]',text)
     test.assertIn('ci.py joint',text)
     test.assertNotIn('if: ${{ false }}',text.split('  container:',1)[1])
+    joint = text.split('  verify:\n', 1)[1].split('  container:', 1)[0]
+    test.assertIn('    if: ${{ always() }}\n', joint)
+    test.assertNotIn('if: ${{ false }}', joint)
     for label,job in (('writer',writer),('rest',rest)):
         test.assertNotIn('    if: ${{ false }}',job.split('    steps:',1)[0])
         test.assertIn('timeout-minutes: 190',job)
@@ -1132,8 +1220,90 @@ def _restored_workflow(test, text):
     test.assertEqual(hashlib.sha256(text.encode()).hexdigest(),'48e018806108f57b5deaf23e81d55e96fcabf62465ea7e066f064db979d64651')
 
 
+def _provider_timeout_workflow(test, text):
+    """Fixed two-case PostgreSQL diagnostic, preserving the reviewed held routes."""
+    writer=text.split('  verify-rest:\n',1)[0]
+    for identifier in ('fixture046-runtime','fixture046-cleanup'):
+        test.assertNotIn(identifier,writer)
+    test.assertEqual(hashlib.sha256(text.encode()).hexdigest(), 'b032f1996d181e6b125fbc1f93d71aeac0a641483a84f37948f2b31b648b1824')
+    for after,before in (
+        ('# PROVIDER TIMEOUT DIAGNOSTIC: two fixed provider cases; full validation remains held.', '# ISOLATION DIAGNOSTIC: two fixed native cases; full validation remains held.'),
+        ('Prove the two deterministic provider timeout cases', 'Diagnose the two native isolation refusals'),
+        ('provider-timeout', 'fixture105-isolation'),
+        ('Hold after the bounded provider timeout diagnostic', 'Hold after the bounded isolation diagnostic'),
+    ):
+        test.assertEqual(text.count(after), 3 if after=='provider-timeout' else 1)
+        text=text.replace(after,before)
+    _isolation_workflow(test,text)
+
+
+def _whole_native_workflow(test, text):
+    """One fixed native file, not an aggregate/full-CI acceptance route."""
+    writer=text.split('  verify-rest:\n',1)[0]
+    for identifier in ('fixture046-runtime','fixture046-cleanup'):test.assertNotIn(identifier,writer)
+    test.assertEqual(hashlib.sha256(text.encode()).hexdigest(), '3d51aca17cf0abff2fd2ed9361b38f7b0bcc12f0f8201503c987e82eeb6cfbe3')
+    test.assertEqual(text.count('command-postgres-hosted.ts fixture105-native'),1)
+    lines=text.splitlines(True)
+    for offset,after,before in reversed([
+        (2, '# WHOLE NATIVE DIAGNOSTIC: all 34 native cases; full validation remains held.\n', '# ISOLATION DIAGNOSTIC: two fixed native cases; full validation remains held.\n'),
+        (474, '      - name: Observe the complete native file context\n', '      - name: Diagnose the two native isolation refusals\n'),
+        (478, '        timeout-minutes: 37\n', '        timeout-minutes: 21\n'),
+        (483, '            /usr/bin/timeout --signal=TERM --kill-after=20s 2160s \\\n            node --import tsx test/support/command-postgres-hosted.ts fixture105-native\n      - name: Retain the whole native diagnostic including failed cleanup observations\n', '            /usr/bin/timeout --signal=TERM --kill-after=20s 1200s \\\n            node --import tsx test/support/command-postgres-hosted.ts fixture105-isolation\n      - name: Retain the two-case diagnostic including failed cleanup observations\n'),
+        (491, '          name: ci-fixture105-native-rest-${{ github.run_id }}-${{ github.run_attempt }}\n          path: ${{ runner.temp }}/evaluation/ci/evidence/fixture105-native/retained\n', '          name: ci-fixture105-isolation-rest-${{ github.run_id }}-${{ github.run_attempt }}\n          path: ${{ runner.temp }}/evaluation/ci/evidence/fixture105-isolation/retained\n'),
+        (617, '      - name: Hold after the bounded whole native diagnostic\n', '      - name: Hold after the bounded isolation diagnostic\n'),
+        (622, "          printf '%s\\n' 'HOLD: whole native diagnostic only; full validation remains held.'\n", "          printf '%s\\n' 'HOLD: two-case diagnostic only; full validation remains held.'\n"),
+    ]):
+        count=len(after.splitlines(True));test.assertEqual(''.join(lines[offset:offset+count]),after)
+        lines[offset:offset+count]=before.splitlines(True)
+    _isolation_workflow(test,''.join(lines))
+
+
+def _isolation_workflow(test, text):
+    """Temporary closed diagnostic; inverse literal deltas preserve all normal-route checks."""
+    writer=text.split('  verify-rest:\n',1)[0]
+    for identifier in ('fixture046-runtime','fixture046-cleanup'):
+        test.assertNotIn(identifier,writer)
+    test.assertEqual(hashlib.sha256(text.encode()).hexdigest(), '2b21e2287b145008bab136ebc85e90cd3aaedd4433c1f215abb766d68cffe2c5')
+    test.assertEqual(text.count('command-postgres-hosted.ts fixture105-isolation'),1)
+    rest=text.split('  verify-rest:\n',1)[1].split('\n  verify:',1)[0]
+    test.assertLess(rest.index('id: upload-controls'),rest.index('id: command-postgres'))
+    test.assertLess(rest.index('id: upload-command-postgres'),rest.index('Hold after the bounded isolation diagnostic'))
+    test.assertIn("always() && steps.init.outcome == 'success' && steps.command-postgres.outcome != 'skipped'",rest)
+    test.assertIn('/evidence/fixture105-isolation/retained',rest)
+    # Exact positional reversal is test-only: it cannot authorize a changed workflow.
+    lines=text.splitlines(True)
+    for offset, after, before in reversed([
+        (2, '# ISOLATION DIAGNOSTIC: two fixed native cases; full validation remains held.\n', '# FULL RESTORATION: independent ordinary installations and complete partition acceptance.\n'),
+        (12, '    if: ${{ false }}\n', ''),
+        (378, '        if: ${{ false }}\n', "        if: ${{ success() && steps.init.outcome == 'success' }}\n"),
+        (474, '      - name: Diagnose the two native isolation refusals\n', '      - name: Prove ordinary PostgreSQL command connection semantics\n'),
+        (484, '            node --import tsx test/support/command-postgres-hosted.ts fixture105-isolation\n      - name: Retain the two-case diagnostic including failed cleanup observations\n', '            node --import tsx test/support/command-postgres-hosted.ts\n      - name: Retain ordinary command proof including failed cleanup observations\n'),
+        (491, '          name: ci-fixture105-isolation-rest-${{ github.run_id }}-${{ github.run_attempt }}\n          path: ${{ runner.temp }}/evaluation/ci/evidence/fixture105-isolation/retained\n', '          name: ci-command-postgres-rest-${{ github.run_id }}-${{ github.run_attempt }}\n          path: ${{ runner.temp }}/evaluation/ci/evidence/command-postgres/retained\n'),
+        (496, '        if: ${{ false }}\n', "        if: ${{ success() && steps.init.outcome == 'success' && steps.semantic-identities.outcome == 'success' && steps.collect-controls.outcome == 'success' && steps.upload-controls.outcome == 'success' }}\n"),
+        (504, '        if: ${{ false }}\n', "        if: ${{ success() && steps.init.outcome == 'success' && steps.semantic-identities.outcome == 'success' && steps.collect-controls.outcome == 'success' && steps.upload-controls.outcome == 'success' }}\n"),
+        (521, '        if: ${{ false }}\n', "        if: ${{ always() && steps.init.outcome == 'success' }}\n"),
+        (531, '        if: ${{ false }}\n', "        if: ${{ always() && steps.collect-full.outcome == 'success' }}\n"),
+        (558, '        if: ${{ false }}\n', "        if: ${{ success() && steps.init.outcome == 'success' }}\n"),
+        (567, '        if: ${{ false }}\n', "        if: ${{ success() && steps.init.outcome == 'success' }}\n"),
+        (574, '        if: ${{ false }}\n', "        if: ${{ success() && steps.security-precheck.outcome == 'success' }}\n"),
+        (583, '        if: ${{ false }}\n', "        if: ${{ always() && steps.init.outcome == 'success' && steps.security-precheck.outcome == 'success' && (steps.gitleaks.outcome == 'success' || steps.gitleaks.outcome == 'failure') }}\n"),
+        (593, '        if: ${{ false }}\n', "        if: ${{ always() && steps.retain-security.outcome == 'success' }}\n"),
+        (603, '        if: ${{ false }}\n', "        if: ${{ always() && steps.init.outcome == 'success' }}\n"),
+        (617, "      - name: Hold after the bounded isolation diagnostic\n        if: ${{ always() }}\n        working-directory: ${{ github.workspace }}\n        timeout-minutes: 1\n        run: |\n          printf '%s\\n' 'HOLD: two-case diagnostic only; full validation remains held.'\n          exit 78\n", ''),
+        (627, '    if: ${{ false }}\n', '    if: ${{ always() }}\n'),
+        (654, '    if: ${{ false }}\n', ''),
+    ]):
+        count=len(after.splitlines(True))
+        test.assertEqual(''.join(lines[offset:offset+count]),after)
+        lines[offset:offset+count]=before.splitlines(True)
+    _restored_workflow(test,''.join(lines))
+
+
 def _evaluation_workflow(test, text):
     """Closed representative /2 route: no source-only or partial-layout consumer."""
+    if '# PROVIDER TIMEOUT DIAGNOSTIC:' in text:return _provider_timeout_workflow(test,text)
+    if '# WHOLE NATIVE DIAGNOSTIC:' in text:return _whole_native_workflow(test,text)
+    if '# ISOLATION DIAGNOSTIC:' in text:return _isolation_workflow(test,text)
     if '# FULL RESTORATION:' in text:return _restored_workflow(test,text)
     test.assertEqual(text.count('# REPRESENTATIVE FIRST: two independent ordinary installations and transferred-build provenance.'),1)
     test.assertNotIn('# P1 SHORT PHYSICAL CHECKOUT:',text)
@@ -1660,15 +1830,40 @@ def _short_layout_controls(test, owner_path):
         'wrong_match_record', 'extra_match_record', 'capture_error',
         'cancel_match', 'bytes_drift', 'config_replaced', 'mode_drift',
         'git_root_replaced', 'names_drift', 'bounded_read')]
-    for fault, selected in config_cases:
-        with test.subTest(layout_config=fault, key=selected), tempfile.TemporaryDirectory() as directory:
+    config_cases = [(profile, fault, selected) for profile in ('pr', 'push')
+                    for fault, selected in config_cases]
+    config_cases += [('push', fault, key) for key in ('branch.main.remote', 'branch.main.merge')
+                     for fault in ('missing', 'wrong', 'duplicate')]
+    context_faults = ('event_missing', 'event_foreign', 'ref_missing', 'ref_foreign',
+                      'ref_pr_head', 'ref_pr_zero', 'ref_pr_suffix', 'ref_pr_newline',
+                      'symbolic_mismatch', 'symbolic_foreign', 'symbolic_duplicate', 'symbolic_missing_lf')
+    config_cases += [(profile, fault, None) for profile in ('pr', 'push') for fault in context_faults]
+    for profile, fault, selected in config_cases:
+        with test.subTest(layout_config=fault, key=selected, profile=profile), tempfile.TemporaryDirectory() as directory:
             g = realm()
             root = Path(directory)
             destination, evidence = root / 'd', root / 'evidence'
             destination.mkdir(mode=0o700); evidence.mkdir(mode=0o700)
             git = destination / '.git'; git.mkdir(mode=0o700)
             config = git / 'config'
-            actual = {key: [value] for key, value in config_expected.items()}
+            expected = dict(config_expected)
+            if profile == 'push':
+                expected.update({'branch.main.remote': 'origin', 'branch.main.merge': 'refs/heads/main'})
+            actual = {key: [value] for key, value in expected.items()}
+            environment = {'GITHUB_EVENT_NAME': 'push' if profile == 'push' else 'pull_request',
+                           'GITHUB_REF': 'refs/heads/main' if profile == 'push' else 'refs/pull/43/merge'}
+            symbolic = b'refs/heads/main\n' if profile == 'push' else b'HEAD\n'
+            if fault == 'event_missing': environment.pop('GITHUB_EVENT_NAME')
+            if fault == 'event_foreign': environment['GITHUB_EVENT_NAME'] = 'workflow_dispatch'
+            if fault == 'ref_missing': environment.pop('GITHUB_REF')
+            if fault.startswith('ref_') and fault != 'ref_missing':
+                environment['GITHUB_REF'] = {'ref_foreign':'refs/heads/other', 'ref_pr_head':'refs/pull/43/head',
+                    'ref_pr_zero':'refs/pull/0/merge', 'ref_pr_suffix':'refs/pull/43/merge/other',
+                    'ref_pr_newline':'refs/pull/43/merge\n'}[fault]
+            if fault == 'symbolic_mismatch': symbolic = b'HEAD\n' if profile == 'push' else b'refs/heads/main\n'
+            if fault == 'symbolic_foreign': symbolic = b'refs/heads/other\n'
+            if fault == 'symbolic_duplicate': symbolic += symbolic
+            if fault == 'symbolic_missing_lf': symbolic = symbolic[:-1]
             sentinel = 'DUMMY_UNEXPECTED_CREDENTIAL_7ac52'
             extras = {'extra_http': 'http.extraheader', 'extra_credential': 'credential.helper',
                       'extra_hook': 'core.hookspath', 'extra_include': 'include.path',
@@ -1681,7 +1876,9 @@ def _short_layout_controls(test, owner_path):
             if fault == 'wrong': actual[selected] = [sentinel]
             if fault == 'duplicate': actual[selected] *= 2
             if fault in extras: actual[extras[fault]] = [sentinel]
-            if fault == 'branch_pair': actual.update({'branch.main.remote': ['origin'], 'branch.main.merge': ['refs/heads/main']})
+            if fault == 'branch_pair':
+                branch = 'other' if profile == 'push' else 'main'
+                actual.update({'branch.' + branch + '.remote': ['origin'], 'branch.' + branch + '.merge': ['refs/heads/' + branch]})
             if fault == 'duplicate_mixed': actual['remote.origin.url'] += ['https://user:' + sentinel + '@example.invalid/']
             if fault in ('empty_value', 'multiline_value', 'boolean_alias'):
                 actual['core.bare'] = [{'empty_value': '', 'multiline_value': 'false\n' + sentinel, 'boolean_alias': '0'}[fault]]
@@ -1703,6 +1900,9 @@ def _short_layout_controls(test, owner_path):
             def query(label, argv, seconds):
                 test.assertEqual(seconds, 10)
                 calls.append((label, argv, seconds))
+                if label == 'source-symbolic-head':
+                    test.assertEqual(argv, ['/usr/bin/git', '-C', str(root), 'rev-parse', '--symbolic-full-name', 'HEAD'])
+                    return symbolic
                 if label in ('clone-config-names', 'clone-config-names-after'):
                     test.assertEqual(argv, ['/usr/bin/git', '-C', str(destination), 'config', 'list',
                                            '--local', '--no-includes', '--null', '--name-only'])
@@ -1713,8 +1913,8 @@ def _short_layout_controls(test, owner_path):
                     if fault == 'empty_names': result = b''
                     if fault == 'names_drift' and label.endswith('-after'): result += b'http.extraheader\0'
                 else:
-                    key = argv[-1]; value = config_expected[key]
-                    index = sorted(config_expected).index(key)
+                    key = argv[-1]; value = expected[key]
+                    index = sorted(expected).index(key)
                     test.assertEqual(label, 'clone-config-match-' + str(index))
                     test.assertEqual(argv, ['/usr/bin/git', '-C', str(destination), 'config', 'get',
                         '--local', '--no-includes', '--all', '--fixed-value', '--value=' + value,
@@ -1737,11 +1937,11 @@ def _short_layout_controls(test, owner_path):
                             git.rename(destination / 'retained-git'); git.mkdir(mode=0o700); config.write_bytes(b'fixed')
                 emitted.append((result, b''))
                 return result
-            with mock.patch.dict(g, {'capture': query}):
+            with mock.patch.dict(os.environ, environment, clear=True), mock.patch.dict(g, {'capture': query}):
                 if fault == 'success':
                     g['validate_clone_config'](g['STATE']['owned_root'])
-                    test.assertEqual([row[0] for row in calls], ['clone-config-names'] +
-                        ['clone-config-match-' + str(i) for i in range(7)] + ['clone-config-names-after'])
+                    test.assertEqual([row[0] for row in calls], ['source-symbolic-head', 'clone-config-names'] +
+                        ['clone-config-match-' + str(i) for i in range(len(expected))] + ['clone-config-names-after'])
                     test.assertTrue(json.loads((evidence / 'clone-config-proof.json').read_bytes())['stable'])
                 else:
                     with test.assertRaises(g['LayoutFailure']) as refused:
@@ -1752,6 +1952,8 @@ def _short_layout_controls(test, owner_path):
                     if fault in extras or fault in ('missing', 'duplicate', 'duplicate_mixed', 'branch_pair',
                                                    'no_terminal_nul', 'extra_terminal_nul', 'non_utf8', 'empty_names'):
                         test.assertFalse(any(row[0].startswith('clone-config-match-') for row in calls))
+                    if fault in context_faults:
+                        test.assertEqual([row[0] for row in calls], ['source-symbolic-head'])
                     test.assertFalse((evidence / 'clone-config-proof.json').exists())
                     test.assertNotIn(sentinel, str(refused.exception))
             test.assertNotIn(sentinel, repr(calls) + repr(emitted) +
@@ -1759,7 +1961,7 @@ def _short_layout_controls(test, owner_path):
             test.assertEqual(g['OWNED_FD_PENDING'], [])
             test.assertEqual(g['PENDING_RESOURCES'], [])
 
-    for fault in ('success', 'evaluation_success', 'missing_role', 'unknown_role', 'existing', 'symlink', 'source_uid', 'tmp_mode', 'wrong_head', 'wrong_sha',
+    for fault in ('success', 'evaluation_success', 'push_success', 'missing_role', 'unknown_role', 'existing', 'symlink', 'source_uid', 'tmp_mode', 'wrong_head', 'wrong_sha',
                   'wrong_tree', 'partial_clone', 'imported_config', 'alternates', 'replacement',
                   'source_mode', 'git_pointer', 'root_mode', 'preseed_modules', 'terminal_receipt',
                   'terminal_cancel', 'tool_drift', 'wrong_git_version', 'source_git_pointer',
@@ -1789,13 +1991,17 @@ def _short_layout_controls(test, owner_path):
                     value['uid'] += 1
                 return value
             calls = []
-            main_config = dict(config_expected)
+            main_expected = dict(config_expected)
+            if fault == 'push_success':
+                main_expected.update({'branch.main.remote': 'origin', 'branch.main.merge': 'refs/heads/main'})
+            main_config = dict(main_expected)
             main_sentinel = 'DUMMY_UNEXPECTED_CREDENTIAL_7ac52'
             if fault == 'config_wrong_url':
                 main_config['remote.origin.url'] = 'https://user:' + main_sentinel + '@example.invalid/'
             def action(label, _argv, _seconds):
                 calls.append(label)
                 if label == 'git-version': return b'not a version\n' if fault == 'wrong_git_version' else b'git version 2.56.0 synthetic-control\n'
+                if label == 'source-symbolic-head': return b'refs/heads/main\n' if fault == 'push_success' else b'HEAD\n'
                 if label == 'source-head': return (('c' if fault == 'wrong_head' else 'a') * 40 + '\n').encode()
                 if label in ('source-tree', 'clone-tree'):
                     return (('c' if fault == 'wrong_tree' and label == 'clone-tree' else 'b') * 40 + '\n').encode()
@@ -1829,8 +2035,8 @@ def _short_layout_controls(test, owner_path):
                     return result + b'remote.origin.url\0' if fault == 'config_duplicate' else result
                 if label.startswith('clone-config-match-'):
                     key = _argv[-1]
-                    test.assertEqual(_argv[-7:], ['--fixed-value', '--value=' + config_expected[key], '--null', '--show-names', '--name-only', '--', key])
-                    if main_config[key] != config_expected[key]:
+                    test.assertEqual(_argv[-7:], ['--fixed-value', '--value=' + main_expected[key], '--null', '--show-names', '--name-only', '--', key])
+                    if main_config[key] != main_expected[key]:
                         raise g['LayoutFailure']('git_action_or_settlement_failed')
                     if fault == 'config_drift' and label.endswith('-0'):
                         config = destination / '.git/config'
@@ -1840,7 +2046,9 @@ def _short_layout_controls(test, owner_path):
             output = root / 'github-output'
             output.write_bytes(b'')
             output.chmod(0o600)
-            environment = {'GITHUB_OUTPUT': str(output), 'GITHUB_ACTIONS': 'true', 'ImageOS': 'ubuntu24', 'DESK_CI_PARTITION': 'rest',
+            environment = {'GITHUB_EVENT_NAME': 'push' if fault == 'push_success' else 'pull_request',
+                           'GITHUB_REF': 'refs/heads/main' if fault == 'push_success' else 'refs/pull/43/merge',
+                           'GITHUB_OUTPUT': str(output), 'GITHUB_ACTIONS': 'true', 'ImageOS': 'ubuntu24', 'DESK_CI_PARTITION': 'rest',
                            'GITHUB_REPOSITORY': 'mikeddamico/the-desk',
                            'GITHUB_SHA': 'invalid' if fault == 'wrong_sha' else 'a' * 40,
                            'GITHUB_WORKSPACE': str(source), 'RUNNER_TEMP': str(runner),
@@ -1866,8 +2074,8 @@ def _short_layout_controls(test, owner_path):
                  mock.patch.object(g['signal'], 'signal'), \
                  mock.patch.object(g['ctypes'], 'CDLL', return_value=types.SimpleNamespace(prctl=lambda *_: 0)), \
                  contextlib.redirect_stdout(printed):
-                test.assertEqual(g['main'](), 0 if fault in ('success','evaluation_success') else 1)
-            if fault in ('success','evaluation_success'):
+                test.assertEqual(g['main'](), 0 if fault in ('success','evaluation_success','push_success') else 1)
+            if fault in ('success','evaluation_success','push_success'):
                 test.assertIsNone(g['STATE']['primary'])
                 test.assertTrue(json.loads((role_evidence / 'terminal.json').read_bytes())['ok'])
                 test.assertIn('evidence_claimed=true', output.read_text())
@@ -1921,11 +2129,60 @@ class WorkflowShape(unittest.TestCase):
 
     def text(self):
         raw = (HERE.parents[1] / '.github' / 'workflows' / 'ci.yml').read_text()
-        return raw if '# REPRESENTATIVE FIRST:' in raw or '# FULL RESTORATION:' in raw else _short_layout_workflow(self, raw)
+        return raw if '# REPRESENTATIVE FIRST:' in raw or '# FULL RESTORATION:' in raw or '# ISOLATION DIAGNOSTIC:' in raw or '# WHOLE NATIVE DIAGNOSTIC:' in raw or '# PROVIDER TIMEOUT DIAGNOSTIC:' in raw else _short_layout_workflow(self, raw)
 
     def test_fixed_steps_and_ceilings(self):
         text = self.text()
         raw = (ci.ROOT / '.github/workflows/ci.yml').read_text()
+        if '# PROVIDER TIMEOUT DIAGNOSTIC:' in raw:
+            _provider_timeout_workflow(self,raw)
+            for before,after in (
+                ('provider-timeout','fixture105-isolation'),
+                ('    if: ${{ false }}','    if: ${{ always() }}'),
+                ('timeout-minutes: 21','timeout-minutes: 22'),('1200s','1201s'),
+                ("steps.upload-controls.outcome == 'success'",'true'),
+                ("steps.command-postgres.outcome != 'skipped'","steps.command-postgres.outcome == 'success'"),
+                ('stage-check prerequisite',''),('stage-check focused',''),('exit 78','exit 0'),
+            ):
+                self.assertIn(before,raw)
+                with self.subTest(provider_timeout=before),self.assertRaises(AssertionError):
+                    _provider_timeout_workflow(self,raw.replace(before,after,1))
+            _short_layout_controls(self,ci.ROOT/'test/support/fixture105-hosted-layout.py')
+            return
+        if '# WHOLE NATIVE DIAGNOSTIC:' in raw:
+            _whole_native_workflow(self,raw)
+            for before,after in (
+                ('fixture105-native','fixture105-isolation'),('timeout-minutes: 37','timeout-minutes: 36'),
+                ('2160s','1200s'),('    if: ${{ false }}','    if: ${{ always() }}'),
+                ("steps.upload-controls.outcome == 'success'",'true'),
+                ("steps.command-postgres.outcome != 'skipped'","steps.command-postgres.outcome == 'success'"),
+                ('/evidence/fixture105-native/retained','/evidence/fixture105-isolation/retained'),
+                ('stage-check focused',''),('exit 78','exit 0'),
+            ):
+                self.assertIn(before,raw)
+                with self.subTest(native_context=before),self.assertRaises(AssertionError):
+                    _whole_native_workflow(self,raw.replace(before,after,1))
+            _short_layout_controls(self,ci.ROOT/'test/support/fixture105-hosted-layout.py')
+            return
+        if '# ISOLATION DIAGNOSTIC:' in raw:
+            _isolation_workflow(self,raw)
+            for before,after in (
+                ('fixture105-isolation','fixture105-unknown'),
+                ('    if: ${{ false }}','    if: ${{ always() }}'),
+                ('timeout-minutes: 21','timeout-minutes: 22'),
+                ('1200s','1201s'),
+                ("steps.upload-controls.outcome == 'success'",'true'),
+                ("steps.command-postgres.outcome != 'skipped'","steps.command-postgres.outcome == 'success'"),
+                ('/evidence/fixture105-isolation/retained','/evidence/command-postgres/retained'),
+                ('stage-check prerequisite',''),
+                ('stage-check focused',''),
+                ('exit 78','exit 0'),
+            ):
+                self.assertIn(before,raw)
+                with self.subTest(diagnostic=before),self.assertRaises(AssertionError):
+                    _isolation_workflow(self,raw.replace(before,after,1))
+            _short_layout_controls(self,ci.ROOT/'test/support/fixture105-hosted-layout.py')
+            return
         if '# FULL RESTORATION:' in raw:
             _restored_workflow(self,raw)
             for before,after in (
@@ -1939,6 +2196,15 @@ class WorkflowShape(unittest.TestCase):
                 ('SECURITY_UPLOAD_OUTCOME: ${{ steps.upload-security.outcome }}','SECURITY_UPLOAD_OUTCOME: success'),
                 ('FIXTURE046_CLEANUP_OUTCOME: ${{ steps.fixture046-cleanup.outcome }}','FIXTURE046_CLEANUP_OUTCOME: success'),
                 ('command-postgres-hosted.ts\n','command-postgres-hosted.ts fixture105-unknown\n'),
+                ('command-postgres-hosted.ts\n','command-postgres-hosted.ts fixture105-isolation\n'),
+                ('command-postgres-hosted.ts\n','command-postgres-hosted.ts fixture105-native\n'),
+                ('command-postgres-hosted.ts\n','command-postgres-hosted.ts provider-timeout\n'),
+                ('  verify-writer:\n','  verify-writer:\n    if: ${{ false }}\n'),
+                ('  container:\n','  container:\n    if: ${{ false }}\n'),
+                ('    needs: [verify-writer, verify-rest, container]\n    if: ${{ always() }}',
+                 '    needs: [verify-writer, verify-rest, container]\n    if: ${{ false }}'),
+                ('  verify:\n', '      - run: exit 78 # HOLD: diagnostic only\n\n  verify:\n'),
+                ("always() && steps.init.outcome == 'success' && steps.command-postgres.outcome != 'skipped'", "steps.command-postgres.outcome == 'success'"),
                 ('GITLEAKS_ENABLE_COMMENTS: "false"','GITLEAKS_ENABLE_COMMENTS: "true"'),
                 ('docker build --tag','true # docker build --tag'),
             ):
@@ -2193,7 +2459,7 @@ class WorkflowShape(unittest.TestCase):
 
     def test_partial_artifacts_are_still_uploaded_and_upload_failure_gates_the_aggregate(self):
         text = self.text()
-        if '# REPRESENTATIVE FIRST:' in text or '# FULL RESTORATION:' in text:
+        if '# REPRESENTATIVE FIRST:' in text or '# FULL RESTORATION:' in text or '# ISOLATION DIAGNOSTIC:' in text or '# WHOLE NATIVE DIAGNOSTIC:' in text or '# PROVIDER TIMEOUT DIAGNOSTIC:' in text:
             _evaluation_workflow(self,text)
             return
         self.assertNotIn('continue-on-error', text)
@@ -2452,6 +2718,36 @@ class Fixture105Tooling(unittest.TestCase):
                 ci.fixture_journal(root, suite)
 
     def test_expected_observed_correspondence_is_separate(self):
+        hosted=(ci.ROOT/'test/support/command-postgres-hosted.ts').read_text()
+        embedded=hosted.split('const sourceCheck = String.raw`',1)[1].split('`;',1)[0]
+        branches=[node for node in ast.walk(ast.parse(embedded)) if isinstance(node,ast.If)
+                  and ast.dump(node.test)==ast.dump(ast.parse("sys.argv[2]=='fixture105-native'",mode='eval').body)]
+        self.assertEqual(len(branches),1)
+        self.assertEqual(ast.unparse(branches[0].body[0]),"c['fixture_journal'](root, json.loads(journal))")
+        self.assertIn("summary_evidence['native_suite_complete' if sys.argv[2]=='fixture105-native' else 'isolation_cases_complete']=False",embedded)
+        branch=compile(ast.Module(body=branches[0].body,type_ignores=[]),'<existing native journal branch>','exec')
+        with fixture_world() as (base,checkout,root,binding):
+            suite=self.journal(root)
+            def check(record):
+                summary={};namespace={'c':{'fixture_journal':ci.fixture_journal},'root':root,'json':json,
+                                      'journal':json.dumps(record),'summary_evidence':summary}
+                exec(branch,namespace)
+                self.assertEqual(summary,{'native_suite_complete':True})
+            check(suite)
+            def clone():return json.loads(json.dumps(suite))
+            mutants=[]
+            for key,value in (('suite_complete',False),('cases',suite['cases'][:-1]),('targets',suite['targets']+suite['targets'][:1])):
+                changed=clone();changed[key]=value;mutants.append(changed)
+            for field,value in (('case_id','foreign case'),('completed',False),('expected',[])):
+                changed=clone();changed['cases'][0][field]=value;mutants.append(changed)
+            for field,value in (('completed',False),('returned',False),('target_hash','f'*64),('ordinal',2)):
+                changed=clone();changed['cases'][0]['calls'][0][field]=value;mutants.append(changed)
+            for changed in mutants:
+                with self.assertRaises(RuntimeError):check(changed)
+            target=suite['targets'][0]['target_hash'];terminal=root/'expectations'/(target+'.terminal.json');saved=terminal.read_bytes()
+            bad=json.loads(saved);bad['intent_sha256']='f'*64;terminal.write_bytes(ci.fixture_bytes(bad))
+            with self.assertRaisesRegex(RuntimeError,'terminal mismatch'):check(suite)
+            terminal.write_bytes(saved);check(suite)
         with fixture_world() as (base, checkout, root, binding):
             suite = self.journal(root)
             suite['targets'][0]['later_outcome'] = 'unknown'
@@ -3046,7 +3342,7 @@ class Partition155Tests(unittest.TestCase):
 
     def test_partition_binding_changes(self):
         members = {p: [1, 'a' * 64] for p in self.tracked}
-        identity = {'checkout_head': 'a' * 40, 'pr_head_sha': 'b' * 40, 'checkout_tree': 'c' * 40,
+        identity = {'event': 'pull_request', 'checkout_head': 'a' * 40, 'pr_head_sha': 'b' * 40, 'checkout_tree': 'c' * 40,
                     'repository': 'mikeddamico/the-desk', 'run_id': '123', 'run_attempt': '1', 'errors': []}
         binding = installation_model.binding(ci,'writer',identity,members)
         env = {'DESK_CI_PARTITION': 'writer', 'GITHUB_SHA': 'a' * 40, 'GITHUB_RUN_ID': '123',
@@ -3098,10 +3394,13 @@ class Partition155Tests(unittest.TestCase):
             self.assertTrue(ci.final_verdict(finals, outcomes))
 
     @contextlib.contextmanager
-    def final_world(self, label):
+    def final_world(self, label, mode='pull_request'):
         members = {p: [1, 'a' * 64] for p in self.tracked}
-        identity = {'checkout_head': 'a' * 40, 'pr_head_sha': 'b' * 40, 'checkout_tree': 'c' * 40,
+        identity = {'event': 'pull_request', 'checkout_head': 'a' * 40, 'pr_head_sha': 'b' * 40, 'checkout_tree': 'c' * 40,
                     'repository': 'mikeddamico/the-desk', 'run_id': '123', 'run_attempt': '1', 'errors': []}
+        if mode == 'push':
+            identity['event'] = 'push'; identity['push_after'] = identity['checkout_head']
+            del identity['pr_head_sha']
         binding = installation_model.binding(ci,label,identity,members)
         with tempfile.TemporaryDirectory() as tmp:
             base = Path(tmp); ev = base / 'evidence'; ev.mkdir()
@@ -3130,20 +3429,21 @@ class Partition155Tests(unittest.TestCase):
                 yield base, output, identity, members
 
     def test_final_emits_only_successful_canonical_proof(self):
-        for label in ('writer', 'rest'):
-            with self.final_world(label) as (base, output, identity, members):
-                self.assertEqual(ci.cmd_final(), 0)
-                raw = output.read_text()
-                self.assertEqual(raw.count('\n'), 1)
-                self.assertTrue(raw.startswith('proof='))
-                proof = ci.parse_partition_proof(raw[6:-1])
-                self.assertEqual(proof['partition'], label)
-                self.assertEqual(proof['identity'], ci.partition_identity(identity, members))
-                self.assertEqual(proof['files'], {p: self.counts[p] for p in ci.partition_files(self.tracked, label)})
-            if label == 'rest':
-                with self.final_world(label) as (base, output, identity, members), mock.patch.dict(os.environ, {'FIXTURE046_CLEANUP_OUTCOME': 'failure'}):
-                    self.assertEqual(ci.cmd_final(), 1)
-                    self.assertFalse(output.exists())
+        for mode in ('pull_request', 'push'):
+            for label in ('writer', 'rest'):
+                with self.final_world(label, mode) as (base, output, identity, members):
+                    self.assertEqual(ci.cmd_final(), 0)
+                    raw = output.read_text()
+                    self.assertEqual(raw.count('\n'), 1)
+                    self.assertTrue(raw.startswith('proof='))
+                    proof = ci.parse_partition_proof(raw[6:-1])
+                    self.assertEqual(proof['partition'], label)
+                    self.assertEqual(proof['identity'], ci.partition_identity(identity, members))
+                    self.assertEqual(proof['files'], {p: self.counts[p] for p in ci.partition_files(self.tracked, label)})
+                if label == 'rest':
+                    with self.final_world(label, mode) as (base, output, identity, members), mock.patch.dict(os.environ, {'FIXTURE046_CLEANUP_OUTCOME': 'failure'}):
+                        self.assertEqual(ci.cmd_final(), 1)
+                        self.assertFalse(output.exists())
 
     def test_final_failures_emit_no_output(self):
         for label in ('writer', 'rest'):
@@ -3181,38 +3481,42 @@ class Partition155Tests(unittest.TestCase):
                     self.assertFalse(output.exists())
 
     def test_joint_command_boundary(self):
-        members = {p: [1, 'a' * 64] for p in self.tracked}
-        identity = {'checkout_head': 'a' * 40, 'pr_head_sha': 'b' * 40, 'checkout_tree': 'c' * 40,
-                    'repository': 'mikeddamico/the-desk', 'run_id': '123', 'run_attempt': '1'}
-        proofs = self.copy(self.proofs)
-        common = ci.partition_identity(identity, members)
-        for label, proof in proofs.items():
-            proof['identity'] = self.copy(common)
-            proof['execution'] = installation_model.execution(ci, common, label)
-            ci.parse_partition_proof(ci.fixture_bytes(proof).decode().rstrip('\n'))
-        env = {label.upper() + '_PROOF': ci.fixture_bytes(proof).decode().rstrip('\n') for label, proof in proofs.items()}
-        env.update({label.upper() + '_OUTCOME': value for label, value in self.outcomes.items()})
-        with mock.patch.dict(os.environ, env), mock.patch.object(ci, 'proof_identity_now', return_value=(identity, members)), contextlib.redirect_stdout(io.StringIO()):
-            self.assertEqual(ci.cmd_joint(), 0)
-            for mutation in ('missing', 'mutated', 'foreign', 'stale'):
-                changed = self.copy(proofs['rest'])
-                if mutation == 'missing':
-                    changed.pop('execution')
-                elif mutation == 'mutated':
-                    changed['execution']['summary']['origin'] = 'compiled-here'
-                elif mutation == 'foreign':
-                    foreign = dict(common, run_id='99')
-                    changed['identity'] = foreign
-                    changed['execution'] = installation_model.execution(ci, foreign, 'rest')
-                    ci.parse_partition_proof(ci.fixture_bytes(changed).decode().rstrip('\n'))
-                else:
-                    changed['execution']['summary']['identity'] = dict(common, run_id='99')
-                with self.subTest(execution=mutation), mock.patch.dict(os.environ, {'REST_PROOF': ci.fixture_bytes(changed).decode().rstrip('\n')}):
+        for mode in ('pull_request', 'push'):
+            members = {p: [1, 'a' * 64] for p in self.tracked}
+            identity = {'event': 'pull_request', 'checkout_head': 'a' * 40, 'pr_head_sha': 'b' * 40, 'checkout_tree': 'c' * 40,
+                        'repository': 'mikeddamico/the-desk', 'run_id': '123', 'run_attempt': '1'}
+            if mode == 'push':
+                identity['event'] = 'push'; identity['push_after'] = identity['checkout_head']
+                del identity['pr_head_sha']
+            proofs = self.copy(self.proofs)
+            common = ci.partition_identity(identity, members)
+            for label, proof in proofs.items():
+                proof['identity'] = self.copy(common)
+                proof['execution'] = installation_model.execution(ci, common, label)
+                ci.parse_partition_proof(ci.fixture_bytes(proof).decode().rstrip('\n'))
+            env = {label.upper() + '_PROOF': ci.fixture_bytes(proof).decode().rstrip('\n') for label, proof in proofs.items()}
+            env.update({label.upper() + '_OUTCOME': value for label, value in self.outcomes.items()})
+            with mock.patch.dict(os.environ, env), mock.patch.object(ci, 'proof_identity_now', return_value=(identity, members)), contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(ci.cmd_joint(), 0)
+                for mutation in ('missing', 'mutated', 'foreign', 'stale'):
+                    changed = self.copy(proofs['rest'])
+                    if mutation == 'missing':
+                        changed.pop('execution')
+                    elif mutation == 'mutated':
+                        changed['execution']['summary']['origin'] = 'compiled-here'
+                    elif mutation == 'foreign':
+                        foreign = dict(common, run_id='99')
+                        changed['identity'] = foreign
+                        changed['execution'] = installation_model.execution(ci, foreign, 'rest')
+                        ci.parse_partition_proof(ci.fixture_bytes(changed).decode().rstrip('\n'))
+                    else:
+                        changed['execution']['summary']['identity'] = dict(common, run_id='99')
+                    with self.subTest(execution=mutation), mock.patch.dict(os.environ, {'REST_PROOF': ci.fixture_bytes(changed).decode().rstrip('\n')}):
+                        self.assertEqual(ci.cmd_joint(), 1)
+                for key, value in [('WRITER_PROOF', ''), ('REST_PROOF', '{}'), ('REST_OUTCOME', 'cancelled')]:
+                    with mock.patch.dict(os.environ, {key: value}): self.assertEqual(ci.cmd_joint(), 1)
+                with mock.patch.object(ci, 'proof_identity_now', return_value=(dict(identity, checkout_head='e' * 40), members)):
                     self.assertEqual(ci.cmd_joint(), 1)
-            for key, value in [('WRITER_PROOF', ''), ('REST_PROOF', '{}'), ('REST_OUTCOME', 'cancelled')]:
-                with mock.patch.dict(os.environ, {key: value}): self.assertEqual(ci.cmd_joint(), 1)
-            with mock.patch.object(ci, 'proof_identity_now', return_value=(dict(identity, checkout_head='e' * 40), members)):
-                self.assertEqual(ci.cmd_joint(), 1)
 
     def test_parser_identity_schema_and_bounds(self):
         original = self.proofs['writer']
@@ -3338,13 +3642,155 @@ class FixtureTargetObserverShapeTests(unittest.TestCase):
         self.assertIsInstance(filters[0], ast.Dict)
         routes = {key.value: value for key, value in zip(filters[0].keys, filters[0].values)
                   if isinstance(key, ast.Constant)}
-        self.assertEqual(set(routes), {'focused', 'p33', 'parity', 'unit', 'integration', 'all', 'writer', 'rest', 'master046', 'technical-master', 'technical-master-pure', 'durable-pair-pure', 'command-postgres', 'fixture105-unknown', 'runtime-observe', 'fixture105-traversal'})
+        self.assertEqual(set(routes), {'focused', 'p33', 'parity', 'unit', 'integration', 'all', 'writer', 'rest', 'master046', 'technical-master', 'technical-master-pure', 'durable-pair-pure', 'command-postgres', 'fixture105-unknown', 'fixture105-isolation', 'fixture105-native', 'provider-timeout', 'runtime-observe', 'fixture105-traversal'})
         self.assertIn("    test = 'test/unit/p33-parity-harness.test.ts'", guard_source)
         self.assertEqual(ast.literal_eval(routes['writer']), ['test/unit/writer-fixture-input.test.ts'])
         self.assertEqual(ast.literal_eval(routes['master046']), ['test/unit/frozen-fixture046-master.test.ts'])
         self.assertEqual(ast.literal_eval(routes['durable-pair-pure']), ['test/unit/durable-pair.test.ts', 'test/unit/durable-pair-transport.test.ts'])
         self.assertEqual(ast.literal_eval(routes['command-postgres']), ['test/integration/g2-command-connection.test.ts'])
         self.assertEqual(ast.literal_eval(routes['fixture105-unknown']), ['test/integration/connected-fixture105.test.ts', '--testNamePattern', '^connected fixture105 native ownership holds unknown construction commit without inventing its missing settlement receipt$'])
+        self.assertEqual(ast.literal_eval(routes['fixture105-isolation']), ['test/integration/connected-fixture105.test.ts', '--testNamePattern', '^connected fixture105 native ownership (retains durable direction if the separate audit transaction fails|rolls back package creation when a foreign observation identity wins late)$'])
+        self.assertEqual(ast.literal_eval(routes['fixture105-native']), ['test/integration/connected-fixture105.test.ts'])
+        self.assertEqual(ast.literal_eval(routes['provider-timeout']), ['test/integration/g1-provider-controls.test.ts', '--testNamePattern', '^G1-A real PostgreSQL controlled non-network execution actual elapsed timeout consumes late (resolve|reject) with no outcome/SQL/unhandled rejection$'])
+        traversal=(ci.ROOT/'test/unit/fixture105-traversal.test.ts').read_text()
+        def extraction_shape(source):
+            extraction=source[source.index('async function nativeCallbackSelftest'):source.index('function requiredValue')]
+            groups={kind:re.findall(r'"([A-Za-z_]+)"',extraction.split('const '+kind+' = new Set([',1)[1].split(']);',1)[0]) for kind in ('functions','constants')}
+            self.assertEqual(groups['functions'], ['retainTestCleanup','withTestCleanup','driverQuery','rawDriverQuery','observedPromiseCall','driverPromiseThen','commitWitness','targetUnknown','targetData','targetInt','targetSupplement','maintenanceStamp','captureMaintenance','observeMaintenance','nativeMaintenance','observeNativeTarget'])
+            self.assertEqual(groups['constants'], ['cleanupFailures','TARGET_PREFIX','TARGET_OBSERVER_CAP','TARGET_SCOPES','MAINTENANCE_SQL','activeCase','nativeTargetBinding','nativeTargetOrdinal','CASE_EXPECTATIONS','HELD_TARGET_CASE'])
+            self.assertIn('expect(declarations).toHaveLength(functions.size + constants.size + 1);',extraction)
+            self.assertIn('globalThis.callbackSelftest = () => TargetObserver.selftest();',extraction)
+            self.assertIn('await (selftest as () => Promise<void>)();',extraction)
+            self.assertIn(').toEqual(original);',extraction)
+        extraction_shape(traversal)
+        for declaration in ('nativeMaintenance','observeNativeTarget','activeCase','nativeTargetBinding','nativeTargetOrdinal','CASE_EXPECTATIONS','HELD_TARGET_CASE'):
+            token='    "'+declaration+'",'
+            self.assertEqual(traversal.count(token),1)
+            with self.subTest(omitted=declaration),self.assertRaises(AssertionError):extraction_shape(traversal.replace(token,'',1))
+        provider=(ci.ROOT/'test/integration/g1-provider-controls.test.ts').read_text()
+        def timeout_shape(source):
+            case=source[source.index('  it.each(["resolve", "reject"])('):]
+            case=case[:case.index('\n  );')]
+            flat=re.sub(r'\s+',' ',case)
+            for token in ('connectionString: pe.ownerUrl','max: 1','connectionTimeoutMillis: 1000','query_timeout: 2000',
+                          '-c statement_timeout=1000 -c lock_timeout=1000','/^g1-effect-[0-9a-f]{32}$/','/^g1-cleanup-[0-9a-f]{32}$/',
+                          'application_name: effectTag','application_name: cleanupTag','beforeEffect: () => effectGate',
+                          'ownedWork.push(work);','ownedWork.push(execution);','late = work.then(',
+                          'const queriesAtTimeout = sqlCount;','expect(sqlCount).toBe(queriesAtTimeout);',
+                          'expect(await invocationCount(cleanupPool)).toBe(0);','expect(await invocationCount(cleanupPool)).toBe(1);',
+                          'const timedOut = await snapshot(cleanupPool);','expect(await snapshot(pe.env.owner)).toBe(timedOut);',
+                          'if (!settled.ok && settled.error !== lateError) throw settled.error;',
+                          'expect(settled.ok).toBe(kind === "resolve");','nonNetworkControls({ PROVIDER_CALL_TIMEOUT_MS: 20 }),',
+                          'owner: cleanupPool','database: pe.env.name','apps: [effectTag]','pools: [effectPool]',
+                          'promises: ownedWork','settleMs: 5000','endMs: 5000','cleanupPool.end()',
+                          'expect(finishCalls).toBe(0);','expect(unhandled).toEqual([]);','() => pe.close()', '120000,'):
+                self.assertIn(token,flat)
+            ordered=['const result = await execution;','const queriesAtTimeout = sqlCount;',
+                     'const timedOut = await snapshot(cleanupPool);','releaseEffect();',
+                     'const settled = await timeoutWait( late, "late provider work pending", );']
+            ordered=[re.sub(r'\s+',' ',token).strip() for token in ordered]
+            for token in ordered:self.assertIn(token,flat)
+            offsets=[flat.index(token) for token in ordered];self.assertEqual(offsets,sorted(offsets))
+            self.assertEqual(case.count('await drain('),1);self.assertEqual(case.count('cleanupPool.end()'),1)
+            self.assertNotIn('pools: [pe.env.owner]',case);self.assertNotIn('durableAdapter(pe.env.owner',case)
+            self.assertIn('let failed = false;',source);self.assertIn('if (failed) throw primary;',source)
+            self.assertIn('[primary, error]',source);self.assertIn('clearTimeout(timer);',source)
+        timeout_shape(provider)
+        for before,after in (('beforeEffect: () => effectGate','beforeEffect: () => Promise.resolve()'),
+                             ('PROVIDER_CALL_TIMEOUT_MS: 20','PROVIDER_CALL_TIMEOUT_MS: 200'),
+                             ('apps: [effectTag]','apps: ["%"]'),('pools: [effectPool]','pools: [pe.env.owner]'),
+                             ('const queriesAtTimeout = sqlCount;','const queriesAtTimeout = 0;'),
+                             ('[primary, error]','[error, primary]'),('if (failed) throw primary;','if (primary) throw primary;')):
+            self.assertIn(before,provider)
+            with self.subTest(timeout_control=before),self.assertRaises(AssertionError):timeout_shape(provider.replace(before,after,1))
+        hosted=(ci.ROOT/'test/support/command-postgres-hosted.ts').read_text()
+        for token in ('providerTimeoutDiagnostic','tests: { passed: 2, skipped: 42, total: 44 }',
+                      '{ tests: 44, failed: 0, skipped: 42, todo: 0 }','"test/integration/g1-provider-controls.test.ts"'):
+            self.assertIn(token,hosted)
+        expected,errors=ci.parse_summary(' Test Files  1 passed (1)\n      Tests  2 passed | 42 skipped (44)\n')
+        self.assertEqual(expected,{'files':{'passed':1,'total':1},'tests':{'passed':2,'skipped':42,'total':44}});self.assertEqual(errors,[])
+        for line in ('1 passed | 43 skipped','2 passed | 1 failed | 41 skipped','3 passed | 41 skipped','44 passed'):
+            actual,_=ci.parse_summary(' Test Files  1 passed (1)\n      Tests  '+line+' (44)\n');self.assertNotEqual(actual,expected)
+        def hosted_budgets(text):
+            self.assertEqual(re.findall(r'const guardWorkSeconds = ([^;]+);',text),['wholeNativeDiagnostic ? 1800 : 900'])
+            self.assertEqual(re.findall(r'const guardCloseMilliseconds = ([^;]+);',text),['wholeNativeDiagnostic ? 1845000 : 945000'])
+            for token in ('`${String(guardWorkSeconds)}s`,','await bounded(close, guardCloseMilliseconds);',
+                          'await bounded(close, 19000);','await bounded(close, 1000);','"--kill-after=20s",',
+                          'wholeNativeDiagnostic && after.native_suite_complete !== true','tests: { passed: 34, total: 34 }',
+                          '{ tests: 34, failed: 0, skipped: 0, todo: 0 }'):
+                self.assertIn(token,text)
+        hosted_budgets(hosted)
+        for before,after in (('1800 : 900','1800 : 1800'),('1800 : 900','1900 : 900'),
+                             ('1845000 : 945000','1845000 : 1845000'),('1845000 : 945000','1945000 : 945000'),
+                             ('close, 19000','close, 20000'),('close, 1000','close, 0')):
+            self.assertIn(before,hosted)
+            with self.assertRaises(AssertionError):hosted_budgets(hosted.replace(before,after,1))
+        summary,errors=ci.parse_summary(' Test Files  1 passed (1)\n      Tests  34 passed (34)\n')
+        self.assertEqual(summary,{'files':{'passed':1,'total':1},'tests':{'passed':34,'total':34}});self.assertEqual(errors,[])
+        for line in ('33 passed | 1 skipped','33 passed | 1 failed','34 passed | 1 skipped','35 passed'):
+            other,_=ci.parse_summary(' Test Files  1 passed (1)\n      Tests  '+line+' (34)\n');self.assertNotEqual(other,summary)
+        embedded=hosted.split('const sourceCheck = String.raw`',1)[1].split('`;',1)[0]
+        tree=ast.parse(embedded)
+        definition=next(node for node in tree.body if isinstance(node,ast.FunctionDef) and node.name=='isolation_journal')
+        namespace={'json':json,'os':os,'re':re}
+        exec(compile(ast.Module(body=[definition],type_ignores=[]),'<fixed isolation journal>','exec'),namespace)
+        validate=namespace['isolation_journal']
+        digest=lambda raw:hashlib.sha256(raw).hexdigest()
+        names=['retains durable direction if the separate audit transaction fails','rolls back package creation when a foreign observation identity wins late']
+        with tempfile.TemporaryDirectory() as directory:
+            root=Path(directory);(root/'bindings').mkdir();(root/'expectations').mkdir();(root/'receipts').mkdir()
+            release=json.dumps({'subject_binding':{'fixed':'synthetic'}}).encode()
+            (root/'bindings/RELEASE.json').write_bytes(release)
+            cases=[];targets=[];terminals={}
+            for i,case_name in enumerate(names):
+                key=str(i+1)*64;state='construction_recorded' if i==0 else 'refused_before_receipt'
+                cases.append({'case_id':case_name,'expected':['expected_refusal'],'completed':True,'calls':[{'ordinal':0,'expected':'expected_refusal','completed':True,'returned':False,'target_hash':key,'pre_target_index':None}]})
+                targets.append({'target_hash':key,'construction_state':state,'later_phase':'audit' if i==0 else 'construction','later_outcome':'refused'})
+                intent={'schema':'fixture105-receipt-intent/1','target_hash':key,'release_sha256':digest(release),'subject_sha256':digest(b'{"fixed":"synthetic"}'),'expected_names':['CONSTRUCTION.json'],'state':'intent'}
+                raw=json.dumps(intent).encode();(root/'expectations'/(key+'.intent.json')).write_bytes(raw)
+                terminal={'schema':'fixture105-receipt-terminal/1','target_hash':key,'intent_sha256':digest(raw),'state':state,'receipts':[]}
+                if i==0:
+                    (root/'receipts'/key).mkdir();data=b'fixed synthetic construction receipt'
+                    (root/'receipts'/key/'CONSTRUCTION.json').write_bytes(data)
+                    terminal['receipts']=[{'name':'CONSTRUCTION.json','bytes':len(data),'sha256':digest(data)}]
+                else:terminal['code']='work_rolled_back'
+                terminals[key]=terminal;(root/'expectations'/(key+'.terminal.json')).write_text(json.dumps(terminal))
+            record={'schema':'fixture105-suite/1','targets':targets,'pre_target_failures':[],'tool_observations':[],'suite_complete':False,'cases':cases}
+            def read(path,limit):
+                data=path.read_bytes();self.assertLessEqual(len(data),limit);return data
+            self.assertTrue(validate(root,record,read,digest))
+            mutations=[]
+            def clone():return json.loads(json.dumps(record))
+            for field,value in (('suite_complete',True),('pre_target_failures',[{}]),('cases',cases[:1]),('targets',targets+targets[:1])):
+                changed=clone();changed[field]=value;mutations.append(changed)
+            changed=clone();changed['cases'].reverse();mutations.append(changed)
+            for field,value in (('completed',False),('returned',True),('ordinal',True),('expected','completed'),('target_hash','3'*64),('pre_target_index',0)):
+                changed=clone();changed['cases'][0]['calls'][0][field]=value;mutations.append(changed)
+            changed=clone();changed['cases'][0]['completed']=False;mutations.append(changed)
+            changed=clone();changed['targets'][0]['later_phase']='construction';mutations.append(changed)
+            for changed in mutations:
+                with self.assertRaises(RuntimeError):validate(root,changed,read,digest)
+            key='2'*64;path=root/'expectations'/(key+'.terminal.json');original=path.read_bytes()
+            for field,value in (('code','fixture_target_isolation'),('intent_sha256','0'*64),('target_hash','1'*64),('receipts',[{}])):
+                changed=dict(terminals[key]);changed[field]=value;path.write_text(json.dumps(changed))
+                with self.assertRaises(RuntimeError):validate(root,record,read,digest)
+            path.write_bytes(original)
+            extra=root/'expectations'/('3'*64+'.intent.json');extra.write_bytes(b'{}')
+            with self.assertRaises(RuntimeError):validate(root,record,read,digest)
+            extra.unlink()
+            receipt=root/'receipts'/('1'*64)/'CONSTRUCTION.json';original=receipt.read_bytes();receipt.write_bytes(b'changed')
+            with self.assertRaises(RuntimeError):validate(root,record,read,digest)
+            receipt.write_bytes(original)
+            self.assertTrue(validate(root,record,read,digest))
+        # Summary/file populations are independent of the journal and strict about skips.
+        good=' Test Files  1 passed (1)\n      Tests  2 passed | 32 skipped (34)\n'
+        parsed,errors=ci.parse_summary(good)
+        self.assertEqual(parsed,{'files':{'passed':1,'total':1},'tests':{'passed':2,'skipped':32,'total':34}})
+        self.assertEqual(errors,[])
+        for bad in ('1 passed | 33 skipped','3 passed | 31 skipped','2 passed | 1 failed | 31 skipped'):
+            result,_=ci.parse_summary(good.replace('2 passed | 32 skipped',bad));self.assertNotEqual(result,parsed)
+        for required in ('isolation_cases_complete !== true','tests: { passed: 2, skipped: 32, total: 34 }','{ tests: 34, failed: 0, skipped: 32, todo: 0 }',"if retention_bytes[0]>64*1024*1024","c['fixture_read'](path,limit)!=data"):
+            self.assertIn(required,hosted)
         self.assertEqual(ast.literal_eval(routes['runtime-observe']), ['test/runtime-observe.test.ts'])
         self.assertEqual(ast.literal_eval(routes['fixture105-traversal']), ['test/unit/fixture105-traversal.test.ts'])
         for profile in ('technical-master', 'technical-master-pure'):
@@ -3357,7 +3803,7 @@ class FixtureTargetObserverShapeTests(unittest.TestCase):
                            for keyword in node.keywords if keyword.arg == 'choices']
         self.assertEqual(len(profile_choices), 1)
         self.assertEqual(ast.literal_eval(profile_choices[0]),
-                         ['prerequisite', 'focused', 'p33', 'parity', 'unit', 'integration', 'all', 'writer', 'rest', 'master046', 'technical-master', 'technical-master-pure', 'durable-pair-pure', 'command-postgres', 'fixture105-unknown', 'runtime-observe', 'fixture105-traversal'])
+                         ['prerequisite', 'focused', 'p33', 'parity', 'unit', 'integration', 'all', 'writer', 'rest', 'master046', 'technical-master', 'technical-master-pure', 'durable-pair-pure', 'command-postgres', 'fixture105-unknown', 'fixture105-isolation', 'fixture105-native', 'provider-timeout', 'runtime-observe', 'fixture105-traversal'])
         for profile, expression in (('all', "['--exclude', test]"),
                                     ('rest', "['--exclude', test, '--exclude', 'test/unit/writer-fixture-input.test.ts']")):
             self.assertEqual(ast.dump(routes[profile]), ast.dump(ast.parse(expression, mode='eval').body))
@@ -3396,7 +3842,7 @@ class FixtureTargetObserverShapeTests(unittest.TestCase):
             self.assertIn(exact, case)
         ordered = [
             'holder.on("error", onHolderError);', 'await withTestCleanup(',
-            'expect(maintenanceLatch.used).toBe(false);', 'await holder.connect();',
+            'expect(controlMaintenanceLatch.used).toBe(false);', 'await holder.connect();',
             'const identity = await holder.query', 'await observer.around(',
             'await runConnectedFixture105();', 'expect(outer === original).toBe(true);',
             'expect(original.code === "fixture_target_isolation").toBe(true);',
@@ -3425,6 +3871,14 @@ class FixtureTargetObserverShapeTests(unittest.TestCase):
             self.assertIn(exact, assertion)
         self.assertNotIn('"lifetime_match"', assertion)
         self.assertNotIn('expect(this.maintenanceCapture?.origins)', assertion)
+        fault=native[native.index('  async function fault<T>'):native.index('  afterEach(async () => {')]
+        for token in ('return withTestCleanup(work, async () => {','fixture-fault-witness/1',
+                      'expect(seen).toBe(1);','await faultPoint(point);','expect(error).toBe(primary);',
+                      'expect(aggregate.errors[0]).toBe(original);','expect(aggregate.errors[1]).toBeInstanceOf(Error);',
+                      'expect(effects).toBe(1);','Object.getOwnPropertyDescriptor(globalThis, HOOK)',
+                      'expect(process.env.DESK_TEST_FAULTS).toBe(flag);'):
+            self.assertIn(token,fault)
+        self.assertIn('await faultCleanupControls();',native)
         self.assertIn('harnessCases.length === CASE_EXPECTATIONS.length', native)
 
     def test_observer_is_first_invocation_only_bounded_and_restores_before_output(self):
@@ -3445,20 +3899,77 @@ class FixtureTargetObserverShapeTests(unittest.TestCase):
                 endings = re.findall(r'\n    ([A-Z_]+|[0-9]+),\n  \);', block)
                 self.assertEqual(endings, ['180000' if chosen else 'LIMIT'])
             self.assertEqual(selected_count, 1)
-            self.assertEqual(re.findall(r'native_case_timeout_ms: ([^\n]+)', metadata),
-                             ['nativeDiagnostic ? 180000 : null,'])
+            self.assertEqual(re.findall(r'native_case_timeout_ms:([^,]+),', metadata),
+                             [re.search(r'native_case_timeout_ms:([^,]+),', hosted).group(1)])
+            self.assertEqual(re.sub(r'\s+','',re.search(r'native_case_timeout_ms:([^,]+),',metadata).group(1)),
+                             'nativeDiagnostic?180000:isolationDiagnostic?120000:null')
         check_case_budgets(native, hosted)
         for mutated, metadata in (
             (native.replace('const LIMIT = 120000;', 'const LIMIT = 180000;'), hosted),
             (native.replace('\n    LIMIT,\n  );', '\n    180000,\n  );', 1), hosted),
             (native.replace('\n    180000,\n  );', '\n    LIMIT,\n  );'), hosted),
-            (native, hosted.replace('nativeDiagnostic ? 180000 : null', 'nativeDiagnostic ? 120000 : null')),
-            (native, hosted.replace('nativeDiagnostic ? 180000 : null', 'nativeDiagnostic ? 180000 : 180000')),
+            (native, hosted.replace('? 180000', '? 120000',1)),
+            (native, hosted.replace('? 120000', '? 180000',1)),
         ):
             with self.assertRaises(AssertionError):
                 check_case_budgets(mutated, metadata)
         self.assertNotIn('native117', native)
         self.assertEqual(native.count('await new TargetObserver(\n          env.name,\n          "acquisition_cut",\n          maintenanceOwner(),\n        ).around(firstInvocation);'), 1)
+        def compact(source):
+            return re.sub(r',(?=[)\]}])', '', re.sub(r'\s+', '', source))
+        def fragment(source):
+            # A snippet lacks the closing delimiter that makes its final comma optional.
+            # Remove only that one boundary comma; never erase internal punctuation.
+            return compact(source).removesuffix(',')
+        def common_observation(source):
+            source = compact(source)
+            for token in (
+                'reconcileConnectedFixture105 as reconcileObservedConnectedFixture105,',
+                'observeNativeTarget("construction", runObservedConnectedFixture105)',
+                'observeNativeTarget("reconciliation", reconcileObservedConnectedFixture105)',
+                'return caseId === HELD_TARGET_CASE ? undefined : owner;',
+                'readonly operation: "construction" | "reconciliation";',
+                'case_id: owner.case_id,', 'ordinal: nativeTargetOrdinal++,',
+                'const binding = nativeTargetBinding();',
+                'database: current.name, maintenance: maintenanceOwner()',
+                'const controlMaintenanceLatch = { used: false };',
+                'latch: control ? controlMaintenanceLatch : maintenanceLatch,',
+                'this.maintenance.latch.used = true;',
+                'this.maintenanceCoverage = "reserved";',
+                '"already_reserved"', '"ineligible"',
+                'fixture-target-diagnostic-summary/3', 'fixture-target-diagnostic/3',
+                'fixture-target-maintenance/2',
+                'async around<T>(work: () => Promise<T>): Promise<T>',
+            ):
+                self.assertIn(fragment(token), source)
+            common = source[source.index(compact('async function observeNativeTarget<T>')):source.index(compact('function caseBody('))]
+            self.assertIn(compact('CASE_EXPECTATIONS.some((entry) => entry.case_id === owner.case_id)'), common)
+            self.assertIn(compact('nativeMaintenance(owner.case_id, binding.maintenance)'), common)
+            self.assertNotIn('process.env', common)
+            self.assertNotIn(compact('new pg.'), common)
+            self.assertEqual(source.count(compact('await runObservedConnectedFixture105()')), 0)
+            self.assertEqual(source.count(compact('await reconcileObservedConnectedFixture105()')), 0)
+            self.assertEqual(source.count('maintenanceOwner(true)'), 1)
+            held = source[source.index(compact('const observer = new TargetObserver('), source.index(compact('let cleanupComplete = false;'))):]
+            self.assertIn(fragment('"held_client_control", maintenanceOwner(true),'), held)
+        common_observation(native)
+        for before, after in (
+            ('observeNativeTarget("construction", runObservedConnectedFixture105)', 'runObservedConnectedFixture105()'),
+            ('observeNativeTarget("reconciliation", reconcileObservedConnectedFixture105)', 'reconcileObservedConnectedFixture105()'),
+            ('return caseId === HELD_TARGET_CASE ? undefined : owner;', 'return owner;'),
+            ('latch: control ? controlMaintenanceLatch : maintenanceLatch,', 'latch: maintenanceLatch,'),
+            ('maintenanceOwner(true)', 'maintenanceOwner()'),
+            ('this.maintenance.latch.used = true;', 'this.maintenance.latch.used = false;'),
+            ('database: current.name, maintenance: maintenanceOwner()', 'database: "foreign", maintenance: maintenanceOwner()'),
+        ):
+            source = compact(native)
+            original, replacement = fragment(before), fragment(after)
+            self.assertEqual(source.count(original), 1, before)
+            self.assertNotEqual(original, replacement)
+            mutated = source.replace(original, replacement, 1)
+            self.assertNotEqual(mutated, source)
+            with self.subTest(common=before), self.assertRaises(AssertionError):
+                common_observation(mutated)
         self.assertIn('const TARGET_OBSERVER_CAP = 64;', native)
         observer = native[native.index('class TargetObserver'):native.index('  /** All 20 groups')]
         selftest = native[native.index('  static async selftest()'):native.index('// pg-pool attaches release')]
@@ -3472,7 +3983,7 @@ class FixtureTargetObserverShapeTests(unittest.TestCase):
         self.assertLess(selftest.rindex('capture.mockRestore();'), selftest.index("process.stderr.write(\n      'FIXTURE_TARGET_DIAGNOSTIC_SELFTEST"))
         self.assertNotIn('runConnectedFixture105(', selftest)
         self.assertNotIn('.query(', selftest)
-        around = observer[observer.index('  async around('):observer.index('  /** Failure vectors')]
+        around = observer[observer.index('  async around<T>('):observer.index('  /** Failure vectors')]
         cleanup = around[around.rindex('      async () => {'):]
         restore = 'Object.defineProperty(pg.Client.prototype, "query", descriptor);'
         self.assertEqual(cleanup.count(restore), 1)
@@ -3522,7 +4033,7 @@ class FixtureTargetObserverShapeTests(unittest.TestCase):
         self.assertIn('expect(seen).toBe(1); // A witness that never reaches its intended cut fails.', native)
         self.assertEqual(native.count('"closes continuation when the acquisition-cut await throws before consumption",'), 3)
         for scope in ('preseed_foreign_claim', 'preseed_missing_config', 'preseed_changed_show', 'preseed_extra_show',
-                      'unknown_construction', 'unknown_program_run', 'unknown_program_attempt', 'unknown_package_binding'):
+                      'unknown_construction', 'unknown_program_run', 'unknown_program_attempt', 'unknown_package_binding', 'audit_fault_cut', 'foreign_observation_cut'):
             with self.subTest(scope=scope):
                 self.assertGreaterEqual(native.count('"' + scope + '"'), 2)
         self.assertEqual(native.count('observer.restoreWitness('), 2)

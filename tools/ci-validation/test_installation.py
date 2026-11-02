@@ -237,9 +237,28 @@ class EvaluationProvenance(unittest.TestCase):
         with self.assertRaises(RuntimeError):self.owner.uint(True)
 
     def test_06_foreign_source_run_and_head(self):
-        for key,value in (('repository','foreign/source'),('run_id','99'),('run_attempt','9'),('checkout','d'*40),('head','d'*40),('tree','d'*40),('source_sha256','d'*64)):
-            common=dict(self.common);common[key]=value
-            with self.subTest(key=key):self.refuses(common=common)
+        # Two explicit synthetic identity variants, never an event/admission fixture.
+        push=dict(self.common,head=self.common['checkout'])
+        def mapped(value):
+            if type(value) is dict:
+                if value == self.common:return dict(push)
+                return {k:mapped(v) for k,v in value.items()}
+            if type(value) is list:return [mapped(v) for v in value]
+            return value
+        push_raw={}
+        for name,data in self.raw.items():
+            original=json.loads(data);value=mapped(original)
+            push_raw[name]=data if value == original else self.owner.canonical(value)
+        push_raw=installation_model.repin(push_raw)
+        for mode,raw,expected in (('pull_request',self.raw,self.common),('push',push_raw,push)):
+            self.validate(raw,expected)
+            for key,value in (('repository','foreign/source'),('run_id','99'),('run_attempt','9'),('checkout','d'*40),('head','d'*40),('tree','d'*40),('source_sha256','d'*64)):
+                common=dict(expected);common[key]=value
+                with self.subTest(mode=mode,key=key):self.refuses(raw,common)
+            changed=dict(raw);value=json.loads(changed['EVAL-INSTALL.json'])
+            value['modules']['ino']+=1;changed['EVAL-INSTALL.json']=self.owner.canonical(value)
+            with self.subTest(mode=mode,substitution='physical_root'):
+                self.refuses(installation_model.repin(changed),expected)
 
     def test_07_wrong_profile_or_role(self):
         for field,value in (('profile_id','desk-full-build/1'),('producer_id','foreign/1'),('platform',{'os':'darwin','arch':'arm64','libc':'none'})):

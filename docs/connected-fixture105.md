@@ -218,7 +218,7 @@ The successor uses the explicitly named connectedFixture151ArtifactHash entry po
 
 Release validation performs two fresh complete execution-root/inventory checks bracketing each synchronous release/adoption/ledger read. Every binding leaf and all 61 owner files retain their independent descriptor reads and hash/identity checks. Start/end root, root hash and complete marker must agree; current-context observations use that final check rather than repeat a third scan. All guard callsites across awaits and SQL remain; no inventory or authority is cached across calls. These are cooperating-runner checks, not detection of every transient mutation or authentication against hostile same-user code. Timeouts and teardown requirements are unchanged.
 
-The traversal preparation restores a fresh kernel no-follow open of every absolute component for each acquired child. It retains once-only FD ownership and private primary-error identity, with permanent cleanup poison checked before graph, execution-root and release filesystem entry. It does not retain the rejected descriptor-reuse algorithm's whole-duration directory snapshots or claim that `lstat` reproduces fresh-open ACL/permission failures. The seventeen registered cases partition the same remapped controls at independent-world boundaries and cover the original acquisition/read/inventory protections and the retained cleanup boundary. Their proposed execution is held; the four-owner native case retains all 58 markers/assertions. Its prospective selected-case acceptance budget is now 180000 ms; shared LIMIT=120000 and all other cases remain unchanged. CI144 and CI152 remain failures of the original 120000 ms benchmark. The hosted wrapper remains 1200 seconds and the inner supervisor 900 seconds.
+The traversal preparation restores a fresh kernel no-follow open of every absolute component for each acquired child. It retains once-only FD ownership and private primary-error identity, with permanent cleanup poison checked before graph, execution-root and release filesystem entry. It does not retain the rejected descriptor-reuse algorithm's whole-duration directory snapshots or claim that `lstat` reproduces fresh-open ACL/permission failures. The seventeen registered cases partition the same remapped controls at independent-world boundaries and cover the original acquisition/read/inventory protections and the retained cleanup boundary. Their proposed execution is held; the four-owner native case retains all 58 markers/assertions. Its prospective selected-case acceptance budget is now 180000 ms; shared LIMIT=120000 and all other cases remain unchanged. CI144 and CI152 remain failures of the original 120000 ms benchmark. The command, selected-case and two-case hosted profiles retain the 1200-second wrapper and 900-second inner supervisor. The separate `fixture105-native` diagnostic selects only the complete existing 34-case native file, omitting the other 83 rest-partition files. It allocates 1800 seconds of guard work, a 1845-second close/EOF wait, the unchanged 20-second fallback settlement, and a 2160-second outer wrapper with 20-second kill grace inside a 37-minute step. These are finite engineering containment allocations, not guaranteed cleanup, a user requirement or a product SLA. It preserves every case limit, observer, isolation predicate and custody check, and requires the existing full journal validator with `suite_complete=true`. A passing attempt does not identify the intermittent isolation cause or establish full CI acceptance; no automatic retry or budget ratchet follows.
 
 The temporary diagnostic workflow step, connected-only/bail profile, diagnostic wrapper branches and P33 timing prints are removed before final validation. Normal prerequisite/focused/all routing, original aggregate deadline, complete case accounting, retention, audit and security gates are restored. CI105 supplied representative native evidence: the first 13 cases passed, including the complete handoff in 79.051 seconds under its original 120-second deadline. Its 600-second diagnostic envelope then interrupted the remaining run; process containment settled without residuals, but the suite was incomplete. These partial results are not final aggregate acceptance.
 
@@ -530,3 +530,48 @@ Final acceptance requires a successful zero-findings report and actual upload
 and media-cleanup outcomes. Partial producer evidence remains non-authoritative
 under unchanged logical/object/byte limits. No paid providers, real media,
 registry publication, deployment, credential expansion or merge is authorized.
+
+## Normal validation restoration after CI160
+
+CI160 on head `40670f228b052f925a232776fc6ad6659a49bda3` completed all
+34 native cases and the complete journal, the 20 selftest groups, 42 common
+observer calls with 160 target observations, all 58 selected-case markers, and
+owned cleanup. Independent review accepted this as one complete nonreproduction.
+The unexpected maintenance slot was unused; only the intentional held-client
+control performed its supplemental read. CI157 and CI159 remain unresolved
+intermittent isolation failures. This result does not establish a causal repair.
+
+The retained SOURCE/TOOLS artifact copies are wrapper-redacted and are not the
+original ROOT-pin bytes. Live before/after source and tool equality was separately
+established by the owner checks; these are distinct evidence claims.
+
+Normal validation restores both sealed writer/rest partitions, pinned synthetic
+media preparation and cleanup, the ordinary seven-test command proof, complete
+aggregate checks and retention, audit/Gitleaks/security uploads, container and
+joint verification. The workflow no longer selects a native diagnostic profile
+or ends in a diagnostic HOLD. Existing diagnostic profiles remain dormant. All
+case, owner, aggregate and job limits remain unchanged; no retry loop or budget
+ratchet is introduced. Authenticated PR and push/main identity semantics and the
+one historical scanner-finding exception remain unchanged.
+
+The reviewed common construction and reconciliation diagnostics remain active
+in the native file. Their case, operation and diagnostic ordinal labels identify
+the current owned allocation without exposing its connection URL. Context-bearing
+vectors/summaries use diagnostic schemas `/3` and maintenance records use `/2`;
+existing specialized records keep their prior schemas. The historical single-slot
+and fixed-scope descriptions above do not describe this successor: common and
+non-control specialized observers share one unexpected-failure maintenance slot,
+while the exact held-client control has one separate slot. Its common observer
+is ineligible for maintenance. Synchronous reservation permits at most two
+supplemental reads per attempt; a failed read consumes its slot without retry.
+Original-row metadata and later provisional, vanished or changed-lifetime
+observations remain distinct. Saturation or missing metadata is inconclusive;
+no backend category is excluded from the runtime isolation predicate.
+
+Fresh exact-commit acceptance still requires writer 4908 plus rest 3858 tests,
+8766 across 85 files, all 34 native cases with `suite_complete=true`, genuine P33,
+complete source/tool/root, process, database, media and security evidence, and
+container/joint success. A future full pass establishes that commit's acceptance,
+not an explanation or repair of the earlier intermittent refusals. Source review,
+local validation and a separately released hosted run precede acceptance; this
+restoration text alone grants no merge, deployment or provider-resource action.
