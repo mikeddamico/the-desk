@@ -1214,6 +1214,27 @@ def _restored_workflow(test, text):
     test.assertEqual(hashlib.sha256(text.encode()).hexdigest(),'48e018806108f57b5deaf23e81d55e96fcabf62465ea7e066f064db979d64651')
 
 
+def _whole_native_workflow(test, text):
+    """One fixed native file, not an aggregate/full-CI acceptance route."""
+    writer=text.split('  verify-rest:\n',1)[0]
+    for identifier in ('fixture046-runtime','fixture046-cleanup'):test.assertNotIn(identifier,writer)
+    test.assertEqual(hashlib.sha256(text.encode()).hexdigest(), '3d51aca17cf0abff2fd2ed9361b38f7b0bcc12f0f8201503c987e82eeb6cfbe3')
+    test.assertEqual(text.count('command-postgres-hosted.ts fixture105-native'),1)
+    lines=text.splitlines(True)
+    for offset,after,before in reversed([
+        (2, '# WHOLE NATIVE DIAGNOSTIC: all 34 native cases; full validation remains held.\n', '# ISOLATION DIAGNOSTIC: two fixed native cases; full validation remains held.\n'),
+        (474, '      - name: Observe the complete native file context\n', '      - name: Diagnose the two native isolation refusals\n'),
+        (478, '        timeout-minutes: 37\n', '        timeout-minutes: 21\n'),
+        (483, '            /usr/bin/timeout --signal=TERM --kill-after=20s 2160s \\\n            node --import tsx test/support/command-postgres-hosted.ts fixture105-native\n      - name: Retain the whole native diagnostic including failed cleanup observations\n', '            /usr/bin/timeout --signal=TERM --kill-after=20s 1200s \\\n            node --import tsx test/support/command-postgres-hosted.ts fixture105-isolation\n      - name: Retain the two-case diagnostic including failed cleanup observations\n'),
+        (491, '          name: ci-fixture105-native-rest-${{ github.run_id }}-${{ github.run_attempt }}\n          path: ${{ runner.temp }}/evaluation/ci/evidence/fixture105-native/retained\n', '          name: ci-fixture105-isolation-rest-${{ github.run_id }}-${{ github.run_attempt }}\n          path: ${{ runner.temp }}/evaluation/ci/evidence/fixture105-isolation/retained\n'),
+        (617, '      - name: Hold after the bounded whole native diagnostic\n', '      - name: Hold after the bounded isolation diagnostic\n'),
+        (622, "          printf '%s\\n' 'HOLD: whole native diagnostic only; full validation remains held.'\n", "          printf '%s\\n' 'HOLD: two-case diagnostic only; full validation remains held.'\n"),
+    ]):
+        count=len(after.splitlines(True));test.assertEqual(''.join(lines[offset:offset+count]),after)
+        lines[offset:offset+count]=before.splitlines(True)
+    _isolation_workflow(test,''.join(lines))
+
+
 def _isolation_workflow(test, text):
     """Temporary closed diagnostic; inverse literal deltas preserve all normal-route checks."""
     writer=text.split('  verify-rest:\n',1)[0]
@@ -1257,6 +1278,7 @@ def _isolation_workflow(test, text):
 
 def _evaluation_workflow(test, text):
     """Closed representative /2 route: no source-only or partial-layout consumer."""
+    if '# WHOLE NATIVE DIAGNOSTIC:' in text:return _whole_native_workflow(test,text)
     if '# ISOLATION DIAGNOSTIC:' in text:return _isolation_workflow(test,text)
     if '# FULL RESTORATION:' in text:return _restored_workflow(test,text)
     test.assertEqual(text.count('# REPRESENTATIVE FIRST: two independent ordinary installations and transferred-build provenance.'),1)
@@ -2083,11 +2105,26 @@ class WorkflowShape(unittest.TestCase):
 
     def text(self):
         raw = (HERE.parents[1] / '.github' / 'workflows' / 'ci.yml').read_text()
-        return raw if '# REPRESENTATIVE FIRST:' in raw or '# FULL RESTORATION:' in raw or '# ISOLATION DIAGNOSTIC:' in raw else _short_layout_workflow(self, raw)
+        return raw if '# REPRESENTATIVE FIRST:' in raw or '# FULL RESTORATION:' in raw or '# ISOLATION DIAGNOSTIC:' in raw or '# WHOLE NATIVE DIAGNOSTIC:' in raw else _short_layout_workflow(self, raw)
 
     def test_fixed_steps_and_ceilings(self):
         text = self.text()
         raw = (ci.ROOT / '.github/workflows/ci.yml').read_text()
+        if '# WHOLE NATIVE DIAGNOSTIC:' in raw:
+            _whole_native_workflow(self,raw)
+            for before,after in (
+                ('fixture105-native','fixture105-isolation'),('timeout-minutes: 37','timeout-minutes: 36'),
+                ('2160s','1200s'),('    if: ${{ false }}','    if: ${{ always() }}'),
+                ("steps.upload-controls.outcome == 'success'",'true'),
+                ("steps.command-postgres.outcome != 'skipped'","steps.command-postgres.outcome == 'success'"),
+                ('/evidence/fixture105-native/retained','/evidence/fixture105-isolation/retained'),
+                ('stage-check focused',''),('exit 78','exit 0'),
+            ):
+                self.assertIn(before,raw)
+                with self.subTest(native_context=before),self.assertRaises(AssertionError):
+                    _whole_native_workflow(self,raw.replace(before,after,1))
+            _short_layout_controls(self,ci.ROOT/'test/support/fixture105-hosted-layout.py')
+            return
         if '# ISOLATION DIAGNOSTIC:' in raw:
             _isolation_workflow(self,raw)
             for before,after in (
@@ -2374,7 +2411,7 @@ class WorkflowShape(unittest.TestCase):
 
     def test_partial_artifacts_are_still_uploaded_and_upload_failure_gates_the_aggregate(self):
         text = self.text()
-        if '# REPRESENTATIVE FIRST:' in text or '# FULL RESTORATION:' in text or '# ISOLATION DIAGNOSTIC:' in text:
+        if '# REPRESENTATIVE FIRST:' in text or '# FULL RESTORATION:' in text or '# ISOLATION DIAGNOSTIC:' in text or '# WHOLE NATIVE DIAGNOSTIC:' in text:
             _evaluation_workflow(self,text)
             return
         self.assertNotIn('continue-on-error', text)
@@ -2633,6 +2670,36 @@ class Fixture105Tooling(unittest.TestCase):
                 ci.fixture_journal(root, suite)
 
     def test_expected_observed_correspondence_is_separate(self):
+        hosted=(ci.ROOT/'test/support/command-postgres-hosted.ts').read_text()
+        embedded=hosted.split('const sourceCheck = String.raw`',1)[1].split('`;',1)[0]
+        branches=[node for node in ast.walk(ast.parse(embedded)) if isinstance(node,ast.If)
+                  and ast.dump(node.test)==ast.dump(ast.parse("sys.argv[2]=='fixture105-native'",mode='eval').body)]
+        self.assertEqual(len(branches),1)
+        self.assertEqual(ast.unparse(branches[0].body[0]),"c['fixture_journal'](root, json.loads(journal))")
+        self.assertIn("summary_evidence['native_suite_complete' if sys.argv[2]=='fixture105-native' else 'isolation_cases_complete']=False",embedded)
+        branch=compile(ast.Module(body=branches[0].body,type_ignores=[]),'<existing native journal branch>','exec')
+        with fixture_world() as (base,checkout,root,binding):
+            suite=self.journal(root)
+            def check(record):
+                summary={};namespace={'c':{'fixture_journal':ci.fixture_journal},'root':root,'json':json,
+                                      'journal':json.dumps(record),'summary_evidence':summary}
+                exec(branch,namespace)
+                self.assertEqual(summary,{'native_suite_complete':True})
+            check(suite)
+            def clone():return json.loads(json.dumps(suite))
+            mutants=[]
+            for key,value in (('suite_complete',False),('cases',suite['cases'][:-1]),('targets',suite['targets']+suite['targets'][:1])):
+                changed=clone();changed[key]=value;mutants.append(changed)
+            for field,value in (('case_id','foreign case'),('completed',False),('expected',[])):
+                changed=clone();changed['cases'][0][field]=value;mutants.append(changed)
+            for field,value in (('completed',False),('returned',False),('target_hash','f'*64),('ordinal',2)):
+                changed=clone();changed['cases'][0]['calls'][0][field]=value;mutants.append(changed)
+            for changed in mutants:
+                with self.assertRaises(RuntimeError):check(changed)
+            target=suite['targets'][0]['target_hash'];terminal=root/'expectations'/(target+'.terminal.json');saved=terminal.read_bytes()
+            bad=json.loads(saved);bad['intent_sha256']='f'*64;terminal.write_bytes(ci.fixture_bytes(bad))
+            with self.assertRaisesRegex(RuntimeError,'terminal mismatch'):check(suite)
+            terminal.write_bytes(saved);check(suite)
         with fixture_world() as (base, checkout, root, binding):
             suite = self.journal(root)
             suite['targets'][0]['later_outcome'] = 'unknown'
@@ -3527,7 +3594,7 @@ class FixtureTargetObserverShapeTests(unittest.TestCase):
         self.assertIsInstance(filters[0], ast.Dict)
         routes = {key.value: value for key, value in zip(filters[0].keys, filters[0].values)
                   if isinstance(key, ast.Constant)}
-        self.assertEqual(set(routes), {'focused', 'p33', 'parity', 'unit', 'integration', 'all', 'writer', 'rest', 'master046', 'technical-master', 'technical-master-pure', 'durable-pair-pure', 'command-postgres', 'fixture105-unknown', 'fixture105-isolation', 'runtime-observe', 'fixture105-traversal'})
+        self.assertEqual(set(routes), {'focused', 'p33', 'parity', 'unit', 'integration', 'all', 'writer', 'rest', 'master046', 'technical-master', 'technical-master-pure', 'durable-pair-pure', 'command-postgres', 'fixture105-unknown', 'fixture105-isolation', 'fixture105-native', 'runtime-observe', 'fixture105-traversal'})
         self.assertIn("    test = 'test/unit/p33-parity-harness.test.ts'", guard_source)
         self.assertEqual(ast.literal_eval(routes['writer']), ['test/unit/writer-fixture-input.test.ts'])
         self.assertEqual(ast.literal_eval(routes['master046']), ['test/unit/frozen-fixture046-master.test.ts'])
@@ -3535,7 +3602,26 @@ class FixtureTargetObserverShapeTests(unittest.TestCase):
         self.assertEqual(ast.literal_eval(routes['command-postgres']), ['test/integration/g2-command-connection.test.ts'])
         self.assertEqual(ast.literal_eval(routes['fixture105-unknown']), ['test/integration/connected-fixture105.test.ts', '--testNamePattern', '^connected fixture105 native ownership holds unknown construction commit without inventing its missing settlement receipt$'])
         self.assertEqual(ast.literal_eval(routes['fixture105-isolation']), ['test/integration/connected-fixture105.test.ts', '--testNamePattern', '^connected fixture105 native ownership (retains durable direction if the separate audit transaction fails|rolls back package creation when a foreign observation identity wins late)$'])
+        self.assertEqual(ast.literal_eval(routes['fixture105-native']), ['test/integration/connected-fixture105.test.ts'])
         hosted=(ci.ROOT/'test/support/command-postgres-hosted.ts').read_text()
+        def hosted_budgets(text):
+            self.assertEqual(re.findall(r'const guardWorkSeconds = ([^;]+);',text),['wholeNativeDiagnostic ? 1800 : 900'])
+            self.assertEqual(re.findall(r'const guardCloseMilliseconds = ([^;]+);',text),['wholeNativeDiagnostic ? 1845000 : 945000'])
+            for token in ('`${String(guardWorkSeconds)}s`,','await bounded(close, guardCloseMilliseconds);',
+                          'await bounded(close, 19000);','await bounded(close, 1000);','"--kill-after=20s",',
+                          'wholeNativeDiagnostic && after.native_suite_complete !== true','tests: { passed: 34, total: 34 }',
+                          '{ tests: 34, failed: 0, skipped: 0, todo: 0 }'):
+                self.assertIn(token,text)
+        hosted_budgets(hosted)
+        for before,after in (('1800 : 900','1800 : 1800'),('1800 : 900','1900 : 900'),
+                             ('1845000 : 945000','1845000 : 1845000'),('1845000 : 945000','1945000 : 945000'),
+                             ('close, 19000','close, 20000'),('close, 1000','close, 0')):
+            self.assertIn(before,hosted)
+            with self.assertRaises(AssertionError):hosted_budgets(hosted.replace(before,after,1))
+        summary,errors=ci.parse_summary(' Test Files  1 passed (1)\n      Tests  34 passed (34)\n')
+        self.assertEqual(summary,{'files':{'passed':1,'total':1},'tests':{'passed':34,'total':34}});self.assertEqual(errors,[])
+        for line in ('33 passed | 1 skipped','33 passed | 1 failed','34 passed | 1 skipped','35 passed'):
+            other,_=ci.parse_summary(' Test Files  1 passed (1)\n      Tests  '+line+' (34)\n');self.assertNotEqual(other,summary)
         embedded=hosted.split('const sourceCheck = String.raw`',1)[1].split('`;',1)[0]
         tree=ast.parse(embedded)
         definition=next(node for node in tree.body if isinstance(node,ast.FunctionDef) and node.name=='isolation_journal')
@@ -3610,7 +3696,7 @@ class FixtureTargetObserverShapeTests(unittest.TestCase):
                            for keyword in node.keywords if keyword.arg == 'choices']
         self.assertEqual(len(profile_choices), 1)
         self.assertEqual(ast.literal_eval(profile_choices[0]),
-                         ['prerequisite', 'focused', 'p33', 'parity', 'unit', 'integration', 'all', 'writer', 'rest', 'master046', 'technical-master', 'technical-master-pure', 'durable-pair-pure', 'command-postgres', 'fixture105-unknown', 'fixture105-isolation', 'runtime-observe', 'fixture105-traversal'])
+                         ['prerequisite', 'focused', 'p33', 'parity', 'unit', 'integration', 'all', 'writer', 'rest', 'master046', 'technical-master', 'technical-master-pure', 'durable-pair-pure', 'command-postgres', 'fixture105-unknown', 'fixture105-isolation', 'fixture105-native', 'runtime-observe', 'fixture105-traversal'])
         for profile, expression in (('all', "['--exclude', test]"),
                                     ('rest', "['--exclude', test, '--exclude', 'test/unit/writer-fixture-input.test.ts']")):
             self.assertEqual(ast.dump(routes[profile]), ast.dump(ast.parse(expression, mode='eval').body))

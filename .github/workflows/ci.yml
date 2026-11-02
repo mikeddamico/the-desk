@@ -1,6 +1,6 @@
 name: foundation-ci
 
-# ISOLATION DIAGNOSTIC: two fixed native cases; full validation remains held.
+# WHOLE NATIVE DIAGNOSTIC: all 34 native cases; full validation remains held.
 # CI153 revised selected-case proof accepted; original 120-second benchmark remains failed.
 on:
   pull_request:
@@ -472,25 +472,25 @@ jobs:
           path: ${{ runner.temp }}/evaluation/ci/upload-controls
           if-no-files-found: error
           retention-days: 30
-      - name: Diagnose the two native isolation refusals
+      - name: Observe the complete native file context
         id: command-postgres
         if: ${{ success() && steps.init.outcome == 'success' && steps.semantic-identities.outcome == 'success' && steps.collect-controls.outcome == 'success' && steps.upload-controls.outcome == 'success' }}
         working-directory: /tmp/e
-        timeout-minutes: 21
+        timeout-minutes: 37
         env:
           DESK_CI_ROLE_TEMP: ${{ runner.temp }}/evaluation
         run: |
           /usr/bin/env HOME="$DESK_CI_ROLE_TEMP/ci/home" TMPDIR="$DESK_CI_ROLE_TEMP/ci/tmp" \
-            /usr/bin/timeout --signal=TERM --kill-after=20s 1200s \
-            node --import tsx test/support/command-postgres-hosted.ts fixture105-isolation
-      - name: Retain the two-case diagnostic including failed cleanup observations
+            /usr/bin/timeout --signal=TERM --kill-after=20s 2160s \
+            node --import tsx test/support/command-postgres-hosted.ts fixture105-native
+      - name: Retain the whole native diagnostic including failed cleanup observations
         id: upload-command-postgres
         if: ${{ always() && steps.init.outcome == 'success' && steps.command-postgres.outcome != 'skipped' }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         timeout-minutes: 2
         with:
-          name: ci-fixture105-isolation-rest-${{ github.run_id }}-${{ github.run_attempt }}
-          path: ${{ runner.temp }}/evaluation/ci/evidence/fixture105-isolation/retained
+          name: ci-fixture105-native-rest-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/evaluation/ci/evidence/fixture105-native/retained
           if-no-files-found: error
           retention-days: 30
       - name: Guard P33 aggregate all
@@ -615,12 +615,12 @@ jobs:
           FIXTURE046_CLEANUP_OUTCOME: ${{ steps.fixture046-cleanup.outcome }}
         run: |
           /usr/bin/python3 -I -B tools/ci-validation/ci.py final
-      - name: Hold after the bounded isolation diagnostic
+      - name: Hold after the bounded whole native diagnostic
         if: ${{ always() }}
         working-directory: ${{ github.workspace }}
         timeout-minutes: 1
         run: |
-          printf '%s\n' 'HOLD: two-case diagnostic only; full validation remains held.'
+          printf '%s\n' 'HOLD: whole native diagnostic only; full validation remains held.'
           exit 78
 
   verify:

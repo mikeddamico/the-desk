@@ -14,13 +14,20 @@ const nativeDiagnostic =
   process.argv.length === 3 && process.argv[2] === "fixture105-unknown";
 const isolationDiagnostic =
   process.argv.length === 3 && process.argv[2] === "fixture105-isolation";
+const wholeNativeDiagnostic =
+  process.argv.length === 3 && process.argv[2] === "fixture105-native";
 const profile = nativeDiagnostic
   ? "fixture105-unknown"
   : isolationDiagnostic
     ? "fixture105-isolation"
-    : "command-postgres";
+    : wholeNativeDiagnostic
+      ? "fixture105-native"
+      : "command-postgres";
 if (
-  (!nativeDiagnostic && !isolationDiagnostic && process.argv.length !== 2) ||
+  (!nativeDiagnostic &&
+    !isolationDiagnostic &&
+    !wholeNativeDiagnostic &&
+    process.argv.length !== 2) ||
   process.platform !== "linux" ||
   process.env.GITHUB_ACTIONS !== "true" ||
   process.env.ImageOS !== "ubuntu24" ||
@@ -106,7 +113,7 @@ c=runpy.run_path('tools/ci-validation/ci.py',run_name='command_postgres_source_c
 import types
 owner_module=types.ModuleType('command_postgres_source_check');owner_module.__dict__.update(c);sys.modules['command_postgres_source_check']=owner_module
 base=c['ci_dir']();ev=base/'evidence';summary_evidence={}
-if sys.argv[2] not in ('command-postgres','fixture105-unknown','fixture105-isolation'):raise RuntimeError('fixed profile required')
+if sys.argv[2] not in ('command-postgres','fixture105-unknown','fixture105-isolation','fixture105-native'):raise RuntimeError('fixed profile required')
 stage=ev/sys.argv[2]
 if sys.argv[1]=='after':
   raw=c['fixture_read'](stage/'stdout',8*1024*1024)
@@ -129,7 +136,7 @@ if sys.argv[1]=='after':
     except Exception as error:
       summary_evidence['native_case_complete']=False
       summary_evidence['native_journal_error']=type(error).__name__
-  if sys.argv[2]=='fixture105-isolation':
+  if sys.argv[2] in ('fixture105-isolation','fixture105-native'):
     try:
       root=base/'tmp'/c['FIXTURE_NAME']
       retention_bytes=[0]
@@ -166,10 +173,14 @@ if sys.argv[1]=='after':
                 if entry.name not in ('CONSTRUCTION.json','CLAIMS-FAILURE.json') or len(leaves)>=2:raise RuntimeError('isolation retention receipt')
                 leaves.append(entry.name)
             for leaf in sorted(leaves):retain_isolation(root/directory/name/leaf,'fixture105/'+directory+'/'+name+'/'+leaf,16384 if leaf=='CONSTRUCTION.json' else 262144)
-      summary_evidence['isolation_cases_complete']=isolation_journal(root,json.loads(journal),c['fixture_read'],c['fixture_hash'])
+      if sys.argv[2]=='fixture105-native':
+        c['fixture_journal'](root,json.loads(journal))
+        summary_evidence['native_suite_complete']=True
+      else:
+        summary_evidence['isolation_cases_complete']=isolation_journal(root,json.loads(journal),c['fixture_read'],c['fixture_hash'])
     except Exception as error:
-      summary_evidence['isolation_cases_complete']=False
-      summary_evidence['isolation_journal_error']=type(error).__name__
+      summary_evidence['native_suite_complete' if sys.argv[2]=='fixture105-native' else 'isolation_cases_complete']=False
+      summary_evidence['native_suite_journal_error' if sys.argv[2]=='fixture105-native' else 'isolation_journal_error']=type(error).__name__
 partition=c['installation_owner']().outer(owner_module, 'E0' if sys.argv[1]=='before' else 'E1')
 if partition['partition']!='rest':raise RuntimeError('rest binding required')
 pre=c['load_pre'](ev);build=c['load_json'](ev/'bind-build.json')
@@ -316,10 +327,13 @@ const environment = {
   TEST_DATABASE_URL: databaseUrl,
   DESK_FIXTURE105_BINDING: JSON.stringify(before.binding),
 };
+// Whole-file-only engineering allocation; case limits and settlement are unchanged.
+const guardWorkSeconds = wholeNativeDiagnostic ? 1800 : 900;
+const guardCloseMilliseconds = wholeNativeDiagnostic ? 1845000 : 945000;
 const command = [
   "--signal=TERM",
   "--kill-after=20s",
-  "900s",
+  `${String(guardWorkSeconds)}s`,
   "/usr/bin/python3",
   "-I",
   "-B",
@@ -501,7 +515,7 @@ try {
     });
   }
   record("process.json", { pid: child.pid, pgid: child.pid });
-  await bounded(close, 945000);
+  await bounded(close, guardCloseMilliseconds);
 } catch (error) {
   primary ??= error;
 } finally {
@@ -582,10 +596,15 @@ try {
           files: { passed: 1, total: 1 },
           tests: { passed: 2, skipped: 32, total: 34 },
         }
-      : {
-          files: { passed: 1, total: 1 },
-          tests: { passed: 7, total: 7 },
-        };
+      : wholeNativeDiagnostic
+        ? {
+            files: { passed: 1, total: 1 },
+            tests: { passed: 34, total: 34 },
+          }
+        : {
+            files: { passed: 1, total: 1 },
+            tests: { passed: 7, total: 7 },
+          };
   if (
     canonicalJson(after.summary) !== canonicalJson(expectedSummary) ||
     canonicalJson(after.summary_errors) !== "[]"
@@ -595,6 +614,8 @@ try {
     throw new Error("native_case_journal_incomplete");
   if (isolationDiagnostic && after.isolation_cases_complete !== true)
     throw new Error("isolation_case_journal_incomplete");
+  if (wholeNativeDiagnostic && after.native_suite_complete !== true)
+    throw new Error("native_suite_journal_incomplete");
   const files = after.file_results as Record<
     string,
     { tests: number; failed: number; skipped: number; todo: number }[]
@@ -603,7 +624,7 @@ try {
     Object.keys(files).length !== 1 ||
     canonicalJson(
       files[
-        nativeDiagnostic || isolationDiagnostic
+        nativeDiagnostic || isolationDiagnostic || wholeNativeDiagnostic
           ? "test/integration/connected-fixture105.test.ts"
           : "test/integration/g2-command-connection.test.ts"
       ],
@@ -613,7 +634,9 @@ try {
           ? { tests: 34, failed: 0, skipped: 33, todo: 0 }
           : isolationDiagnostic
             ? { tests: 34, failed: 0, skipped: 32, todo: 0 }
-            : { tests: 7, failed: 0, skipped: 0, todo: 0 },
+            : wholeNativeDiagnostic
+              ? { tests: 34, failed: 0, skipped: 0, todo: 0 }
+              : { tests: 7, failed: 0, skipped: 0, todo: 0 },
       ])
   )
     throw new Error("fixed_file_results_required");
@@ -724,9 +747,19 @@ console.log(
         ? "fixture105_unknown"
         : isolationDiagnostic
           ? "fixture105_isolation"
-          : "command_postgres"]: ok ? "pass" : "hold",
+          : wholeNativeDiagnostic
+            ? "fixture105_native"
+            : "command_postgres"]: ok ? "pass" : "hold",
       evidence: retained,
-      tests: ok ? (nativeDiagnostic ? 1 : isolationDiagnostic ? 2 : 7) : null,
+      tests: ok
+        ? nativeDiagnostic
+          ? 1
+          : isolationDiagnostic
+            ? 2
+            : wholeNativeDiagnostic
+              ? 34
+              : 7
+        : null,
     }),
   ),
 );
