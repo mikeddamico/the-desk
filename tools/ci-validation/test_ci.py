@@ -1154,11 +1154,17 @@ def _restored_workflow(test, text):
     rest=text.split('  verify-rest:\n',1)[1].split('\n  verify:',1)[0]
     for identifier in ('fixture046-runtime','fixture046-cleanup'):
         test.assertNotIn(identifier,writer)
-    test.assertNotIn('fixture105-unknown',text)
+    for profile in ('fixture105-unknown', 'fixture105-isolation', 'fixture105-native'):
+        test.assertNotIn(profile, text)
+    test.assertNotIn('exit 78', text)
+    test.assertNotIn('HOLD:', text)
     test.assertNotIn('ci.py diagnostic-final',text)
     test.assertIn('needs: [verify-writer, verify-rest, container]',text)
     test.assertIn('ci.py joint',text)
     test.assertNotIn('if: ${{ false }}',text.split('  container:',1)[1])
+    joint = text.split('  verify:\n', 1)[1].split('  container:', 1)[0]
+    test.assertIn('    if: ${{ always() }}\n', joint)
+    test.assertNotIn('if: ${{ false }}', joint)
     for label,job in (('writer',writer),('rest',rest)):
         test.assertNotIn('    if: ${{ false }}',job.split('    steps:',1)[0])
         test.assertIn('timeout-minutes: 190',job)
@@ -2157,6 +2163,14 @@ class WorkflowShape(unittest.TestCase):
                 ('SECURITY_UPLOAD_OUTCOME: ${{ steps.upload-security.outcome }}','SECURITY_UPLOAD_OUTCOME: success'),
                 ('FIXTURE046_CLEANUP_OUTCOME: ${{ steps.fixture046-cleanup.outcome }}','FIXTURE046_CLEANUP_OUTCOME: success'),
                 ('command-postgres-hosted.ts\n','command-postgres-hosted.ts fixture105-unknown\n'),
+                ('command-postgres-hosted.ts\n','command-postgres-hosted.ts fixture105-isolation\n'),
+                ('command-postgres-hosted.ts\n','command-postgres-hosted.ts fixture105-native\n'),
+                ('  verify-writer:\n','  verify-writer:\n    if: ${{ false }}\n'),
+                ('  container:\n','  container:\n    if: ${{ false }}\n'),
+                ('    needs: [verify-writer, verify-rest, container]\n    if: ${{ always() }}',
+                 '    needs: [verify-writer, verify-rest, container]\n    if: ${{ false }}'),
+                ('  verify:\n', '      - run: exit 78 # HOLD: diagnostic only\n\n  verify:\n'),
+                ("always() && steps.init.outcome == 'success' && steps.command-postgres.outcome != 'skipped'", "steps.command-postgres.outcome == 'success'"),
                 ('GITLEAKS_ENABLE_COMMENTS: "false"','GITLEAKS_ENABLE_COMMENTS: "true"'),
                 ('docker build --tag','true # docker build --tag'),
             ):

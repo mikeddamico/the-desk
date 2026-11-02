@@ -530,3 +530,48 @@ Final acceptance requires a successful zero-findings report and actual upload
 and media-cleanup outcomes. Partial producer evidence remains non-authoritative
 under unchanged logical/object/byte limits. No paid providers, real media,
 registry publication, deployment, credential expansion or merge is authorized.
+
+## Normal validation restoration after CI160
+
+CI160 on head `40670f228b052f925a232776fc6ad6659a49bda3` completed all
+34 native cases and the complete journal, the 20 selftest groups, 42 common
+observer calls with 160 target observations, all 58 selected-case markers, and
+owned cleanup. Independent review accepted this as one complete nonreproduction.
+The unexpected maintenance slot was unused; only the intentional held-client
+control performed its supplemental read. CI157 and CI159 remain unresolved
+intermittent isolation failures. This result does not establish a causal repair.
+
+The retained SOURCE/TOOLS artifact copies are wrapper-redacted and are not the
+original ROOT-pin bytes. Live before/after source and tool equality was separately
+established by the owner checks; these are distinct evidence claims.
+
+Normal validation restores both sealed writer/rest partitions, pinned synthetic
+media preparation and cleanup, the ordinary seven-test command proof, complete
+aggregate checks and retention, audit/Gitleaks/security uploads, container and
+joint verification. The workflow no longer selects a native diagnostic profile
+or ends in a diagnostic HOLD. Existing diagnostic profiles remain dormant. All
+case, owner, aggregate and job limits remain unchanged; no retry loop or budget
+ratchet is introduced. Authenticated PR and push/main identity semantics and the
+one historical scanner-finding exception remain unchanged.
+
+The reviewed common construction and reconciliation diagnostics remain active
+in the native file. Their case, operation and diagnostic ordinal labels identify
+the current owned allocation without exposing its connection URL. Context-bearing
+vectors/summaries use diagnostic schemas `/3` and maintenance records use `/2`;
+existing specialized records keep their prior schemas. The historical single-slot
+and fixed-scope descriptions above do not describe this successor: common and
+non-control specialized observers share one unexpected-failure maintenance slot,
+while the exact held-client control has one separate slot. Its common observer
+is ineligible for maintenance. Synchronous reservation permits at most two
+supplemental reads per attempt; a failed read consumes its slot without retry.
+Original-row metadata and later provisional, vanished or changed-lifetime
+observations remain distinct. Saturation or missing metadata is inconclusive;
+no backend category is excluded from the runtime isolation predicate.
+
+Fresh exact-commit acceptance still requires writer 4908 plus rest 3858 tests,
+8766 across 85 files, all 34 native cases with `suite_complete=true`, genuine P33,
+complete source/tool/root, process, database, media and security evidence, and
+container/joint success. A future full pass establishes that commit's acceptance,
+not an explanation or repair of the earlier intermittent refusals. Source review,
+local validation and a separately released hosted run precede acceptance; this
+restoration text alone grants no merge, deployment or provider-resource action.
