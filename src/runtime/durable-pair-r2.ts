@@ -15,6 +15,7 @@ import type {
 import { NodeHttpHandler } from "@smithy/node-http-handler";
 import { r2Credentials, type RegisteredPair } from "./durable-pair-binding.js";
 import {
+  UPLOAD_ORDER,
   PairRefusal,
   requirePair,
   keyFor,
@@ -32,6 +33,138 @@ const NO_LOGGER = {
 };
 const EMPTY = Buffer.alloc(0);
 let pendingClient = false;
+
+/** Bounded diagnostic metadata only. No bodies, headers, URLs, IDs or error text. */
+type DiagnosticStage =
+  | "start"
+  | "credentials"
+  | "signing"
+  | "signed"
+  | "dispatch"
+  | "headers"
+  | "consumed"
+  | "refused"
+  | "cleanup";
+interface DiagnosticRecord {
+  method: "PUT" | "GET";
+  object: string;
+  stage: DiagnosticStage;
+  elapsed_ms: number;
+  status?: number;
+  bytes?: number;
+  code?: string;
+  cleanup_pending?: boolean;
+}
+const records: DiagnosticRecord[] = [];
+let droppedRecords = 0;
+let requestsStarted = 0;
+let requestsClosed = 0;
+export interface TransportDiagnosticSnapshot {
+  schema: "durable-pair-transport-diagnostics/1";
+  complete: boolean;
+  saturated: boolean;
+  dropped_records: number;
+  requests_started: number;
+  requests_closed: number;
+  records: readonly DiagnosticRecord[];
+}
+export function transportDiagnosticSnapshot(): TransportDiagnosticSnapshot {
+  return {
+    schema: "durable-pair-transport-diagnostics/1",
+    complete: droppedRecords === 0 && requestsStarted === requestsClosed,
+    saturated: droppedRecords > 0,
+    dropped_records: droppedRecords,
+    requests_started: requestsStarted,
+    requests_closed: requestsClosed,
+    records: transportDiagnostics(),
+  };
+}
+export function transportDiagnostics(): readonly DiagnosticRecord[] {
+  return records.map((record) => ({ ...record }));
+}
+function diagnostic(method: "PUT" | "GET", name: FileName) {
+  const object = (UPLOAD_ORDER as readonly string[]).includes(name)
+    ? name
+    : "OTHER";
+  const start = performance.now();
+  let emitted = 0;
+  return (
+    stage: DiagnosticStage,
+    status?: number,
+    bytes?: number,
+    error?: unknown,
+    cleanupPending?: boolean,
+  ): void => {
+    try {
+      if (stage === "start")
+        requestsStarted = Math.min(65535, requestsStarted + 1);
+      if (stage === "cleanup")
+        requestsClosed = Math.min(65535, requestsClosed + 1);
+      if (emitted++ >= 12 || records.length >= 512) {
+        droppedRecords = Math.min(65535, droppedRecords + 1);
+        return;
+      }
+      const record: DiagnosticRecord = {
+        method,
+        object,
+        stage,
+        elapsed_ms: Math.min(
+          600000,
+          Math.max(0, Math.floor(performance.now() - start)),
+        ),
+      };
+      if (
+        typeof status === "number" &&
+        Number.isInteger(status) &&
+        status >= 200 &&
+        status <= 599
+      )
+        record.status = status;
+      if (
+        typeof bytes === "number" &&
+        Number.isSafeInteger(bytes) &&
+        bytes >= 0 &&
+        bytes <= 5760044
+      )
+        record.bytes = bytes;
+      if (error !== undefined) {
+        let code: unknown;
+        try {
+          code =
+            typeof error === "object" && error !== null
+              ? Reflect.get(error, "code")
+              : undefined;
+        } catch {
+          // Error metadata is untrusted; retain the event without invoking it again.
+          code = undefined;
+        }
+        record.code =
+          typeof code === "string" &&
+          [
+            "storage_timeout",
+            "storage_response_invalid",
+            "storage_readback_invalid",
+            "resource_limit",
+            "cleanup_pending",
+            "binding_unavailable",
+            "ECONNRESET",
+            "ETIMEDOUT",
+            "ENOTFOUND",
+            "ECONNREFUSED",
+            "EPIPE",
+            "ERR_TLS_CERT_ALTNAME_INVALID",
+          ].includes(code)
+            ? code
+            : "OTHER";
+      }
+      if (typeof cleanupPending === "boolean")
+        record.cleanup_pending = cleanupPending;
+      records.push(record);
+    } catch {
+      /* Diagnostics must never change transport outcomes. */
+    }
+  };
+}
 
 /** Retains only request-owned replay keys; reset constructs a fresh pinned delegate. */
 function requestChecksums(): {
@@ -221,6 +354,7 @@ class BoundedHandler extends NodeHttpHandler {
   sourceAborted = false;
   sourceFault: unknown;
   dispatches = 0;
+  observedBytes = 0;
   cleanupFault = false;
   private sourceDestroyAttempted = false;
   private cappedDestroyAttempted = false;
@@ -228,6 +362,7 @@ class BoundedHandler extends NodeHttpHandler {
     agent: OwnedAgent,
     private readonly maxBytes: number,
     private readonly method: "GET" | "PUT",
+    private readonly report: ReturnType<typeof diagnostic>,
   ) {
     super({
       httpsAgent: agent,
@@ -247,6 +382,7 @@ class BoundedHandler extends NodeHttpHandler {
       "readback",
     );
     const result = await super.handle(...args);
+    this.report("headers", result.response.statusCode);
     const source: unknown = result.response.body;
     // Own the returned stream before any header/type predicate can throw.
     if (source instanceof Readable) {
@@ -305,12 +441,15 @@ class BoundedHandler extends NodeHttpHandler {
         : 65536;
     let count = 0;
     const capped = new Transform({
-      transform(chunk: Buffer, _encoding, callback) {
+      transform: (chunk: Buffer, _encoding, callback) => {
         if (!Buffer.isBuffer(chunk) || chunk.length > 65536)
           callback(new PairRefusal("resource_limit", "readback"));
         else if ((count += chunk.length) > maximum)
           callback(new PairRefusal("storage_readback_invalid", "readback"));
-        else callback(null, chunk);
+        else {
+          this.observedBytes = count;
+          callback(null, chunk);
+        }
       },
     });
     this.capped = capped;
@@ -492,6 +631,8 @@ async function request<T>(
   ) => Promise<T>,
 ): Promise<T> {
   if (pendingClient) throw new PairRefusal("cleanup_pending", "cleanup", true);
+  const report = diagnostic(body === undefined ? "GET" : "PUT", name);
+  report("start");
   const controller = new AbortController();
   const checksums = requestChecksums();
   const deadline = performance.now() + 15000;
@@ -551,6 +692,7 @@ async function request<T>(
       "binding_unavailable",
       "binding",
     );
+    report("credentials");
     const unsigned = unsignedRequest(registration, operation, name, body);
     const date = new Date();
     clearCredentialCache();
@@ -577,11 +719,13 @@ async function request<T>(
       agent,
       maximum,
       body === undefined ? "GET" : "PUT",
+      report,
     );
     const currentHandler = handler;
     workSettled = false;
     const work = (async (): Promise<T> => {
       beforeDispatch();
+      report("signing");
       const signing = signer.sign(unsigned, {
         signingDate: date,
         signableHeaders: new Set([
@@ -595,7 +739,9 @@ async function request<T>(
       beforeDispatch();
       checkSignature(unsigned, signed, date, credentials.accessKeyId);
       beforeDispatch();
+      report("signed");
       httpSettled = false;
+      report("dispatch");
       const invocation = currentHandler.handle(new HttpRequest(signed), {
         abortSignal: controller.signal,
       });
@@ -620,7 +766,9 @@ async function request<T>(
       },
     );
     value = await Promise.race([work, timedOut]);
+    report("consumed", undefined, handler.observedBytes);
   } catch (error) {
+    report("refused", undefined, handler?.observedBytes, error);
     primary =
       error instanceof PairRefusal
         ? error
@@ -668,6 +816,13 @@ async function request<T>(
     cleanupPending ||=
       unsettled() || handler?.cleanupFault === true || pending(agent, handler);
     pendingClient ||= cleanupPending;
+    report(
+      "cleanup",
+      undefined,
+      handler?.observedBytes,
+      undefined,
+      cleanupPending,
+    );
   }
   if (primary instanceof PairRefusal)
     throw new PairRefusal(
