@@ -118,7 +118,8 @@ export function registeredPair(): RegisteredPair {
     "binding",
   );
   requirePair(
-    registration.namespace.path === "/tmp/the-desk-durable-pair-operations" &&
+    registration.namespace.path ===
+      "/workspaces/the-desk-durable-pair-operations-v2" &&
       registration.namespace.uid === process.getuid?.() &&
       Number.isSafeInteger(registration.namespace.dev) &&
       Number.isSafeInteger(registration.namespace.ino),

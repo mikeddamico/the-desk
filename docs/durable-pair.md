@@ -30,14 +30,67 @@ JSON/error bodies are capped at 64 KiB, objects at the fixed corpus sizes, aggre
 
 One initial real roundtrip is at most 33 R2 requests: eleven PUTs, eleven writer GETs and eleven fresh-reader GETs, with at most 12 MiB upload and 24 MiB download. Schema initialization, read-only binding checks and any explicitly requested reconciliation are separately accounted actions. Fault and concurrency tests use controlled adapters; they are not permission to repeat paid writes.
 
-## Candidate checks and proposed execution
+## Offline controls and execution boundary
 
 The twenty cases in `durable-pair.test.ts` retain the durable protocol and interrupted-write controls. Eleven additional cases in `durable-pair-transport.test.ts` cover published signing vectors, reset/fallback, frozen wire expectations, immutable snapshots, framing, status/chunk bounds, deadlines, late signer cleanup, Agent ownership and normalized errors. Every case retains the default five-second limit; long-deadline controls use fake time and owned deferred promises. Assessment is mocked from the historical observation, and no transport seam connects a socket. These tests cannot establish real R2 durability or acoustic acceptance.
 
-After actual-source/invocation review and fresh authentic source/tool bindings, the proposed pure command is:
+The repository remains unconfigured for external execution. Any bounded test command
+must use the existing supervisor with fresh source/tool bindings. Adding the proof
+CLI does not supply a registration, credentials, namespace or authorization.
 
-```sh
-/usr/bin/timeout --signal=TERM --kill-after=20s 900s /usr/bin/python3 -I -B test/support/p33-parity-supervisor.py guard durable-pair-pure
-```
+## Optional transport diagnostics
 
-The proposed implementation and its new controls have not executed. The independent signing-reference calculation is also unrun; its exact script/inputs must pass review before the resulting expected file is frozen. Tests refuse rather than skip when that required file is absent. Package metadata proposes a five-package Smithy closure, but the existing lock/installation remain unchanged pending separate lock/install review. No performance improvement or 120-second sufficiency is established. Real schema/storage proof still requires separately reviewed literal bindings/procedure and action-time credential/security authorization. No listener or production-quality claim follows from synthetic tone persistence.
+The proof CLI can retain a terminal metadata snapshot when
+`DESK_DURABLE_PAIR_DIAGNOSTICS_DIR` names an existing private canonical directory.
+The sink does not create that directory, adopt an operation namespace, or change
+permissions. It uses Linux `/proc` descriptor checks and publishes a new private
+file exclusively. A collision or persistence/reporting failure does not replace
+the action's original result or exit status; a failure may leave private partial
+evidence for inspection. Process loss before terminal capture can leave no snapshot.
+
+Records contain only allowlisted object names, method/stage, elapsed time, response
+status, consumed response-byte count, sanitized error code and cleanup flag. They
+never contain request headers, credentials, object bodies, URLs or raw error text.
+A throwing error-code getter is represented as `OTHER`, preserving the event and
+the primary transport outcome. Request and record limits remain bounded.
+
+`complete` describes recorded event coverage, not successful cleanup, SQL commit,
+artifact admission or enduring object availability. `saturated` and `dropped_records`
+make capacity loss explicit. Counts are process-global observations, not an
+operation journal. Byte counts measure inbound response bytes, not upload progress.
+
+## Persistent namespace boundary
+
+The admitted namespace path is fixed to
+`/workspaces/the-desk-durable-pair-operations-v2`. A separately reviewed registration
+must still bind its actual device/inode, UID and owner-file hash; repository
+registration remains null. Callers cannot choose or initialize a replacement path.
+Missing prior ownership or intent remains held, never evidence of a new operation.
+
+A preserved workspace avoids the ephemeral `/tmp` location across ordinary
+Codespace stop/start and rebuild. This is not a backup or a promise of survival
+after Codespace deletion. Existing unresolved operations and their evidence must
+not be deleted or reconstructed to regain first-entry status.
+
+## Captured private result and remaining work
+
+On November 4, 2026 UTC, a separately bound private development candidate completed
+one synthetic writer and one fresh-reader invocation. Its eleven conditional PUTs
+and twenty-two GETs succeeded, the SQL receipt committed, private operation evidence
+was retained, and temporary database access was closed. Independent result review
+accepted that captured outcome. It did not establish the earlier uncertain
+operation's outcome or timeout cause.
+
+That private candidate also included an independently reviewed database guard
+variant not included in this diagnostics/namespace patch. Therefore this result is
+not a claim that unconfigured repository main reproduces the private connection.
+The result retains `authority=none`, synthetic-only scope, and false authoritative
+gate, lifecycle VALIDATED, READY and production flags. Synthetic tones establish
+neither spoken-content quality nor product audio thresholds.
+
+The accepted durable-pair contract's next substantive step is separate review of
+an authoritative technical-gate schema/projection bound to durable subject IDs,
+the actual attempt/configuration/selection chain, transaction/idempotency rules and
+guarded ASSEMBLED-to-VALIDATED transition. Existing transition machinery alone does
+not establish those prerequisites. No additional synthetic live proof, deployment,
+new spending or speech-provider call is released by this integration.

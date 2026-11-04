@@ -732,7 +732,7 @@ def guard(args):
                'master046': ['test/unit/frozen-fixture046-master.test.ts'],
                'technical-master': ['test/unit/technical-master-admission.test.ts'],
                'technical-master-pure': ['test/unit/technical-master-admission.test.ts'],
-               'durable-pair-pure': ['test/unit/durable-pair.test.ts', 'test/unit/durable-pair-transport.test.ts'],
+               'durable-pair-pure': ['test/unit/durable-pair.test.ts', 'test/unit/durable-pair-transport.test.ts', 'test/unit/durable-pair-diagnostics.test.ts', 'test/unit/durable-pair-proof.test.ts', 'test/unit/durable-pair-namespace.test.ts'],
                'command-postgres': ['test/integration/g2-command-connection.test.ts'],
                'fixture105-unknown': ['test/integration/connected-fixture105.test.ts', '--testNamePattern', '^connected fixture105 native ownership holds unknown construction commit without inventing its missing settlement receipt$'],
                'fixture105-isolation': ['test/integration/connected-fixture105.test.ts', '--testNamePattern', '^connected fixture105 native ownership (retains durable direction if the separate audit transaction fails|rolls back package creation when a foreign observation identity wins late)$'],

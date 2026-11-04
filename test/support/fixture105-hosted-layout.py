@@ -17,7 +17,7 @@ ROLE = None
 DESTINATION = Path('/tmp/d')
 UID = os.getuid()
 CAP = 262144
-SOURCE_FILES = 515
+SOURCE_FILES = 520
 STATE = {'phase': 'preflight', 'primary': None, 'cleanup_errors': [],
          'cancelled': None, 'settling': False, 'actions': [],
          'evidence': None, 'source': None, 'owned_root': None, 'prepared': False}
