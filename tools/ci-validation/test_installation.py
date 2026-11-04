@@ -170,6 +170,25 @@ class EvaluationProvenance(unittest.TestCase):
                 for path in (root,root/'a',root/'a/b',root/'a/b/c'):
                     self.assertEqual(stat.S_IMODE(path.stat().st_mode),0o700)
                 self.assertEqual((root.stat().st_dev,root.stat().st_ino),(before.st_dev,before.st_ino))
+                # Match test_24's init and PREP retention fixtures. Every
+                # ancestor and leaf must be private under both inherited masks.
+                real_open=os.open;created=[]
+                def masked_open(path,flags,mode=0o777,*,dir_fd=None):
+                    if flags & os.O_CREAT:created.append(mode)
+                    return real_open(path,flags,mode & ~mask,dir_fd=dir_fd)
+                with mock.patch.object(installation_model.os,'mkdir',side_effect=masked_mkdir),mock.patch.object(installation_model.os,'open',side_effect=masked_open):
+                    for role in ('build','evaluation'):
+                        base=root/role/'ci';ev=base/'evidence'
+                        for path in (base/'tmp',base/'home',ev/'producer/metadata'):
+                            installation_model.private_dirs(root,path)
+                    slot=root/'evaluation/ci/evidence/stage-owner/prerequisite'
+                    installation_model.private_dirs(root,slot/'PREP')
+                    for name in ('owner.json','PREP/owner.json','PREP/process.json','PREP/stdout','PREP/stderr'):
+                        installation_model.put(slot/name,b'' if name.endswith('stderr') else b'model\n',root=root)
+                self.assertTrue(calls);self.assertEqual(set(calls),{0o700})
+                self.assertEqual(created,[0o600]*5)
+                for path in root.rglob('*'):
+                    self.assertEqual(stat.S_IMODE(path.stat().st_mode),0o700 if path.is_dir() else 0o600)
         with tempfile.TemporaryDirectory() as directory:
             root=Path(directory);bad=root/'bad';bad.mkdir(mode=0o700)
             # Deliberately invalid, private test-owned fixture; the helper must
@@ -848,7 +867,7 @@ class EvaluationProvenance(unittest.TestCase):
                 with self.subTest(init_role=role,mode=mode),tempfile.TemporaryDirectory() as directory:
                     runner=Path(directory);base=runner/role/'ci';ev=base/'evidence'
                     for path in (base/'tmp',base/'home',ev/'producer/metadata'):
-                        path.mkdir(mode=0o700,parents=True)
+                        installation_model.private_dirs(runner,path)
                     identity=dict(self.common,repository='model/é')
                     if mode in ('at-bound','over-bound'):
                         identity['repository']+='x'*(65536-len(baseline)+(mode=='over-bound'))
@@ -862,7 +881,14 @@ class EvaluationProvenance(unittest.TestCase):
                         return 0,{'node':ci.NODE_VERSION,'npm':ci.NPM_VERSION,
                             'timeout':'timeout (GNU coreutils) model','unzip':'UnZip model','git':''}[executable]
                     output=io.StringIO()
+                    # Real producers verify an inherited 0077 envelope before
+                    # cmd_init. Model that creation mode only at ci's opener;
+                    # keep write_bytes_x, serialization and strict reads real.
+                    def envelope_open(path,mode):
+                        self.assertEqual(mode,'xb');Path(path).relative_to(runner)
+                        return open(path,mode,opener=lambda name,flags:os.open(name,flags,0o600))
                     with contextlib.ExitStack() as patches:
+                        patches.enter_context(mock.patch.object(ci,'open',side_effect=envelope_open,create=True))
                         patches.enter_context(mock.patch.dict(os.environ,{'RUNNER_TEMP':str(runner),'DESK_CI_ROLE_TEMP':str(base.parent)}))
                         patches.enter_context(mock.patch.object(ci,'ROOT',runner))
                         patches.enter_context(mock.patch.object(ci,'ci_dir',return_value=base))
@@ -1712,7 +1738,7 @@ class EvaluationProvenance(unittest.TestCase):
             staged=world/'stage-runner';staged.mkdir(mode=0o700)
             for role in ('build','evaluation'):shutil.copytree(runner/role,staged/role)
             slot=staged/'evaluation/ci/evidence/stage-owner/prerequisite'
-            (slot/'PREP').mkdir(parents=True,mode=0o700)
+            installation_model.private_dirs(world,slot/'PREP')
             launch={'pid':77,'pgid':77,'identity':{'pid':77,'start':99},'argv':['fixed-model-only']}
             action={'phase':'PREP','launch':launch,'primary':'RuntimeError','settled':False}
             parent_raw=self.owner.canonical({'actions':[action],'success':False})
@@ -1720,7 +1746,7 @@ class EvaluationProvenance(unittest.TestCase):
             for name,raw in [('owner.json',parent_raw),('PREP/owner.json',(json.dumps(action,sort_keys=True)+'\n').encode()),
                              ('PREP/process.json',(json.dumps(launch,sort_keys=True)+'\n').encode()),
                              ('PREP/stdout',new_blobs[1]),('PREP/stderr',new_blobs[2])]:
-                (slot/name).write_bytes(raw)
+                put(slot/name,raw)
             specs=self.owner.partial_specs(staged)
             self.assertEqual(len(specs),281)
             aggregate=[rel.as_posix() for _,rel,_ in specs if '/all/' in rel.as_posix() or rel.as_posix()=='evaluation/fixture105-before-all.json']
