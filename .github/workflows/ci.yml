@@ -79,6 +79,11 @@ jobs:
 
           LAST_CASE = None
           SYNTHETIC_PINS = {}
+          CASE_PASSED = {name: False for name in CASES}
+          PHASES = frozenset(('extract', 'setup', 'image', 'producer', 'runner_copies',
+              'case_setup', 'case_check', 'case_restore', 'pin_validation',
+              'container_cleanup', 'filesystem_cleanup', 'receipt', 'unknown'))
+          ACTIVE_PHASE = 'unknown'
 
 
           class PreflightFailure(RuntimeError):
@@ -90,6 +95,29 @@ jobs:
           def need(value, code):
               if not value:
                   raise PreflightFailure(code)
+
+
+          def phase(value):
+              global ACTIVE_PHASE
+              need(type(value) is str and value in PHASES, 'internal')
+              ACTIVE_PHASE = value
+
+
+          def case_setup(name):
+              global LAST_CASE
+              need(type(name) is str and name in CASES, 'internal')
+              LAST_CASE = name
+              phase('case_setup')
+
+
+          def failure_kind(error):
+              if type(error) is PermissionError and error.errno in (errno.EACCES, errno.EPERM):
+                  return 'permission_denied'
+              if type(error) is FileNotFoundError:
+                  return 'missing'
+              if type(error) is PreflightFailure:
+                  return 'verification'
+              return 'other'
 
 
           def load_module(name, path):
@@ -205,7 +233,7 @@ jobs:
                             '; do printf "synthetic-owner\\n" > "/evidence/$name"; done; '
                             'printf "{}\\n" > /evidence/negative/host; '
                             'printf "synthetic-owner\\n" > /evidence/negative/retained; '
-                            'mkdir /evidence/negative/root-directory')
+                            'umask 000; mkdir -m 0777 /evidence/negative/root-directory')
                   self.bind_root = str(root)
                   self.created_pending = True
                   identifier = self.command(['create', '--name', self.name,
@@ -323,9 +351,11 @@ jobs:
               def accepted(name, operation):
                   global LAST_CASE
                   LAST_CASE = name
+                  phase('case_check')
                   need(clock() < deadline, 'deadline')
                   operation()
                   results.append(name)
+                  CASE_PASSED[name] = True
               expected_failures = {
                   'runner_docker_rejected': ('code', 'supply_leaf_owner'),
                   'root_host_rejected': ('code', 'supply_leaf_owner'),
@@ -351,6 +381,7 @@ jobs:
               def rejected(name, operation):
                   global LAST_CASE
                   LAST_CASE = name
+                  phase('case_check')
                   need(clock() < deadline, 'deadline')
                   kind, expected = expected_failures[name]
                   try:
@@ -363,6 +394,7 @@ jobs:
                           or (kind == 'helper' and type(error) is RuntimeError and error.args == (expected,)))
                       need(valid, 'case')
                       results.append(name)
+                      CASE_PASSED[name] = True
                       return
                   raise PreflightFailure('case')
               def put(path, data=b'synthetic-owner\n', mode=0o600):
@@ -375,6 +407,7 @@ jobs:
                   with v['RuntimeSupply'](ci) as supply:
                       supply.settled = settled
                       return supply.read(path, limit)
+              case_setup('settlement_admitted')
               registration = {'image_id': 'synthetic-preflight-image', 'containers': ['synthetic-owned']}
               ownership = {'schema': 'fixture046-supply-owner/1', 'preparation': 'ready', 'local': False,
                   'image_id': registration['image_id'], 'token': 'a' * 32,
@@ -394,9 +427,11 @@ jobs:
                   actual_cleanup = v['supply_pair'](ci, supply, root / 'cleanup.json',
                       copies / 'cleanup.json', {}, copies.parent)
                   accepted('settlement_admitted', lambda: v['settled_supply'](actual_owner, actual_cleanup, registration))
+                  case_setup('cleanup_receipt_replacement_rejected')
                   original = root / 'cleanup.json'
                   raw = original.read_bytes(); original.rename(root / 'negative/old-cleanup'); put(original, raw)
                   rejected('cleanup_receipt_replacement_rejected', lambda: supply.read(original))
+              case_setup('genuine_docker_ten')
               docker = sorted(v['DOCKER_ORIGINALS'])
               need(os.getuid() != 0 and all((root / name).lstat().st_uid == 0 for name in docker), 'mapping')
               need(all((copies / name).lstat().st_uid == os.getuid() for name in docker), 'mapping')
@@ -412,21 +447,32 @@ jobs:
               rejected('unsettled_rejected', lambda: read_once(root / docker[0], False))
               outside = copies / docker[0]
               rejected('outside_root_rejected', lambda: read_once(outside))
+              case_setup('runner_docker_rejected')
               name = docker[0]; target = root / name; saved = root / 'negative/docker-original'
               target.rename(saved); put(target)
-              rejected('runner_docker_rejected', lambda: read_once(target)); target.unlink(); saved.rename(target)
+              rejected('runner_docker_rejected', lambda: read_once(target))
+              phase('case_restore')
+              target.unlink(); saved.rename(target)
+              case_setup('root_host_rejected')
               host = root / 'acquisition.json'; (root / 'negative/host').rename(host)
-              rejected('root_host_rejected', lambda: read_once(host)); host.unlink(); put(host, b'{}\n')
+              rejected('root_host_rejected', lambda: read_once(host))
+              phase('case_restore')
+              host.unlink(); put(host, b'{}\n')
+              case_setup('root_retained_rejected')
               kept = copies / name; kept.unlink(); (root / 'negative/retained').rename(kept)
               with v['RuntimeSupply'](ci) as supply:
                   supply.settled = True
                   rejected('root_retained_rejected', lambda: v['supply_pair'](ci, supply, target,
                       kept, {}, copies.parent, json_record=False))
-              kept.unlink(); put(kept, b'altered\n')
+              phase('case_restore')
+              kept.unlink()
+              case_setup('copy_drift_rejected')
+              put(kept, b'altered\n')
               with v['RuntimeSupply'](ci) as supply:
                   supply.settled = True
                   rejected('copy_drift_rejected', lambda: v['supply_pair'](ci, supply, target,
                       kept, {}, copies.parent, json_record=False))
+              phase('case_restore')
               kept.unlink(); put(kept)
               rejected('duplicate_json_rejected', lambda: v['strict_json'](b'{"x":1,"x":2}'))
               rejected('malformed_json_rejected', lambda: v['strict_json'](b'{'))
@@ -434,33 +480,53 @@ jobs:
               rejected('missing_rejected', lambda: read_once(root / 'install-identify.stderr'))
               rejected('bound_rejected', lambda: read_once(target, limit=1))
               # Mutations apply only to explicitly synthetic runner-owned host leaves.
+              case_setup('symlink_rejected')
               host.unlink(); host.symlink_to(target)
-              rejected('symlink_rejected', lambda: read_once(host)); host.unlink(); put(host)
+              rejected('symlink_rejected', lambda: read_once(host))
+              phase('case_restore')
+              host.unlink(); put(host)
+              case_setup('hardlink_rejected')
               os.link(host, root / 'negative/hardlink')
-              rejected('hardlink_rejected', lambda: read_once(host)); (root / 'negative/hardlink').unlink(); host.unlink()
+              rejected('hardlink_rejected', lambda: read_once(host))
+              phase('case_restore')
+              (root / 'negative/hardlink').unlink(); host.unlink()
+              case_setup('fifo_rejected')
               os.mkfifo(host, 0o600)
-              rejected('fifo_rejected', lambda: read_once(host)); host.unlink(); put(host, mode=0o622)
+              rejected('fifo_rejected', lambda: read_once(host))
+              phase('case_restore')
+              host.unlink()
               # Explicit mode only on this negative fixture; no admitted positives normalized.
+              case_setup('permissions_rejected')
+              put(host, mode=0o622)
               os.chmod(host, 0o622)
-              rejected('permissions_rejected', lambda: read_once(host)); host.unlink(); put(host)
+              rejected('permissions_rejected', lambda: read_once(host))
+              phase('case_restore')
+              host.unlink(); put(host)
               with v['RuntimeSupply'](ci) as supply:
+                  case_setup('leaf_replacement_rejected')
                   supply.read(host)
                   host.rename(root / 'negative/old-host'); put(host)
                   rejected('leaf_replacement_rejected', lambda: supply.read(host))
               with v['RuntimeSupply'](ci) as supply:
+                  case_setup('original_byte_drift_rejected')
                   supply.read(host)
                   host.write_bytes(b'changed-synthetic-bytes\n')
                   rejected('original_byte_drift_rejected', lambda: supply.read(host))
+              case_setup('root_replacement_rejected')
               old = root.with_name('synthetic-root-old')
               with v['RuntimeSupply'](ci) as supply:
                   supply.read(host); roots.move(root, old); roots.create(root)
                   rejected('root_replacement_rejected', supply.terminal)
+              phase('case_restore')
               root.rmdir(); roots.move(old, root)
-              replacement = root / 'negative/root-directory'; need(replacement.lstat().st_uid == 0, 'mapping')
+              case_setup('root_owned_directory_rejected')
+              replacement = root / 'negative/root-directory'; need(replacement.lstat().st_uid == 0
+                  and stat.S_IMODE(replacement.lstat().st_mode) == 0o777, 'mapping')
               roots.admit(replacement, empty=True)
               roots.move(replacement, root.with_name('synthetic-root-replacement'))
               roots.move(root, old); roots.move(root.with_name('synthetic-root-replacement'), root)
               rejected('root_owned_directory_rejected', lambda: read_once(root / 'ownership.json'))
+              phase('case_restore')
               root.rmdir(); roots.move(old, root)
               rejected('settlement_rejected', lambda: v['settled_supply'](
                   dict(ownership, command_pending=True), cleanup, registration))
@@ -510,25 +576,34 @@ jobs:
 
 
           def preflight_body(base, workspace, service, interruption):
-              global LAST_CASE, SYNTHETIC_PINS
+              global LAST_CASE, SYNTHETIC_PINS, CASE_PASSED
               LAST_CASE = None
               SYNTHETIC_PINS = {}
+              CASE_PASSED = {name: False for name in CASES}
+              phase('setup')
               started = time.monotonic()
               roots = SyntheticRoots(base)
               probe = DockerProbe(base)
               probe.started = started; probe.work_deadline = started + 30; probe.deadline = started + 45
               error = None; rows = []; ci = None
+              work_failure_phase = None; work_failure_kind = None; cleanup_failure_phase = None
+              container_cleanup_verified = False; filesystem_cleanup_verified = False
               try:
+                  phase('extract')
                   v = extract_verifier(workspace / '.github/workflows/ci.yml')
                   ci = load_module('synthetic_owner_ci', workspace / 'tools/ci-validation/ci.py')
+                  phase('setup')
                   root = roots.paths[0]; roots.create(root)
                   (root / 'negative').mkdir(mode=0o700)
                   copies = root / 'copies'; copies.mkdir(mode=0o700)
                   v['RUNTIME_ROOT'] = root
                   ci.FIXTURE046_RUNTIME = root
                   need(os.getuid() != 0, 'mapping')
+                  phase('image')
                   image = probe.image(service)
+                  phase('producer')
                   probe.produce(root, sorted(v['DOCKER_ORIGINALS']), image)
+                  phase('runner_copies')
                   for name in v['DOCKER_ORIGINALS']:
                       fd = os.open(copies / name, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
                       try:
@@ -536,36 +611,59 @@ jobs:
                       finally:
                           os.close(fd)
                   rows = run_cases(v, ci, root, copies, probe.work_deadline, roots)
+                  phase('pin_validation')
                   need(set(SYNTHETIC_PINS) == set(v['DOCKER_ORIGINALS'])
                        and all(record == {'original': {'bytes': 16, 'sha256': hashlib.sha256(b'synthetic-owner\n').hexdigest()},
                                           'retained': {'bytes': 16, 'sha256': hashlib.sha256(b'synthetic-owner\n').hexdigest()}}
-                               for record in SYNTHETIC_PINS.values()), 'case')
+                               for record in SYNTHETIC_PINS.values())
+                       and set(CASE_PASSED) == set(CASES)
+                       and all(value is True for value in CASE_PASSED.values()), 'case')
               except BaseException as caught:
                   error = caught
+                  work_failure_phase = ACTIVE_PHASE if ACTIVE_PHASE in PHASES else 'unknown'
+                  work_failure_kind = failure_kind(caught)
               interruption['cleaning'] = True
               try:
+                  phase('container_cleanup')
                   probe.cleanup()
                   need(not probe.created_pending and not probe.uncertain, 'cleanup')
+                  container_cleanup_verified = True
+                  phase('filesystem_cleanup')
                   if ci is not None:
                       roots.cleanup(ci.installation_owner(), probe.deadline)
                   else:
                       need(not any(os.path.lexists(path) for path in roots.paths), 'cleanup')
                   need(time.monotonic() < probe.deadline, 'deadline')
+                  filesystem_cleanup_verified = True
               except BaseException:
+                  cleanup_failure_phase = ACTIVE_PHASE if ACTIVE_PHASE in PHASES else 'unknown'
                   error = PreflightFailure('cleanup')
               if interruption['cancelled']:
                   error = PreflightFailure('command_uncertain')
-              receipt = {'schema': 'synthetic-owner-preflight/1', 'accepted': error is None,
+              phase('receipt')
+              safe_pins = {}
+              if CASE_PASSED.get('genuine_runner_retained_ten') is True:
+                  expected_pin = {'bytes': 16, 'sha256': hashlib.sha256(b'synthetic-owner\n').hexdigest()}
+                  if set(SYNTHETIC_PINS) == set(v['DOCKER_ORIGINALS']) and all(
+                          record == {'original': expected_pin, 'retained': expected_pin}
+                          for record in SYNTHETIC_PINS.values()):
+                      safe_pins = SYNTHETIC_PINS
+              receipt = {'schema': 'synthetic-owner-preflight/2', 'accepted': error is None,
                          'full_acceptance': False, 'production_fixture_evidence': False,
                          'path_substituted': True, 'verifier_sha256': VERIFIER_SHA256,
-                         'case_passed': {name: error is None and name in rows for name in CASES},
-                         'synthetic_pins': SYNTHETIC_PINS if error is None else {},
+                         'case_passed': {name: CASE_PASSED.get(name) is True for name in CASES},
+                         'synthetic_pins': safe_pins,
                          'case_population': len(CASES),
                          'actual_runner_nonzero': os.getuid() != 0,
-                         'actual_docker_uid_zero': error is None,
-                         'runner_retained_role_matches': error is None,
-                         'cleanup_verified': error is None,
-                         'failure_case': LAST_CASE if error is not None and LAST_CASE in CASES else None,
+                         'actual_docker_uid_zero': CASE_PASSED.get('genuine_docker_ten') is True,
+                         'runner_retained_role_matches': CASE_PASSED.get('genuine_runner_retained_ten') is True,
+                         'cleanup_verified': container_cleanup_verified and filesystem_cleanup_verified,
+                         'container_cleanup_verified': container_cleanup_verified,
+                         'filesystem_cleanup_verified': filesystem_cleanup_verified,
+                         'work_failure_phase': work_failure_phase, 'work_failure_kind': work_failure_kind,
+                         'cleanup_failure_phase': cleanup_failure_phase,
+                         'failure_case': LAST_CASE if work_failure_phase in ('case_setup', 'case_check', 'case_restore')
+                             and LAST_CASE in CASES else None,
                          'failure_code': None if error is None else
                              (error.code if type(error) is PreflightFailure and error.code in CODES else 'internal')}
               data = (json.dumps(receipt, sort_keys=True) + '\n').encode()
