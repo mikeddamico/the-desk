@@ -1023,7 +1023,7 @@ function fixtureExecutionProvenance(
     .filter((name) => /^test\/.*\.test\.ts$/u.test(name))
     .sort();
   if (
-    allTests.length !== 86 ||
+    allTests.length !== 89 ||
     !allTests.includes("test/unit/p33-parity-harness.test.ts") ||
     !allTests.includes("test/unit/writer-fixture-input.test.ts")
   )
@@ -1039,7 +1039,7 @@ function fixtureExecutionProvenance(
   fixtureSame(partition.selection, selected);
   fixtureSame(
     partition.counts,
-    partition.partition === "writer" ? [1, 4908, 0] : [84, 3858, 29],
+    partition.partition === "writer" ? [1, 4908, 0] : [87, 3880, 29],
   );
   const sourced = (value: FixtureRootObject): void => {
     fixtureSame(value.source, identity);
