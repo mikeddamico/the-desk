@@ -911,6 +911,53 @@ def stage_guard_url(stage, partition, env):
     return value
 
 
+def stage_prep_env(env):
+    """Give PREP only the validated target identity, never database credentials."""
+    if 'DESK_CI_DB_TARGET' in env:
+        raise RuntimeError('stage caller database target')
+    try:
+        target = stage_ci()['validate_db_url'](env.get('TEST_DATABASE_URL'))
+        target = stage_ci()['validate_db_target'](target)
+        encoded = json.dumps(target, ensure_ascii=False, sort_keys=True,
+                             separators=(',', ':'), allow_nan=False) + '\n'
+        if len(encoded.encode('utf-8')) > 1024:
+            raise ValueError('target bound')
+    except Exception:
+        raise RuntimeError('stage disposable database target') from None
+    prepared = dict(env)
+    prepared.pop('TEST_DATABASE_URL', None)
+    prepared['DESK_CI_DB_TARGET'] = encoded
+    return prepared
+
+
+def stage_phase_env(stage, phase, partition, env):
+    """Validate the closed credential/target routing before either launch boundary."""
+    if phase not in STAGE_PHASES:
+        raise RuntimeError('stage phase')
+    if phase == 'PREP':
+        if 'TEST_DATABASE_URL' in env:
+            raise RuntimeError('stage phase database')
+        try:
+            raw = env.get('DESK_CI_DB_TARGET')
+            if type(raw) is not str or not 0 < len(raw.encode('utf-8')) <= 1024:
+                raise ValueError('target bound')
+            target = stage_ci()['validate_db_target'](json.loads(raw))
+            canonical = json.dumps(target, ensure_ascii=False, sort_keys=True,
+                                   separators=(',', ':'), allow_nan=False) + '\n'
+            if raw != canonical:
+                raise ValueError('target encoding')
+        except Exception:
+            raise RuntimeError('stage PREP database target') from None
+        return None
+    if 'DESK_CI_DB_TARGET' in env:
+        raise RuntimeError('stage unexpected database target')
+    if phase == 'GUARD':
+        return stage_guard_url(stage, partition, env)
+    if 'TEST_DATABASE_URL' in env:
+        raise RuntimeError('stage phase database')
+    return None
+
+
 def stage_argv(stage, phase, partition=None):
     if stage not in ('prerequisite', 'focused', 'all') or phase not in STAGE_PHASES:
         raise RuntimeError('stage command map')
@@ -978,8 +1025,7 @@ def stage_child(args):
     """An execed bootstrap waits for authorization; Popen preexec_fn never waits."""
     stage_argv(args.stage,args.phase)
     if args.partition != stage_partition():raise RuntimeError('stage child partition')
-    if args.phase == 'GUARD':stage_guard_url(args.stage,args.partition,os.environ)
-    elif 'TEST_DATABASE_URL' in os.environ:raise RuntimeError('stage phase database')
+    stage_phase_env(args.stage, args.phase, args.partition, os.environ)
     if len(args.nonce) != 48 or any(c not in '0123456789abcdef' for c in args.nonce):
         raise RuntimeError('stage nonce')
     parent = {'pid':args.parent,'start':args.start}
@@ -1077,8 +1123,7 @@ class StageOwner:
     def phase(self, phase, env, output=None):
         self.barrier()
         if env.get('DESK_CI_PARTITION')!=self.partition:raise RuntimeError('stage phase partition')
-        credential = stage_guard_url(self.stage,self.partition,env) if phase=='GUARD' else None
-        if phase!='GUARD' and 'TEST_DATABASE_URL' in env:raise RuntimeError('stage phase database')
+        credential = stage_phase_env(self.stage, phase, self.partition, env)
         if self.actions and not self.actions[-1]['settled']:
             raise RuntimeError('stage predecessor unsettled')
         self.grant_committed = False
@@ -1221,6 +1266,8 @@ def stage_snapshot(path):
 
 
 def stage_owner(stage, checking=False):
+    if 'DESK_CI_DB_TARGET' in os.environ:
+        raise RuntimeError('stage caller database target')
     import resource
     started = time.monotonic()  # Includes setup, every grant and normal settlement.
     stage_argv(stage,'CHECK' if checking else 'PREP')
@@ -1253,7 +1300,7 @@ def stage_owner(stage, checking=False):
             stage_previous_owner(base,stage)
             owner.phase('CHECK',env)
         else:
-            owner.phase('PREP',env)
+            owner.phase('PREP', stage_prep_env(os.environ))
             owner.phase('BIND',env)
             binding_raw = stage_read(directory/'BIND/stdout',8192)
             binding = json.loads(binding_raw)

@@ -108,6 +108,15 @@ def db_context():
         yield
 
 
+@contextlib.contextmanager
+def credential_free_precheck_context():
+    env = dict(os.environ)
+    env.pop('TEST_DATABASE_URL', None)
+    env['DESK_CI_DB_TARGET'] = ci.fixture_bytes(synthetic_db_receipt()['target']).decode()
+    with mock.patch.dict(os.environ, env, clear=True):
+        yield
+
+
 def file_lines(counts=None, extra=''):
     counts = counts or PER_FILE
     return ''.join(' ✓ %s (%d tests) 12ms\n' % (n, c) for n, c in counts.items()) + extra
@@ -365,6 +374,22 @@ class DatabaseBinding(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     ci.validate_db_url(bad)
 
+        target = ci.validate_db_url(URL)
+        detached = ci.validate_db_target(target)
+        self.assertEqual(detached, target)
+        self.assertIsNot(detached, target)
+        mutations = [None, [], {}, {**target, 'extra': True}]
+        for field, values in {'host': ['remote.example', None, True],
+                              'port': [True, 5432.0, '5432', 5433],
+                              'database': ['postgres', None],
+                              'user': ['', None, True, 'a:b', 'a@b', 'a/b', 'a b', 'a\nb']}.items():
+            mutations.extend({**target, field: value} for value in values)
+        for field in target:
+            mutations.append({key: value for key, value in target.items() if key != field})
+        for value in mutations:
+            with self.subTest(target=value), self.assertRaises((RuntimeError, ValueError, TypeError)):
+                ci.validate_db_target(value)
+
     def test_missing_variable_is_a_recorded_failure_without_probing(self):
         with tempfile.TemporaryDirectory() as tmp:
             (Path(tmp) / 'ci' / 'evidence').mkdir(parents=True)
@@ -594,6 +619,31 @@ class DatabaseBinding(unittest.TestCase):
             retained.chmod(0o600)
             self.assertEqual(ci.read_db_probe(source, binding), raw)
             self.assertEqual(ci.verify_db_probe_custody(source, retained, binding, raw), raw)
+            target = synthetic_db_receipt()['target']
+            for url in (None, '', 'not-a-url', URL.replace('localhost', '127.0.0.1'),
+                        URL.replace('postgres:postgres@', 'different:postgres@')):
+                env = dict(os.environ)
+                env.pop('TEST_DATABASE_URL', None)
+                if url is not None:
+                    env['TEST_DATABASE_URL'] = url
+                with self.subTest(reader_url=url), mock.patch.dict(os.environ, env, clear=True):
+                    with self.assertRaises((RuntimeError, ValueError)):
+                        ci.read_db_probe(source, binding)
+                    with self.assertRaises((RuntimeError, ValueError)):
+                        ci.verify_db_probe_custody(source, retained, binding, raw)
+            with credential_free_precheck_context():
+                self.assertNotIn('TEST_DATABASE_URL', os.environ)
+                self.assertEqual(ci.read_db_probe(source, binding, expected_target=target), raw)
+                self.assertEqual(ci.verify_db_probe_custody(source, retained, binding, raw,
+                                                           expected_target=target), raw)
+                for expected in ({**target, 'host': '127.0.0.1'}, {**target, 'user': 'different'},
+                                 {**target, 'extra': True}, {}):
+                    with self.subTest(reader_target=expected):
+                        with self.assertRaises((RuntimeError, ValueError)):
+                            ci.read_db_probe(source, binding, expected_target=expected)
+                        with self.assertRaises((RuntimeError, ValueError)):
+                            ci.verify_db_probe_custody(source, retained, binding, raw,
+                                                      expected_target=expected)
             for label, data in malformed.items():
                 with self.subTest(receipt_bytes=label):
                     source.write_bytes(data)
@@ -1052,7 +1102,8 @@ class StageGateCommands(unittest.TestCase):
         env = {'RUNNER_TEMP': str(runner), 'DESK_CI_ROLE_TEMP': str(runner/'evaluation')}
         with db_context(), mock.patch.dict(os.environ, env), mock.patch.object(ci, 'ci_dir', return_value=Path(runner)/'ci'), mock.patch.object(ci, 'ROOT', root), \
                 mock.patch.object(ci, 'tracked_files', lambda: list(TRACKED)), mock.patch.object(ci, 'fixture_capture_stage', return_value={'complete': True}), contextlib.redirect_stdout(io.StringIO()):
-            return fn(*args)
+            with credential_free_precheck_context() if fn is ci.cmd_precheck else contextlib.nullcontext():
+                return fn(*args)
 
     def stage(self, ev, runner, stage, seen):
         runtime = runner / 'ci' / 'tmp' / 'p33-1000-abc'
@@ -1068,6 +1119,67 @@ class StageGateCommands(unittest.TestCase):
             self.assertEqual(self.run_cmd(root, runner, ci.cmd_precheck, 'focused'), 0)
             (ev / 'prerequisite').mkdir()
             self.assertEqual(self.run_cmd(root, runner, ci.cmd_precheck, 'prerequisite'), 1)
+
+        # Compose the real StageOwner PREP transform and launch validation with
+        # the real command. No prebuilt target context may hide the URL boundary.
+        import runpy
+        supervisor = runpy.run_path(str(ci.ROOT / 'test/support/p33-parity-supervisor.py'),
+                                    run_name='inert_prep_boundary')
+        for partition in ('writer', 'rest'):
+            for stage in ci.STAGES:
+                with self.subTest(credential_free_partition=partition, stage=stage), tempfile.TemporaryDirectory() as tmp:
+                    ev, _ = build_world(tmp)
+                    binding = synthetic_db_binding(partition)
+                    write_json(ev / 'db-probe.json', synthetic_db_receipt(binding))
+                    for previous in ci.STAGES[:ci.STAGES.index(stage)]:
+                        write_json(ev / ('verdict-' + previous + '.json'),
+                                   {'ok': True, 'partition': partition, 'stage': previous})
+                    controls = Path(tmp) / 'ci/upload-controls'
+                    controls.mkdir()
+                    write_json(controls / 'db-probe.json', synthetic_db_receipt(binding))
+                    write_json(controls / 'final.json', {
+                        'scope': 'controls', 'all_stages_ok': True, 'evidence_status': 'complete',
+                        'collection_problems': {'missing': [], 'censored': [], 'errors': []},
+                        'verdicts': {'prerequisite': True, 'focused': True}, 'not_attempted': [],
+                        'partition': partition, 'commit': binding['identity']['checkout'],
+                        'run_id': binding['identity']['run_id'], 'run_attempt': binding['identity']['run_attempt'],
+                        'execution': binding['execution'],
+                    })
+                    incoming = {'DESK_CI_PARTITION': partition,
+                                'TEST_DATABASE_URL': URL.replace(':postgres@', ':prep-canary-secret@'),
+                                'GITHUB_SHA': binding['identity']['checkout'],
+                                'GITHUB_RUN_ID': binding['identity']['run_id'],
+                                'GITHUB_RUN_ATTEMPT': binding['identity']['run_attempt']}
+                    original = dict(incoming)
+                    with mock.patch.object(ci, 'ci_dir', return_value=Path(tmp) / 'ci'), \
+                            mock.patch.object(ci, 'check_partition_binding', return_value=binding), \
+                            mock.patch.object(ci.subprocess, 'run', side_effect=AssertionError('no child permitted')) as run, \
+                            mock.patch.object(ci.subprocess, 'Popen', side_effect=AssertionError('no child permitted')) as popen:
+                        prepared = supervisor['stage_prep_env'](incoming)
+                        self.assertEqual(incoming, original)
+                        self.assertNotIn('TEST_DATABASE_URL', prepared)
+                        self.assertNotIn('prep-canary-secret', json.dumps(prepared))
+                        self.assertEqual(json.loads(prepared['DESK_CI_DB_TARGET']),
+                                         synthetic_db_receipt(binding)['target'])
+                        mismatched = supervisor['stage_prep_env'](dict(incoming,
+                            TEST_DATABASE_URL=incoming['TEST_DATABASE_URL'].replace('localhost', '127.0.0.1')))
+                        for label, child_env, expected in (('matching', prepared, 0),
+                                                           ('mismatched', mismatched, 1)):
+                            with self.subTest(owner_prep_target=label), \
+                                    mock.patch.dict(os.environ, child_env, clear=True), \
+                                    contextlib.redirect_stdout(io.StringIO()) as output:
+                                self.assertNotIn('TEST_DATABASE_URL', os.environ)
+                                self.assertIsNone(supervisor['stage_phase_env'](stage, 'PREP', partition, os.environ))
+                                self.assertEqual(ci.cmd_precheck(stage), expected)
+                                problems = json.loads(output.getvalue())['problems']
+                                self.assertEqual(problems, [] if expected == 0 else
+                                                 ['database probe precheck refused: RuntimeError'])
+                        for forged in (prepared['DESK_CI_DB_TARGET'], mismatched['DESK_CI_DB_TARGET']):
+                            with self.subTest(forged_owner_target=forged), \
+                                    self.assertRaisesRegex(RuntimeError, 'stage caller database target'):
+                                supervisor['stage_prep_env'](dict(incoming, DESK_CI_DB_TARGET=forged))
+                        run.assert_not_called()
+                        popen.assert_not_called()
 
     def test_precheck_requires_database_probe_and_build_binding(self):
         for name in ('db-probe.json', 'bind-build.json', 'bind-pre.json'):
@@ -1088,6 +1200,34 @@ class StageGateCommands(unittest.TestCase):
                 root, runner, ev = self.world(tmp)
                 edit_json(ev / 'db-probe.json', change)
                 self.assertEqual(self.run_cmd(root, runner, ci.cmd_precheck, 'prerequisite'), 1)
+
+        target = synthetic_db_receipt()['target']
+        target_json = json.dumps(target)
+        invalid_targets = [None, '', '{', 'null', '[]', '{}', target_json, ' ' * 1025,
+                           target_json[:-1] + ', "user": "postgres"}',
+                           target_json.replace('5432', 'NaN'),
+                           ci.fixture_bytes({**target, 'host': '127.0.0.1'}).decode(),
+                           ci.fixture_bytes({**target, 'user': 'different'}).decode(),
+                           ci.fixture_bytes({**target, 'extra': True}).decode()]
+        for value in invalid_targets:
+            with self.subTest(precheck_target=value), tempfile.TemporaryDirectory() as tmp:
+                build_world(tmp)
+                with db_context(), credential_free_precheck_context(), \
+                        mock.patch.object(ci, 'ci_dir', return_value=Path(tmp) / 'ci'), \
+                        contextlib.redirect_stdout(io.StringIO()):
+                    if value is None:
+                        os.environ.pop('DESK_CI_DB_TARGET', None)
+                    else:
+                        os.environ['DESK_CI_DB_TARGET'] = value
+                    self.assertEqual(ci.cmd_precheck('prerequisite'), 1)
+        for url in ('', URL, 'not-a-url'):
+            with self.subTest(precheck_url_injected=url), tempfile.TemporaryDirectory() as tmp:
+                build_world(tmp)
+                with db_context(), credential_free_precheck_context(), \
+                        mock.patch.dict(os.environ, {'TEST_DATABASE_URL': url}), \
+                        mock.patch.object(ci, 'ci_dir', return_value=Path(tmp) / 'ci'), \
+                        contextlib.redirect_stdout(io.StringIO()):
+                    self.assertEqual(ci.cmd_precheck('prerequisite'), 1)
 
     def test_check_accepts_matching_source_and_evidence(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -1354,7 +1494,8 @@ class ControlsGate(unittest.TestCase):
 
     def precheck_all(self, tmp):
         with db_context(), mock.patch.dict(os.environ, {'RUNNER_TEMP': tmp, 'DESK_CI_ROLE_TEMP': str(Path(tmp)/'evaluation')}), mock.patch.object(ci, 'ci_dir', return_value=Path(tmp)/'ci'), contextlib.redirect_stdout(io.StringIO()):
-            return ci.cmd_precheck('all')
+            with credential_free_precheck_context():
+                return ci.cmd_precheck('all')
 
     def final_path(self, tmp):
         return Path(tmp) / 'ci' / 'upload-controls' / 'final.json'
@@ -1471,7 +1612,8 @@ class ControlsGate(unittest.TestCase):
 
     def precheck_stage(self, tmp, stage):
         with db_context(), mock.patch.dict(os.environ, {'RUNNER_TEMP': tmp, 'DESK_CI_ROLE_TEMP': str(Path(tmp)/'evaluation')}), mock.patch.object(ci, 'ci_dir', return_value=Path(tmp)/'ci'), contextlib.redirect_stdout(io.StringIO()):
-            return ci.cmd_precheck(stage)
+            with credential_free_precheck_context():
+                return ci.cmd_precheck(stage)
 
 
 # BEGIN TEMPORARY MAINTENANCE WORKFLOW VALIDATOR
@@ -1497,8 +1639,8 @@ def _maintenance_workflow(test, text):
     test.assertEqual(diagnostic.count('command-postgres-hosted.ts fixture105-native'), 1)
     test.assertEqual(diagnostic.count('timeout-minutes: 190\n'), 1)
     caps = [int(value) for value in re.findall(r'^        timeout-minutes: (\d+)$', diagnostic, re.M)]
-    test.assertEqual(caps, [2, 2, 3, 6, 2, 41, 6, 2, 16, 6, 16, 2, 1, 3, 2, 5, 2, 2, 2, 37, 3, 2, 3, 3, 3, 3, 3, 2, 1])
-    test.assertEqual(sum(caps), 181)
+    test.assertEqual(caps, [2, 4, 2, 2, 3, 6, 2, 41, 6, 2, 16, 6, 16, 2, 1, 3, 2, 5, 2, 2, 2, 37, 3, 2, 3, 3, 3, 3, 3, 2, 1])
+    test.assertEqual(sum(caps), 187)
     steps = {}
     for block in diagnostic.split('      - ')[1:]:
         identifiers = re.findall(r'^        id: (.+)$', block, re.M)
@@ -1508,6 +1650,29 @@ def _maintenance_workflow(test, text):
             steps[identifiers[0]] = block
         if 'working-directory: /tmp/e' in block:
             test.assertIn('DESK_CI_ROLE_TEMP: ${{ runner.temp }}/evaluation', block)
+    hosted = steps['installation-unit-controls']
+    retained = steps['upload-installation-unit-controls']
+    test.assertLess(diagnostic.index('id: installation-unit-controls'), diagnostic.index('id: upload-installation-unit-controls'))
+    test.assertLess(diagnostic.index('id: upload-installation-unit-controls'), diagnostic.index('id: build-layout'))
+    for invariant in ("if: ${{ success() }}", 'working-directory: ${{ github.workspace }}',
+                      'timeout-minutes: 4', '180s /usr/bin/python3 -I -B -',
+                      "COMMAND = ['/usr/bin/timeout', '--signal=TERM', '--kill-after=5s', '120s',",
+                      "'/usr/bin/python3', '-I', '-B', 'tools/ci-validation/test_installation.py', '-v']",
+                      "os.environ.get('RUNNER_ENVIRONMENT') == 'github-hosted'",
+                      "before['head'] == os.environ['GITHUB_SHA'] and before['status'] == ''",
+                      "all(observed.get(path) == digest for path, digest in PINS.items())",
+                      "save('checkout-before.json', before)", "save('checkout-after.json', after)",
+                      "require(before == after", 'require(completed.returncode == 0',
+                      'sorted(rows) == METHODS and len(rows) == 24',
+                      'exact OK summary with zero skips or failures required',
+                      "require(stdout == ''", "'full_acceptance': False", "save('result.json', result)"):
+        test.assertIn(invariant, hosted)
+    for invariant in ("always() && steps.installation-unit-controls.outcome != 'skipped'",
+                      'actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02',
+                      'ci-maintenance-installation-unit-controls-${{ github.run_id }}-${{ github.run_attempt }}',
+                      'path: ${{ runner.temp }}/installation-unit-diagnostic',
+                      'timeout-minutes: 2', 'if-no-files-found: error', 'retention-days: 30'):
+        test.assertIn(invariant, retained)
     context = steps['build-layout']
     test.assertIn('30s /usr/bin/python3 -I -B -', context)
     for invariant in ("GITHUB_JOB') != 'verify-maintenance-fixture105'",
@@ -1530,8 +1695,8 @@ def _maintenance_workflow(test, text):
         'ci-maintenance-fixture105-' + kind + '-${{ github.run_id }}-${{ github.run_attempt }}'
         for kind in ('build-layout', 'evaluation-layout', 'controls', 'native', 'full', 'producers', 'verdict')
     ])
-    test.assertEqual(diagnostic.count('if-no-files-found: error'), 7)
-    test.assertEqual(diagnostic.count('retention-days: 30'), 7)
+    test.assertEqual(diagnostic.count('if-no-files-found: error'), 8)
+    test.assertEqual(diagnostic.count('retention-days: 30'), 8)
     verdict = steps['maintenance-verdict']
     for outcome, identifier in (
         ('BUILD_LAYOUT_UPLOAD_OUTCOME', 'upload-build-layout'),
@@ -1552,7 +1717,7 @@ def _maintenance_workflow(test, text):
                       'sys.modules[spec.name] = module', "'full_acceptance': False"):
         test.assertIn(invariant, verdict)
     test.assertTrue(diagnostic.endswith("      - name: Hold after diagnostic evidence without full acceptance\n        if: ${{ always() }}\n        timeout-minutes: 1\n        run: |\n          echo 'HOLD: diagnostic-only native fixture105 proof; full acceptance is false'\n          exit 78\n"))
-    test.assertEqual(hashlib.sha256(diagnostic.encode()).hexdigest(), '2cada30c5e85c853ee8a17778820d514894def9fa981f303cc27736c7a0a347a')
+    test.assertEqual(hashlib.sha256(diagnostic.encode()).hexdigest(), '2aae6e61d738b4a3a129e47a37b335af6a5d61e2a5e8eab6788bff21f75ec4b8')
     projection = prefix + 'jobs:\n  verify-writer:\n' + normal_tail
     dependency = '    needs: [verify-maintenance-fixture105]\n'
     test.assertEqual(projection.count(dependency), 3)
@@ -1561,7 +1726,7 @@ def _maintenance_workflow(test, text):
         test.assertEqual(projection.count(opening), 1)
         projection = projection.replace(opening, '  ' + job + ':\n', 1)
     _restored_workflow(test, projection)
-    test.assertEqual(hashlib.sha256(text.encode()).hexdigest(), '9e98e8dd2ce04849056259c30809981d088d34c136e1f824d4e40b75b05e50eb')
+    test.assertEqual(hashlib.sha256(text.encode()).hexdigest(), '5c011178b6e098932deabc2d540a10e28dfc97de7febf0fd1ed493c1e02b48fa')
     return projection
 
 # END TEMPORARY MAINTENANCE WORKFLOW VALIDATOR

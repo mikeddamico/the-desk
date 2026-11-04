@@ -31,6 +31,113 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         timeout-minutes: 2
         with: { fetch-depth: 0 }
+      - name: Run unchanged installation unit controls on the genuine hosted runner
+        id: installation-unit-controls
+        if: ${{ success() }}
+        working-directory: ${{ github.workspace }}
+        timeout-minutes: 4
+        run: |
+          /usr/bin/timeout --signal=TERM --kill-after=5s 180s /usr/bin/python3 -I -B - <<'PY'
+          import hashlib
+          import json
+          import os
+          import re
+          import subprocess
+          from pathlib import Path
+
+          PINS = {'tools/ci-validation/test_installation.py': '3d5b043e5107921a447f506c210959b04a6ad386880cd2fc2fc6742efb98012f', 'tools/ci-validation/ci.py': 'fb83752ba37e400391b95fde6ad15625aba9eb878ccc00bc71a20645a23e0638', 'tools/ci-validation/installation.py': '3a00fe9ff11f3363bfe2f70dae56129282815845bc0c974cec4573278b05cfd0', 'tools/ci-validation/installation_model.py': '49ed8a122c20d1b831b9d615f9ba45b8808befb7403085ec0c344ceec90c5619', 'test/support/p33-parity-supervisor.py': '5e84ed89f47b86434011b8fc204c5383628a7a2f6f53377f39b5636f59fea495'}
+          METHODS = ['test_01_complete_explicit_model', 'test_02_preseal_is_not_a_sealed_capability', 'test_03_missing_and_extra_leaves', 'test_04_noncanonical_and_duplicate_json', 'test_05_type_sensitive_counts', 'test_06_foreign_source_run_and_head', 'test_07_wrong_profile_or_role', 'test_08_valid_but_foreign_profile_swap', 'test_09_policy_swap', 'test_10_missing_and_failed_quality', 'test_11_quality_reorder_or_wrong_command', 'test_12_pending_cancel_or_incomplete_settlement', 'test_13_partial_and_corrupt_copy', 'test_14_transfer_wrong_root', 'test_15_package_path_and_nested_mapping', 'test_16_hidden_lock_graph_mismatch', 'test_17_optional_absence_population', 'test_18_wrong_physical_identity', 'test_19_private_model_refused_at_real_admission', 'test_20_legacy_root_refused', 'test_21_summary_role_and_foreign_dag', 'test_22_descriptor_primary_and_permanent_barrier', 'test_23_metadata_namespace_symlink_and_extra', 'test_24_canonical_budgets_and_no_future_authority']
+          COMMAND = ['/usr/bin/timeout', '--signal=TERM', '--kill-after=5s', '120s',
+                     '/usr/bin/python3', '-I', '-B', 'tools/ci-validation/test_installation.py', '-v']
+          base = Path(os.environ['RUNNER_TEMP']) / 'installation-unit-diagnostic'
+          base.mkdir(mode=0o700, exist_ok=False)
+          result = {'schema': 'installation-unit-diagnostic/1', 'accepted': False,
+                    'full_acceptance': False, 'command': COMMAND}
+
+          def save(name, value):
+              (base / name).write_text(json.dumps(value, sort_keys=True, indent=2) + '\n')
+
+          def require(condition, reason):
+              if not condition:
+                  raise RuntimeError(reason)
+
+          def git(*args):
+              return subprocess.check_output(['/usr/bin/git', *args], timeout=15)
+
+          def snapshot():
+              paths = git('ls-files', '-z').split(b'\0')[:-1]
+              rows = []
+              for raw in paths:
+                  path = Path(os.fsdecode(raw))
+                  require(path.is_file() and not path.is_symlink(), 'regular tracked source required')
+                  data = path.read_bytes()
+                  rows.append({'path': str(path), 'bytes': len(data),
+                               'sha256': hashlib.sha256(data).hexdigest()})
+              return {'head': git('rev-parse', 'HEAD').decode().strip(),
+                      'tree': git('rev-parse', 'HEAD^{tree}').decode().strip(),
+                      'status': git('status', '--porcelain', '--untracked-files=all').decode(),
+                      'files': rows}
+
+          try:
+              require(os.environ.get('GITHUB_ACTIONS') == 'true'
+                      and os.environ.get('RUNNER_ENVIRONMENT') == 'github-hosted'
+                      and os.environ.get('ImageOS') == 'ubuntu24'
+                      and os.environ.get('GITHUB_EVENT_NAME') == 'pull_request'
+                      and os.environ.get('GITHUB_REPOSITORY') == 'mikeddamico/the-desk'
+                      and os.environ.get('GITHUB_JOB') == 'verify-maintenance-fixture105',
+                      'genuine hosted diagnostic pull request required')
+              require(Path.cwd() == Path(os.environ['GITHUB_WORKSPACE']), 'original checkout required')
+              event = json.loads(Path(os.environ['GITHUB_EVENT_PATH']).read_text())
+              number = event['number']
+              require(type(number) is int and number > 0, 'pull request number required')
+              ref = 'refs/pull/%s/merge' % number
+              require(os.environ['GITHUB_REF'] == ref
+                      and os.environ['GITHUB_WORKFLOW_REF'] == 'mikeddamico/the-desk/.github/workflows/ci.yml@' + ref,
+                      'merge workflow context required')
+              result['context'] = {key: os.environ[key] for key in
+                                   ('GITHUB_SHA', 'GITHUB_RUN_ID', 'GITHUB_RUN_ATTEMPT',
+                                    'GITHUB_REF', 'GITHUB_WORKFLOW_REF', 'RUNNER_ENVIRONMENT', 'ImageOS')}
+              before = snapshot()
+              save('checkout-before.json', before)
+              require(before['head'] == os.environ['GITHUB_SHA'] and before['status'] == '',
+                      'clean exact merge checkout required')
+              observed = {row['path']: row['sha256'] for row in before['files']}
+              require(all(observed.get(path) == digest for path, digest in PINS.items()), 'reviewed source pins required')
+              save('source-pins.json', PINS)
+              with (base / 'stdout.txt').open('wb') as stdout, (base / 'stderr.txt').open('wb') as stderr:
+                  completed = subprocess.run(COMMAND, stdout=stdout, stderr=stderr, check=False)
+              result['exit_code'] = completed.returncode
+              (base / 'exit-code.txt').write_text(str(completed.returncode) + '\n')
+              after = snapshot()
+              save('checkout-after.json', after)
+              require(before == after, 'checkout changed during tests')
+              require(completed.returncode == 0, 'test command failed or timed out')
+              stderr = (base / 'stderr.txt').read_text(errors='strict')
+              stdout = (base / 'stdout.txt').read_text(errors='strict')
+              rows = re.findall(r'^(test_\w+) \(__main__\.EvaluationProvenance\.\1\) \.\.\. ok$', stderr, re.MULTILINE)
+              require(sorted(rows) == METHODS and len(rows) == 24, 'exact 24 successful methods required')
+              remaining = re.sub(r'^test_\w+ \(__main__\.EvaluationProvenance\.test_\w+\) \.\.\. ok\n', '', stderr, flags=re.MULTILINE)
+              require(re.fullmatch(r'\n-{70}\nRan 24 tests in [0-9]+\.[0-9]+s\n\nOK\n', remaining) is not None,
+                      'exact OK summary with zero skips or failures required')
+              require(stdout == '', 'unexpected test stdout')
+              result['accepted'] = True
+              result['methods'] = rows
+          except Exception as error:
+              result['error'] = str(error)
+              raise
+          finally:
+              save('result.json', result)
+          PY
+      - name: Retain separate hosted installation unit control evidence
+        id: upload-installation-unit-controls
+        if: ${{ always() && steps.installation-unit-controls.outcome != 'skipped' }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        timeout-minutes: 2
+        with:
+          name: ci-maintenance-installation-unit-controls-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/installation-unit-diagnostic
+          if-no-files-found: error
+          retention-days: 30
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         timeout-minutes: 2
         with:
@@ -851,7 +958,7 @@ jobs:
                       'fixture046_complete_cleanup')
 
 
-          SOURCE_PINS = {'test/integration/connected-fixture105.test.ts': 'd94a78b2340848d156cd4f634926e12378a8e868876b99c2a7ed649111f4577a', 'src/runtime/connected-fixture105.ts': '02f6b14225ca4b69c150fdce060a4b91cfc507cc4f69a38764a566e8bd31918d', 'test/support/command-postgres-hosted.ts': 'f091c648c397b667c9134ed6fa412726879440bf90046e507ee1a00ad2d5c623', 'test/support/p33-parity-supervisor.py': '3cbfef3cf48ebc4ac64d3a0938498be0ae5a89114790f7c833c176a02c2647cb', 'test/support/p33-parity-runner.ts': '44bb370ca659d5d585af88f51e3ec6678356572b723816498fc6c16165c49858'}
+          SOURCE_PINS = {'test/integration/connected-fixture105.test.ts': 'd94a78b2340848d156cd4f634926e12378a8e868876b99c2a7ed649111f4577a', 'src/runtime/connected-fixture105.ts': '02f6b14225ca4b69c150fdce060a4b91cfc507cc4f69a38764a566e8bd31918d', 'test/support/command-postgres-hosted.ts': 'f091c648c397b667c9134ed6fa412726879440bf90046e507ee1a00ad2d5c623', 'test/support/p33-parity-supervisor.py': '5e84ed89f47b86434011b8fc204c5383628a7a2f6f53377f39b5636f59fea495', 'test/support/p33-parity-runner.ts': '44bb370ca659d5d585af88f51e3ec6678356572b723816498fc6c16165c49858'}
 
 
           def main():

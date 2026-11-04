@@ -994,7 +994,7 @@ class EvaluationProvenance(unittest.TestCase):
         subject=runpy.run_path(str(ci.ROOT/'test/support/p33-parity-supervisor.py'),run_name='stage_owner_controls')
         cls=subject['StageOwner'];ns=cls.barrier.__globals__
         real_partition=ns['stage_partition'];ns['stage_partition']=lambda:'writer'
-        ns['stage_ci']=lambda:{'validate_db_url':ci.validate_db_url,'redact':ci.redact}
+        ns['stage_ci']=lambda:{'validate_db_url':ci.validate_db_url,'validate_db_target':ci.validate_db_target,'redact':ci.redact}
         routed=(ci.ROOT/'tools/ci-validation/run-stage.sh').read_text()
         self.assertEqual(routed.count('prerequisite|focused|all) exec /usr/bin/python3 -I -B test/support/p33-parity-supervisor.py stage-owner "$STAGE"'),1)
         self.assertNotIn('precheck "$STAGE"',routed)
@@ -1018,6 +1018,53 @@ class EvaluationProvenance(unittest.TestCase):
                 else:
                     with self.assertRaises(RuntimeError):real_partition()
         secret='postgresql://canary:fixed-secret@localhost:5432/the_desk_test'
+        target = {'host': 'localhost', 'port': 5432, 'database': 'the_desk_test', 'user': 'canary'}
+        target_wire = ci.fixture_bytes(target).decode()
+        prep_env = {'DESK_CI_PARTITION': 'writer', 'DESK_CI_DB_TARGET': target_wire}
+        for partition in ('writer', 'rest'):
+            for stage in ('prerequisite', 'focused', 'all'):
+                with self.subTest(target_route=(partition, stage)):
+                    incoming = {'DESK_CI_PARTITION': partition, 'TEST_DATABASE_URL': secret, 'OTHER': 'preserved'}
+                    prepared = subject['stage_prep_env'](incoming)
+                    self.assertEqual(prepared, {'DESK_CI_PARTITION': partition,
+                        'DESK_CI_DB_TARGET': target_wire, 'OTHER': 'preserved'})
+                    self.assertEqual(incoming['TEST_DATABASE_URL'], secret)
+                    self.assertNotIn('fixed-secret', json.dumps(prepared))
+                    self.assertIsNone(subject['stage_phase_env'](stage, 'PREP', partition, prepared))
+                    for phase in ('BIND', 'CHECK', 'GUARD'):
+                        clean = {'DESK_CI_PARTITION': partition}
+                        if phase == 'GUARD' and stage == 'all' and partition == 'rest':
+                            clean['TEST_DATABASE_URL'] = secret
+                        self.assertEqual(subject['stage_phase_env'](stage, phase, partition, clean),
+                                         secret if 'TEST_DATABASE_URL' in clean else None)
+                        with self.assertRaises(RuntimeError):
+                            subject['stage_phase_env'](stage, phase, partition,
+                                                      dict(clean, DESK_CI_DB_TARGET=target_wire))
+        for incoming in ({}, {'TEST_DATABASE_URL': secret.replace('localhost', 'remote.example')},
+                         {'TEST_DATABASE_URL': secret, 'DESK_CI_DB_TARGET': target_wire},
+                         {'TEST_DATABASE_URL': secret, 'DESK_CI_DB_TARGET': ''}):
+            with self.subTest(untrusted_owner_env=incoming):
+                with self.assertRaises(RuntimeError):subject['stage_prep_env'](incoming)
+        malformed_targets = [None, '', '{}', 'null', target_wire.rstrip(),
+                             target_wire.replace('5432', 'true'), target_wire.replace('5432', 'NaN'),
+                             target_wire.replace('"host":', '"host":"localhost","host":'),
+                             ci.fixture_bytes(dict(target, password='never')).decode(),
+                             ci.fixture_bytes(dict(target, host='remote.example')).decode()]
+        for raw in malformed_targets:
+            with self.subTest(prep_target=raw):
+                invalid = {'DESK_CI_PARTITION': 'writer'}
+                if raw is not None:invalid['DESK_CI_DB_TARGET'] = raw
+                with self.assertRaises(RuntimeError):
+                    subject['stage_phase_env']('prerequisite', 'PREP', 'writer', invalid)
+        with self.assertRaises(RuntimeError):
+            subject['stage_phase_env']('prerequisite', 'PREP', 'writer', dict(prep_env, TEST_DATABASE_URL=secret))
+        for checking in (False, True):
+            with self.subTest(owner_rejects_target=checking), \
+                 mock.patch.dict(os.environ, {'DESK_CI_DB_TARGET': target_wire}, clear=True), \
+                 mock.patch.dict(ns, handlers=mock.Mock(), StageOwner=mock.Mock()):
+                with self.assertRaises(RuntimeError):subject['stage_owner']('prerequisite', checking)
+                ns['handlers'].assert_not_called()
+                ns['StageOwner'].assert_not_called()
         self.assertEqual(subject['stage_guard_url']('all','rest',{'TEST_DATABASE_URL':secret}),secret)
         for stage,partition,value in (('all','writer',secret),('focused','rest',secret),('all','rest',None),
                                       ('all','rest',secret.replace('localhost','remote.example'))):
@@ -1029,6 +1076,21 @@ class EvaluationProvenance(unittest.TestCase):
             o.cancelled=False;o.failed=False;o.grant_committed=False;o.errors=[];o.pending=[];o.actions=[]
             o.parent={'pid':44,'start':88};o.parent_fd=999;o.root_identity=None;o.directory=directory
             return o
+        for phase in ('PREP', 'BIND', 'GUARD', 'CHECK'):
+            invalid = {'DESK_CI_PARTITION': 'writer'} if phase == 'PREP' else dict(prep_env)
+            args = types.SimpleNamespace(stage='prerequisite', partition='writer', phase=phase)
+            with self.subTest(phase_target_boundary=phase), \
+                 mock.patch.dict(os.environ, invalid, clear=True), \
+                 mock.patch.dict(ns, stage_parent=mock.Mock()), \
+                 mock.patch.object(subprocess, 'Popen') as launch, \
+                 mock.patch.object(os, 'execve') as execute:
+                with self.assertRaises(RuntimeError):subject['stage_child'](args)
+                ns['stage_parent'].assert_not_called()
+                execute.assert_not_called()
+                owner = modeled_owner()
+                owner.barrier = mock.Mock()
+                with self.assertRaises(RuntimeError):owner.phase(phase, invalid)
+                launch.assert_not_called()
         direct={'pid':77,'start':99,'ppid':os.getpid(),'pgid':77,'sid':77,'state':'S'}
         nonce='a'*48
         ready={'nonce':nonce,'phase':'PREP','stage':'prerequisite','partition':'writer','pid':77,'start':99,'ppid':os.getpid()}
@@ -1152,7 +1214,8 @@ class EvaluationProvenance(unittest.TestCase):
             with mock.patch.dict(ns,stage_parent=mock.Mock(return_value=998),stage_parent_live=mock.Mock(return_value=cut!='parent-loss'),
                                  stat=lambda pid:dict(direct,pid=pid),receive_line=mock.Mock(side_effect=RuntimeError('transport EOF') if cut=='eof' else None,return_value=offered)), \
                  mock.patch.object(socket,'socket',return_value=link),mock.patch.object(os,'set_inheritable'), \
-                 mock.patch.object(os,'close') as close,mock.patch.object(os,'execve') as execute:
+                 mock.patch.object(os,'close') as close,mock.patch.object(os,'execve') as execute, \
+                 mock.patch.dict(os.environ, prep_env, clear=True):
                 if cut=='success':subject['stage_child'](args);execute.assert_called_once()
                 else:
                     with self.assertRaises((RuntimeError,OSError)):subject['stage_child'](args)
@@ -1215,9 +1278,9 @@ class EvaluationProvenance(unittest.TestCase):
                         o.barrier=mock.Mock(side_effect=[None,None,None,None,None,RuntimeError('EOF-primary')])
                         o.pump=mock.Mock()  # No EOF can be asserted from empty callbacks.
                     try:
-                        if cut=='success':self.assertEqual(o.phase('PREP',{'DESK_CI_PARTITION':'writer'})['exit'],0)
+                        if cut=='success':self.assertEqual(o.phase('PREP', prep_env)['exit'],0)
                         else:
-                            with self.assertRaises((RuntimeError,ValueError,OSError)) as failure:o.phase('PREP',{'DESK_CI_PARTITION':'writer'})
+                            with self.assertRaises((RuntimeError,ValueError,OSError)) as failure:o.phase('PREP', prep_env)
                             if cut in ('spawn','wait','record','settlement-fault'):self.assertEqual(str(failure.exception),'first-primary')
                         self.assertEqual(popen.call_count,1)
                         if cut!='record':self.assertTrue((Path(directory)/'PREP/owner.json').is_file())

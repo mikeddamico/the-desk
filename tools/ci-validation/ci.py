@@ -450,6 +450,29 @@ def validate_db_url(url):
     return {'host': match.group(3), 'port': 5432, 'database': DB_NAME, 'user': match.group(1)}
 
 
+def validate_db_target(value):
+    """Validate the closed credential-free description of a disposable target."""
+    owner = installation_owner()
+    owner.exact(value, ('host', 'port', 'database', 'user'))
+    if (type(value['host']) is not str or value['host'] not in ('localhost', '127.0.0.1')
+            or type(value['port']) is not int or value['port'] != 5432
+            or type(value['database']) is not str or value['database'] != DB_NAME
+            or type(value['user']) is not str
+            or re.fullmatch(r'[^:@/\s]+', value['user']) is None):
+        raise RuntimeError('database target is not the disposable service')
+    return {key: value[key] for key in ('host', 'port', 'database', 'user')}
+
+
+def precheck_db_target():
+    """PREP receives only the target freshly derived by its authenticated owner."""
+    if 'TEST_DATABASE_URL' in os.environ:
+        raise RuntimeError('database credentials are forbidden in PREP')
+    wire = os.environ.get('DESK_CI_DB_TARGET')
+    if type(wire) is not str:
+        raise RuntimeError('PREP database target missing')
+    return validate_db_target(installation_owner().parse(wire.encode('utf-8'), 1024))
+
+
 def interpret_db_probe(row, partition, target):
     """Validate authenticated facts for an explicit hosted partition and URL target.
 
@@ -596,31 +619,33 @@ def db_probe_problems(record, binding):
         return ['database probe receipt or binding is malformed']
 
 
-def read_db_probe(path, binding, *, private=True):
-    """Read bounded, no-follow evidence and validate its current URL and context."""
+def read_db_probe(path, binding, *, private=True, expected_target=None):
+    """Validate current context and URL, or the explicit owner-derived PREP target."""
     owner = installation_owner()
     # Retention uses ordinary readable evidence modes, unlike private producer files.
     raw = fixture_read(Path(path), JSON_LIMIT, private)
     record = owner.parse(raw, JSON_LIMIT, canonical_required=False)
     problems = db_probe_problems(record, binding)
-    if not owner.same(record.get('target'), validate_db_url(os.environ.get('TEST_DATABASE_URL'))):
-        problems.append('database probe target differs from the current validated URL')
+    target = validate_db_target(expected_target) if expected_target is not None else validate_db_url(os.environ.get('TEST_DATABASE_URL'))
+    if not owner.same(record.get('target'), target):
+        problems.append('database probe target differs from the current validated target')
     if problems:
         raise RuntimeError('; '.join(problems))
     return raw
 
 
-def verify_db_probe_custody(original, retained, binding, expected_bytes=None):
+def verify_db_probe_custody(original, retained, binding, expected_bytes=None, *, expected_target=None):
     """Require independently valid, byte-identical live and retained evidence.
 
     Repeated reads detect cooperative changes during transfer; they are not an
     atomic lock against privileged writers after the final observation.
     """
-    source = read_db_probe(original, binding)
-    destination = read_db_probe(retained, binding, private=False)
+    source = read_db_probe(original, binding, expected_target=expected_target)
+    destination = read_db_probe(retained, binding, private=False, expected_target=expected_target)
     if source != destination or (expected_bytes is not None and source != expected_bytes):
         raise RuntimeError('database probe receipt bytes changed during retention')
-    if read_db_probe(original, binding) != source or read_db_probe(retained, binding, private=False) != destination:
+    if (read_db_probe(original, binding, expected_target=expected_target) != source
+            or read_db_probe(retained, binding, private=False, expected_target=expected_target) != destination):
         raise RuntimeError('database probe receipt changed during custody checks')
     return source
 
@@ -1910,11 +1935,12 @@ def cmd_precheck(stage):
         if not verdict_ok(ev / name):
             problems.append(name + ' missing or not ok')
     try:
+        target = precheck_db_target()
         binding = check_partition_binding()
-        probe_bytes = read_db_probe(ev / 'db-probe.json', binding)
+        probe_bytes = read_db_probe(ev / 'db-probe.json', binding, expected_target=target)
         if stage == 'all':
             verify_db_probe_custody(ev / 'db-probe.json',
-                                   ci_dir() / 'upload-controls/db-probe.json', binding, probe_bytes)
+                                   ci_dir() / 'upload-controls/db-probe.json', binding, probe_bytes, expected_target=target)
         if not installation_owner().same(binding, check_partition_binding()):
             raise RuntimeError('database probe precheck binding changed')
     except Exception as error:
