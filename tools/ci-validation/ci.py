@@ -429,8 +429,10 @@ const client = new pg.Client({ connectionString: process.env.TEST_DATABASE_URL, 
 try {
   await client.connect();
   const r = await client.query("select current_setting('server_version_num')::int as v, current_database() as d, current_user as u, (select rolsuper from pg_roles where rolname = current_user) as su, (select rolcreatedb from pg_roles where rolname = current_user) as cdb, (select rolcreaterole from pg_roles where rolname = current_user) as crole");
+  const settings = await client.query("select setting, source, pending_restart, context from pg_settings where name = 'autovacuum'");
+  if (r.rows.length !== 1 || settings.rows.length !== 1) throw new Error('probe row count');
   const row = r.rows[0];
-  console.log(JSON.stringify({ ok: true, v: row.v, d: row.d, u: row.u, su: row.su, cdb: row.cdb, crole: row.crole }));
+  console.log(JSON.stringify({ ok: true, v: row.v, d: row.d, u: row.u, su: row.su, cdb: row.cdb, crole: row.crole, autovacuum: settings.rows }));
 } catch (error) {
   console.log(JSON.stringify({ ok: false, code: typeof error?.code === 'string' ? error.code : 'ERROR' }));
   process.exitCode = 1;
@@ -448,24 +450,179 @@ def validate_db_url(url):
     return {'host': match.group(3), 'port': 5432, 'database': DB_NAME, 'user': match.group(1)}
 
 
-def interpret_db_probe(row):
-    """Pure check of the probe's JSON row. Returns (errors, record) with no credentials."""
-    errors, record = [], {}
-    if not isinstance(row, dict) or row.get('ok') is not True:
-        code = row.get('code') if isinstance(row, dict) and isinstance(row.get('code'), str) else 'unknown'
-        return ['database probe failed (error code %s)' % re.sub(r'[^A-Za-z0-9_]', '', code)[:32]], record
-    version = row.get('v')
-    record = {'server_version_num': version, 'major': version // 10000 if isinstance(version, int) else None,
-              'database': row.get('d'), 'role': row.get('u'), 'superuser': row.get('su'),
-              'createdb': row.get('cdb'), 'createrole': row.get('crole')}
-    if record['major'] != 17:
+def interpret_db_probe(row, partition, target):
+    """Validate authenticated facts for an explicit hosted partition and URL target.
+
+    Writer records the setting but does not acquire the rest-only maintenance gate.
+    This observation does not replace target isolation or prove future settings.
+    """
+    errors = []
+    keys = {'ok', 'v', 'd', 'u', 'su', 'cdb', 'crole', 'autovacuum'}
+    if type(row) is not dict or set(row) != keys or row.get('ok') is not True:
+        return ['database probe failed or returned an invalid row'], {}
+    if partition not in ('writer', 'rest') or type(partition) is not str:
+        errors.append('database probe requires a hosted partition')
+    version = row['v']
+    record = {
+        'server_version_num': version,
+        'major': version // 10000 if type(version) is int else None,
+        'database': row['d'], 'role': row['u'], 'superuser': row['su'],
+        'createdb': row['cdb'], 'createrole': row['crole'],
+        'autovacuum': row['autovacuum'],
+    }
+    if type(version) is not int or record['major'] != 17:
         errors.append('database major version is not 17')
-    if record['database'] != DB_NAME:
+    if type(row['d']) is not str or row['d'] != DB_NAME:
         errors.append('connected database is not %s' % DB_NAME)
-    if record['superuser'] is not True:
+    if type(target) is not dict or type(row['u']) is not str or row['u'] != target.get('user'):
+        errors.append('connected role does not match the validated URL user')
+    if row['su'] is not True:
         errors.append('connected role is not a superuser (cluster-wide role bootstrap is required)')
+    if type(row['cdb']) is not bool or type(row['crole']) is not bool:
+        errors.append('database role observations are not Boolean')
+    settings = row['autovacuum']
+    setting_keys = {'setting', 'source', 'pending_restart', 'context'}
+    if (type(settings) is not list or len(settings) != 1
+            or type(settings[0]) is not dict or set(settings[0]) != setting_keys):
+        errors.append('autovacuum observation must contain exactly one settings row')
+    else:
+        setting = settings[0]
+        if (any(type(setting[key]) is not str for key in ('setting', 'source', 'context'))
+                or type(setting['pending_restart']) is not bool):
+            errors.append('autovacuum observation has invalid types')
+        elif partition == 'rest' and setting != {
+                'setting': 'off', 'source': 'command line',
+                'pending_restart': False, 'context': 'sighup'}:
+            errors.append('rest autovacuum is not off from the server command line')
     return errors, record
 
+
+def db_probe_binding(binding):
+    """Copy the complete verified /2 context, excluding only selection and counts."""
+    owner = installation_owner()
+    owner.exact(binding, ('schema', 'partition', 'identity', 'selection', 'counts', 'execution'))
+    if binding['schema'] != 'ci-partition/2' or binding['partition'] not in ('writer', 'rest'):
+        raise RuntimeError('database probe requires a hosted /2 binding')
+    selection = binding['selection']
+    if (not owner.same(binding['counts'], list(PARTITION_COUNTS[binding['partition']]))
+            or type(selection) is not list
+            or any(type(path) is not str for path in selection)
+            or len(selection) != PARTITION_COUNTS[binding['partition']][0]
+            or selection != sorted(set(selection))):
+        raise RuntimeError('database probe partition selection/counts malformed')
+    owner.exact(binding['identity'], ('checkout', 'head', 'tree', 'repository', 'run_id',
+        'run_attempt', 'source_sha256', 'profile_policy_sha256', 'quality_policy_sha256'))
+    identity = binding['identity']
+    for key in ('checkout', 'head', 'tree'):
+        if type(identity[key]) is not str or HEX40.fullmatch(identity[key]) is None:
+            raise RuntimeError('database probe commit identity malformed')
+    for key in ('source_sha256', 'profile_policy_sha256', 'quality_policy_sha256'):
+        if type(identity[key]) is not str or SHA256.fullmatch(identity[key]) is None:
+            raise RuntimeError('database probe policy/source identity malformed')
+    if type(identity['repository']) is not str or REPO_NAME.fullmatch(identity['repository']) is None:
+        raise RuntimeError('database probe repository malformed')
+    for key in ('run_id', 'run_attempt'):
+        if type(identity[key]) is not str or re.fullmatch(r'[1-9][0-9]{0,19}', identity[key]) is None:
+            raise RuntimeError('database probe run identity malformed')
+    execution = owner.exact(binding['execution'], ('provenance', 'summary'))
+    summary = owner.exact(execution['summary'], ('schema', 'partition', 'job', 'identity',
+        'origin', 'producer', 'build_profile', 'evaluation_profile', 'manifest', 'lock',
+        'build_installation', 'evaluation_installation', 'quality', 'transfer', 'dist',
+        'quality_gates', 'structural_methods_sha256', 'settled'))
+    if (summary['schema'] != 'ci-execution-summary/1'
+            or summary['partition'] != binding['partition']
+            or summary['job'] != 'verify-' + binding['partition']
+            or not owner.same(summary['identity'], identity)
+            or summary['origin'] != 'transferred' or summary['settled'] is not True
+            or summary['build_profile'] != 'desk-full-build/1'
+            or summary['evaluation_profile'] != 'desk-evaluation-runtime/1'
+            or type(summary['producer']) is not str
+            or type(summary['structural_methods_sha256']) is not str
+            or SHA256.fullmatch(summary['structural_methods_sha256']) is None):
+        raise RuntimeError('database probe execution summary malformed')
+    references = [execution['provenance']] + [summary[key] for key in
+        ('manifest', 'lock', 'build_installation', 'evaluation_installation', 'quality', 'transfer', 'dist')]
+    gates = summary['quality_gates']
+    if type(gates) is not list or len(gates) != len(owner.GATES):
+        raise RuntimeError('database probe quality gate population malformed')
+    for gate, name in zip(gates, owner.GATES):
+        owner.exact(gate, ('name', 'exit', 'result'))
+        if gate['name'] != name or type(gate['exit']) is not int or gate['exit'] != 0:
+            raise RuntimeError('database probe quality gate malformed')
+        references.append(gate['result'])
+    for reference in references:
+        owner.exact(reference, ('bytes', 'sha256'))
+        if (type(reference['bytes']) is not int or not 0 < reference['bytes'] <= 4194304
+                or type(reference['sha256']) is not str or SHA256.fullmatch(reference['sha256']) is None):
+            raise RuntimeError('database probe execution reference malformed')
+    # A strict round trip detaches the capture from mutable caller-owned dictionaries.
+    return owner.parse(fixture_bytes({key: binding[key] for key in
+        ('partition', 'identity', 'execution')}))
+
+
+def db_probe_problems(record, binding):
+    """Pure receipt check against an already verified current /2 binding."""
+    owner = installation_owner()
+    try:
+        context = db_probe_binding(binding)
+        owner.exact(record, ('schema', 'partition', 'identity', 'execution', 'target',
+                             'server', 'probe_exit', 'errors', 'ok'))
+        if record['schema'] != 'ci-db-probe/1':
+            return ['database probe receipt schema mismatch']
+        if any(not owner.same(record[key], context[key]) for key in context):
+            return ['database probe receipt context mismatch']
+        if (record['ok'] is not True or not owner.same(record['errors'], [])
+                or type(record['probe_exit']) is not int or record['probe_exit'] != 0):
+            return ['database probe receipt is not successful']
+        target = record['target']
+        owner.exact(target, ('host', 'port', 'database', 'user'))
+        if (type(target['user']) is not str
+                or re.fullmatch(r'[^:@/\s]+', target['user']) is None
+                or type(target['host']) is not str or target['host'] not in ('localhost', '127.0.0.1')
+                or type(target['port']) is not int or target['port'] != 5432
+                or target['database'] != DB_NAME):
+            return ['database probe target is not the disposable service']
+        server = record['server']
+        owner.exact(server, ('server_version_num', 'major', 'database', 'role', 'superuser',
+                             'createdb', 'createrole', 'autovacuum'))
+        row = {'ok': True, 'v': server['server_version_num'], 'd': server['database'],
+               'u': server['role'], 'su': server['superuser'], 'cdb': server['createdb'],
+               'crole': server['createrole'], 'autovacuum': server['autovacuum']}
+        errors, expected = interpret_db_probe(row, context['partition'], target)
+        if not owner.same(server, expected):
+            errors.append('database probe server facts mismatch')
+        return errors
+    except (RuntimeError, ValueError, TypeError, KeyError):
+        return ['database probe receipt or binding is malformed']
+
+
+def read_db_probe(path, binding, *, private=True):
+    """Read bounded, no-follow evidence and validate its current URL and context."""
+    owner = installation_owner()
+    # Retention uses ordinary readable evidence modes, unlike private producer files.
+    raw = fixture_read(Path(path), JSON_LIMIT, private)
+    record = owner.parse(raw, JSON_LIMIT, canonical_required=False)
+    problems = db_probe_problems(record, binding)
+    if not owner.same(record.get('target'), validate_db_url(os.environ.get('TEST_DATABASE_URL'))):
+        problems.append('database probe target differs from the current validated URL')
+    if problems:
+        raise RuntimeError('; '.join(problems))
+    return raw
+
+
+def verify_db_probe_custody(original, retained, binding, expected_bytes=None):
+    """Require independently valid, byte-identical live and retained evidence.
+
+    Repeated reads detect cooperative changes during transfer; they are not an
+    atomic lock against privileged writers after the final observation.
+    """
+    source = read_db_probe(original, binding)
+    destination = read_db_probe(retained, binding, private=False)
+    if source != destination or (expected_bytes is not None and source != expected_bytes):
+        raise RuntimeError('database probe receipt bytes changed during retention')
+    if read_db_probe(original, binding) != source or read_db_probe(retained, binding, private=False) != destination:
+        raise RuntimeError('database probe receipt changed during custody checks')
+    return source
 
 
 # ---------------------------------------------------------------- stage evidence validation
@@ -1649,8 +1806,15 @@ def cmd_bind_build():
 
 def cmd_dbprobe():
     ev = ci_dir() / 'evidence'
-    record = {'errors': [], 'probe_exit': None}
+    record = {'schema': 'ci-db-probe/1', 'partition': None, 'identity': None,
+              'execution': None, 'target': None, 'server': None,
+              'errors': [], 'probe_exit': None, 'ok': False}
     try:
+        binding = check_partition_binding()
+        if partition_label(required=True) != binding['partition']:
+            raise RuntimeError('database probe partition mismatch')
+        binding = installation_owner().parse(fixture_bytes(binding), JSON_LIMIT)
+        record.update(db_probe_binding(binding))
         url = os.environ.get('TEST_DATABASE_URL')
         record['target'] = validate_db_url(url)
         node = shutil.which('node')
@@ -1661,22 +1825,28 @@ def cmd_dbprobe():
         result = subprocess.run([node, '--input-type=module', '-e', NODE_PROBE], cwd=ROOT, env=child_env,
                                 stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
                                 timeout=30, check=False)
+        current = check_partition_binding()
+        if not installation_owner().same(binding, current):
+            raise RuntimeError('database probe binding changed during capture')
+        if not installation_owner().same(record['target'], validate_db_url(os.environ.get('TEST_DATABASE_URL'))):
+            raise RuntimeError('database probe target changed during capture')
         code = result.returncode
         record['probe_exit'] = code if type(code) is int else None
         if type(code) is not int or code != 0:
             record['errors'].append('database probe process exit status is %r, want exactly 0' % (code,))
         else:
-            last = result.stdout.decode('utf-8', errors='replace').strip().splitlines()[-1:]  # stderr is discarded unread
-            row = json.loads(last[0]) if last else {}
-            errors, info = interpret_db_probe(row)
+            row = installation_owner().parse(result.stdout.strip(), JSON_LIMIT, canonical_required=False)
+            errors, info = interpret_db_probe(row, binding['partition'], record['target'])
             record['server'] = info
             record['errors'] += errors
+            record['ok'] = not record['errors']
+            record['errors'] += db_probe_problems(record, current)
     except ValueError as error:
         record['errors'].append(str(error) if str(error).startswith('TEST_DATABASE_URL') else 'database probe output unreadable')
     except Exception as error:
         record['errors'].append('database probe failed: ' + type(error).__name__)
     record['ok'] = not record['errors']
-    write_json_x(ev / 'db-probe.json', record)
+    fixture_write_raw(ev / 'db-probe.json', fixture_bytes(record), JSON_LIMIT)
     print(json.dumps({'dbprobe': record['ok'], 'errors': record['errors'][:3]}))
     return 0 if record['ok'] else 1
 
@@ -1736,9 +1906,19 @@ def controls_problems(upload):
 def cmd_precheck(stage):
     ev = ci_dir() / 'evidence'
     problems = []
-    for name in ('bind-pre.json', 'bind-build.json', 'db-probe.json'):
+    for name in ('bind-pre.json', 'bind-build.json'):
         if not verdict_ok(ev / name):
             problems.append(name + ' missing or not ok')
+    try:
+        binding = check_partition_binding()
+        probe_bytes = read_db_probe(ev / 'db-probe.json', binding)
+        if stage == 'all':
+            verify_db_probe_custody(ev / 'db-probe.json',
+                                   ci_dir() / 'upload-controls/db-probe.json', binding, probe_bytes)
+        if not installation_owner().same(binding, check_partition_binding()):
+            raise RuntimeError('database probe precheck binding changed')
+    except Exception as error:
+        problems.append('database probe precheck refused: ' + type(error).__name__)
     index = STAGES.index(stage)
     if index and not stage_verdict_ok(ev / ('verdict-%s.json' % STAGES[index - 1]), STAGES[index - 1]):
         problems.append('predecessor verdict missing or not ok')
@@ -1975,6 +2155,13 @@ def cmd_collect(scope):
     ev = base / 'evidence'
     keep = Retention(upload, extra=[os.environ.get('TEST_DATABASE_URL') or ''])
     problems = keep.problems
+    probe_binding = None
+    probe_bytes = None
+    try:
+        probe_binding = check_partition_binding()
+        probe_bytes = read_db_probe(ev / 'db-probe.json', probe_binding)
+    except Exception as error:
+        problems['errors'].append('database probe before collection: ' + type(error).__name__)
     if partition_label() != 'all':
         try:
             check_partition_binding()
@@ -2043,6 +2230,14 @@ def cmd_collect(scope):
             keep.copy(ev/'identity-witness'/name,Path('identity-witness')/name,16384 if name in ('stdout','stderr') else 262144,required=True)
         installation_owner().retain_bundle(sys.modules[__name__], keep, scope)
     fixture_collect(base, keep, scope, successful)
+    try:
+        current = check_partition_binding()
+        if probe_bytes is None or not installation_owner().same(probe_binding, current):
+            raise RuntimeError('database probe collection binding changed or original missing')
+        verify_db_probe_custody(ev / 'db-probe.json', upload / 'db-probe.json',
+                               current, probe_bytes)
+    except Exception as error:
+        problems['errors'].append('database probe after collection: ' + type(error).__name__)
     warnings = []
     for stage, verdict in successful.items():
         warnings += ['%s: %s' % (stage, w) for w in (verdict.get('facts') or {}).get('warnings', [])]
@@ -2356,6 +2551,17 @@ def cmd_final():
         except Exception:
             finals[scope] = None
     reasons = final_verdict(finals, {name: os.environ.get(name) for name in FINAL_OUTCOMES})
+    try:
+        binding = check_partition_binding()
+        original = ci_dir() / 'evidence/db-probe.json'
+        probe_bytes = read_db_probe(original, binding)
+        for scope in SCOPES:
+            verify_db_probe_custody(original, ci_dir() / ('upload-' + scope) / 'db-probe.json',
+                                   binding, probe_bytes)
+        if not installation_owner().same(binding, check_partition_binding()):
+            raise RuntimeError('database probe final binding changed')
+    except Exception as error:
+        reasons.append('database probe final refused: ' + type(error).__name__)
     if partition_label() == 'rest' and os.environ.get('FIXTURE046_CLEANUP_OUTCOME') != 'success':
         reasons.append('fixture046 runtime cleanup did not succeed')
     if not reasons and partition_label() != 'all':

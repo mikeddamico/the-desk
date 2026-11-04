@@ -9,7 +9,904 @@ on:
 permissions:
   contents: read
 jobs:
+  verify-maintenance-fixture105:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 190
+    services:
+      postgres:
+        image: postgres:17
+        command: postgres -c autovacuum=off
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: the_desk_test
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres -d the_desk_test"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      DESK_CI_PARTITION: rest
+      TEST_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/the_desk_test
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        timeout-minutes: 2
+        with: { fetch-depth: 0 }
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        timeout-minutes: 2
+        with:
+          node-version: 24.21.0
+          cache: npm
+      - run: npm install --global npm@11.19.0 --ignore-scripts
+        working-directory: ${{ github.workspace }}
+        timeout-minutes: 3
+      - name: Prepare the exclusive complete BUILD clone
+        id: build-layout
+        if: ${{ success() }}
+        working-directory: ${{ github.workspace }}
+        timeout-minutes: 6
+        run: |
+          /usr/bin/timeout --signal=TERM --kill-after=5s 30s /usr/bin/python3 -I -B - <<'PY'
+          import importlib.util
+          import os
+          import sys
+          from pathlib import Path
+          
+          if (os.environ.get('GITHUB_JOB') != 'verify-maintenance-fixture105'
+                  or os.environ.get('GITHUB_EVENT_NAME') != 'pull_request'
+                  or os.environ.get('GITHUB_REPOSITORY') != 'mikeddamico/the-desk'
+                  or os.environ.get('GITHUB_ACTIONS') != 'true'
+                  or os.environ.get('ImageOS') != 'ubuntu24'
+                  or os.environ.get('DESK_CI_PARTITION') != 'rest'):
+              raise RuntimeError('fixed hosted diagnostic pull request required')
+          if Path.cwd() != Path(os.environ['GITHUB_WORKSPACE']):
+              raise RuntimeError('original checkout required')
+          spec = importlib.util.spec_from_file_location('maintenance_context', 'tools/ci-validation/ci.py')
+          ci = importlib.util.module_from_spec(spec)
+          sys.modules[spec.name] = ci
+          spec.loader.exec_module(ci)
+          # This only reads the genuine checkout/event. It cannot create an installation
+          # binding or stand in for the later, unchanged BUILD/EVAL producer admission.
+          identity, members = ci.proof_identity_now(False)
+          if type(identity['pr_number']) is not int or identity['pr_number'] <= 0:
+              raise RuntimeError('genuine pull request number required')
+          merge_ref = 'refs/pull/%s/merge' % identity['pr_number']
+          workflow_ref = 'mikeddamico/the-desk/.github/workflows/ci.yml@' + merge_ref
+          if os.environ.get('GITHUB_REF') != merge_ref or os.environ.get('GITHUB_WORKFLOW_REF') != workflow_ref:
+              raise RuntimeError('diagnostic merge and workflow context mismatch')
+          if len(members) != 520:
+              raise RuntimeError('diagnostic source population mismatch')
+          print('Diagnostic checkout and pull request context verified; producer admission is still required.')
+          PY
+          /usr/bin/timeout --signal=TERM --kill-after=20s 300s /usr/bin/python3 -I -B test/support/fixture105-hosted-layout.py build
+      - name: Retain BUILD layout and failed preparation evidence
+        id: upload-build-layout
+        if: ${{ always() && steps.build-layout.outputs.evidence_claimed == 'true' }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        timeout-minutes: 2
+        with:
+          name: ci-maintenance-fixture105-build-layout-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/build/fixture105-layout
+          if-no-files-found: error
+          retention-days: 30
+      - name: Ordinary full BUILD install and five complete quality gates
+        id: build-quality
+        if: ${{ success() && steps.build-layout.outcome == 'success' }}
+        working-directory: /tmp/d
+        timeout-minutes: 41
+        env:
+          DESK_CI_ROLE_TEMP: ${{ runner.temp }}/build
+        run: |
+          /bin/bash tools/ci-validation/run-stage.sh producer-build
+      - name: Prepare the exclusive complete EVAL clone
+        id: eval-layout
+        if: ${{ success() && steps.build-quality.outcome == 'success' }}
+        working-directory: ${{ github.workspace }}
+        timeout-minutes: 6
+        run: |
+          /usr/bin/timeout --signal=TERM --kill-after=20s 300s /usr/bin/python3 -I -B test/support/fixture105-hosted-layout.py evaluation
+      - name: Retain EVAL layout and failed preparation evidence
+        id: upload-eval-layout
+        if: ${{ always() && steps.eval-layout.outputs.evidence_claimed == 'true' }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        timeout-minutes: 2
+        with:
+          name: ci-maintenance-fixture105-evaluation-layout-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/evaluation/fixture105-layout
+          if-no-files-found: error
+          retention-days: 30
+      - name: Ordinary EVAL install and closed preseal initialization
+        id: eval-init
+        if: ${{ success() && steps.eval-layout.outcome == 'success' }}
+        working-directory: /tmp/e
+        timeout-minutes: 16
+        env:
+          DESK_CI_ROLE_TEMP: ${{ runner.temp }}/evaluation
+        run: |
+          /bin/bash tools/ci-validation/run-stage.sh evaluation-init
+      - name: Transfer complete verified dist and seal the evaluation provenance
+        id: init
+        if: ${{ success() && steps.eval-init.outcome == 'success' }}
+        working-directory: /tmp/e
+        timeout-minutes: 6
+        env:
+          DESK_CI_ROLE_TEMP: ${{ runner.temp }}/evaluation
+        run: |
+          /bin/bash tools/ci-validation/run-stage.sh bind-build
+      - name: Reconstruct the fixed synthetic fixture FFmpeg runtime
+        id: fixture046-runtime
+        if: ${{ success() && steps.init.outcome == 'success' }}
+        working-directory: /tmp/e
+        timeout-minutes: 16
+        env:
+          DESK_CI_ROLE_TEMP: ${{ runner.temp }}/evaluation
+        run: /usr/bin/timeout --signal=TERM --kill-after=20s 900s /usr/bin/python3 -I -B test/support/fixture046-ffmpeg-supply.py prepare
+      - name: Verify all six frozen semantic identities in the genuine EVAL installation
+        id: semantic-identities
+        if: ${{ success() && steps.init.outcome == 'success' }}
+        working-directory: /tmp/e
+        timeout-minutes: 2
+        env:
+          DESK_CI_ROLE_TEMP: ${{ runner.temp }}/evaluation
+        run: /usr/bin/python3 -I -B tools/ci-validation/ci.py identity-witness
+      - name: Probe the disposable database read-only
+        if: ${{ success() && steps.init.outcome == 'success' && steps.semantic-identities.outcome == 'success' }}
+        working-directory: /tmp/e
+        timeout-minutes: 1
+        env:
+          DESK_CI_ROLE_TEMP: ${{ runner.temp }}/evaluation
+        run: |
+          /usr/bin/python3 -I -B tools/ci-validation/ci.py dbprobe
+      - name: Guard P33 prerequisite
+        if: ${{ success() && steps.init.outcome == 'success' && steps.semantic-identities.outcome == 'success' }}
+        working-directory: /tmp/e
+        timeout-minutes: 3
+        env:
+          DESK_CI_ROLE_TEMP: ${{ runner.temp }}/evaluation
+        run: |
+          exec /bin/bash tools/ci-validation/run-stage.sh prerequisite
+      - name: Validate P33 prerequisite
+        if: ${{ success() && steps.init.outcome == 'success' && steps.semantic-identities.outcome == 'success' }}
+        working-directory: /tmp/e
+        timeout-minutes: 2
+        env:
+          DESK_CI_ROLE_TEMP: ${{ runner.temp }}/evaluation
+        run: |
+          exec /usr/bin/python3 -I -B test/support/p33-parity-supervisor.py stage-check prerequisite
+      - name: Guard P33 focused
+        if: ${{ success() && steps.init.outcome == 'success' && steps.semantic-identities.outcome == 'success' }}
+        working-directory: /tmp/e
+        timeout-minutes: 5
+        env:
+          DESK_CI_ROLE_TEMP: ${{ runner.temp }}/evaluation
+        run: |
+          exec /bin/bash tools/ci-validation/run-stage.sh focused
+      - name: Validate P33 focused
+        if: ${{ success() && steps.init.outcome == 'success' && steps.semantic-identities.outcome == 'success' }}
+        working-directory: /tmp/e
+        timeout-minutes: 2
+        env:
+          DESK_CI_ROLE_TEMP: ${{ runner.temp }}/evaluation
+        run: |
+          exec /usr/bin/python3 -I -B test/support/p33-parity-supervisor.py stage-check focused
+      - name: Collect controls evidence
+        id: collect-controls
+        if: ${{ always() && steps.init.outcome == 'success' }}
+        working-directory: /tmp/e
+        timeout-minutes: 2
+        env:
+          DESK_CI_ROLE_TEMP: ${{ runner.temp }}/evaluation
+        run: |
+          /usr/bin/python3 -I -B tools/ci-validation/ci.py collect --scope controls
+      - name: Retain controls evidence
+        id: upload-controls
+        if: ${{ always() && steps.collect-controls.outcome == 'success' }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        timeout-minutes: 2
+        with:
+          name: ci-maintenance-fixture105-controls-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/evaluation/ci/upload-controls
+          if-no-files-found: error
+          retention-days: 30
+      - name: Prove all 34 native fixture105 cases and held-client refusal
+        id: native
+        if: ${{ success() && steps.init.outcome == 'success' && steps.semantic-identities.outcome == 'success' && steps.collect-controls.outcome == 'success' && steps.upload-controls.outcome == 'success' }}
+        working-directory: /tmp/e
+        timeout-minutes: 37
+        env:
+          DESK_CI_ROLE_TEMP: ${{ runner.temp }}/evaluation
+        run: |
+          /usr/bin/python3 -I -B - <<'PY'
+          import importlib.util
+          import os
+          import sys
+          from pathlib import Path
+          
+          if os.environ.get('GITHUB_JOB') != 'verify-maintenance-fixture105':
+              raise RuntimeError('fixed diagnostic job required')
+          if os.environ.get('GITHUB_EVENT_NAME') != 'pull_request':
+              raise RuntimeError('genuine pull request required')
+          spec = importlib.util.spec_from_file_location('maintenance_preflight', 'tools/ci-validation/ci.py')
+          ci = importlib.util.module_from_spec(spec)
+          sys.modules[spec.name] = ci
+          spec.loader.exec_module(ci)
+          owner = ci.installation_owner()
+          before_outer = owner.outer(ci, 'E0')
+          binding = ci.check_partition_binding()
+          if binding['partition'] != 'rest' or not owner.same(before_outer, binding):
+              raise RuntimeError('rest diagnostic binding required')
+          base = ci.ci_dir()
+          problems = ci.controls_problems(base / 'upload-controls')
+          if problems:
+              raise RuntimeError('complete controls required')
+          ci.verify_db_probe_custody(base / 'evidence/db-probe.json', base / 'upload-controls/db-probe.json', binding)
+          if not owner.same(binding, ci.check_partition_binding()) or not owner.same(before_outer, owner.outer(ci, 'E1')):
+              raise RuntimeError('diagnostic preflight provenance changed')
+          PY
+          /usr/bin/env HOME="$DESK_CI_ROLE_TEMP/ci/home" TMPDIR="$DESK_CI_ROLE_TEMP/ci/tmp" \
+            /usr/bin/timeout --signal=TERM --kill-after=20s 2160s \
+            node --import tsx test/support/command-postgres-hosted.ts fixture105-native
+      - name: Retain native fixture105 proof including failed cleanup observations
+        id: upload-native
+        if: ${{ always() && steps.init.outcome == 'success' && steps.native.outcome != 'skipped' }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        timeout-minutes: 3
+        with:
+          name: ci-maintenance-fixture105-native-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/evaluation/ci/evidence/fixture105-native/retained
+          if-no-files-found: error
+          retention-days: 30
+      - name: Settle owned fixture runtime before full retention
+        id: fixture046-cleanup
+        if: ${{ always() && steps.init.outcome == 'success' && (steps.fixture046-runtime.outcome == 'success' || steps.fixture046-runtime.outcome == 'failure') }}
+        working-directory: /tmp/e
+        timeout-minutes: 2
+        env:
+          DESK_CI_ROLE_TEMP: ${{ runner.temp }}/evaluation
+        run: /usr/bin/python3 -I -B test/support/fixture046-ffmpeg-supply.py cleanup
+      - name: Collect full evidence
+        id: collect-full
+        if: ${{ always() && steps.init.outcome == 'success' }}
+        working-directory: /tmp/e
+        timeout-minutes: 3
+        env:
+          DESK_CI_ROLE_TEMP: ${{ runner.temp }}/evaluation
+          FIXTURE046_CLEANUP_OUTCOME: ${{ steps.fixture046-cleanup.outcome }}
+        run: |
+          /usr/bin/python3 -I -B tools/ci-validation/ci.py collect --scope full
+      - name: Retain full evidence
+        id: upload-full
+        if: ${{ always() && steps.collect-full.outcome == 'success' }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        timeout-minutes: 3
+        with:
+          name: ci-maintenance-fixture105-full-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/evaluation/ci/upload-full
+          if-no-files-found: error
+          retention-days: 30
+      - name: Collect known producer failure or partial evidence
+        id: collect-producer
+        if: ${{ always() && steps.build-layout.outcome != 'skipped' }}
+        working-directory: ${{ github.workspace }}
+        timeout-minutes: 3
+        run: |
+          /usr/bin/python3 -I -B tools/ci-validation/ci.py retain-producer-partial
+      - name: Retain both producer roles including partial failures
+        id: upload-producer
+        if: ${{ always() && steps.collect-producer.outcome == 'success' }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        timeout-minutes: 3
+        with:
+          name: ci-maintenance-fixture105-producers-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/producer-failure
+          if-no-files-found: error
+          retention-days: 30
+      - name: Independently verify the complete native maintenance diagnostic
+        id: maintenance-verdict
+        if: ${{ always() && steps.init.outcome == 'success' }}
+        working-directory: /tmp/e
+        timeout-minutes: 3
+        env:
+          DESK_CI_ROLE_TEMP: ${{ runner.temp }}/evaluation
+          BUILD_LAYOUT_UPLOAD_OUTCOME: ${{ steps.upload-build-layout.outcome }}
+          EVAL_LAYOUT_UPLOAD_OUTCOME: ${{ steps.upload-eval-layout.outcome }}
+          CONTROLS_UPLOAD_OUTCOME: ${{ steps.upload-controls.outcome }}
+          NATIVE_UPLOAD_OUTCOME: ${{ steps.upload-native.outcome }}
+          UPLOAD_OUTCOME: ${{ steps.upload-full.outcome }}
+          PRODUCER_UPLOAD_OUTCOME: ${{ steps.upload-producer.outcome }}
+          FIXTURE046_CLEANUP_OUTCOME: ${{ steps.fixture046-cleanup.outcome }}
+          NATIVE_OUTCOME: ${{ steps.native.outcome }}
+        run: |
+          /usr/bin/python3 -I -B - <<'PY'
+          """Temporary read-only native verifier; embed verbatim in the diagnostic workflow.
+          
+          This file is an offline review artifact, never an additional tracked source file.
+          It grants no stage, partition or full-suite acceptance and performs no DB work.
+          """
+          import hashlib
+          import importlib.util
+          import json
+          import os
+          import re
+          import sys
+          import stat
+          from pathlib import Path
+          from urllib.parse import urlparse
+          
+          
+          UPLOAD_OUTCOMES = (
+              'BUILD_LAYOUT_UPLOAD_OUTCOME', 'EVAL_LAYOUT_UPLOAD_OUTCOME',
+              'CONTROLS_UPLOAD_OUTCOME', 'NATIVE_UPLOAD_OUTCOME',
+              'UPLOAD_OUTCOME', 'PRODUCER_UPLOAD_OUTCOME',
+          )
+          HELD_CASE = 'identifies a held client while preserving target isolation refusal'
+          NATIVE_FILE = 'test/integration/connected-fixture105.test.ts'
+          EXPECTED_SUMMARY = {'files': {'passed': 1, 'total': 1},
+                              'tests': {'passed': 34, 'total': 34}}
+          EXPECTED_FILES = {NATIVE_FILE: [{'tests': 34, 'failed': 0, 'skipped': 0, 'todo': 0}]}
+          
+          
+          def require(condition, reason):
+              if not condition:
+                  raise RuntimeError(reason)
+          
+          
+          def equal(left, right):
+              # JSON equality must not treat True as integer 1.
+              return json.dumps(left, sort_keys=True, allow_nan=False) == json.dumps(
+                  right, sort_keys=True, allow_nan=False)
+          
+          
+          def digest(data):
+              return hashlib.sha256(data).hexdigest()
+          
+          
+          def pin(data):
+              return {'bytes': len(data), 'sha256': digest(data)}
+          
+          
+          def strict_json(data):
+              def object_pairs(pairs):
+                  value = {}
+                  for key, item in pairs:
+                      require(key not in value, 'duplicate_json_key')
+                      value[key] = item
+                  return value
+          
+              def invalid_constant(value):
+                  raise RuntimeError('nonfinite_json')
+          
+              return json.loads(data.decode('utf8', errors='strict'),
+                                object_pairs_hook=object_pairs,
+                                parse_constant=invalid_constant)
+          
+          
+          def fixed_records(text, prefix, limit):
+              results = []
+              for line in text.splitlines():
+                  # Vitest may prepend an stderr test heading, but witness lines themselves
+                  # are emitted with a fixed prefix, never recovered from arbitrary substrings.
+                  if line.startswith(prefix + ' '):
+                      require(len(line.encode('utf8')) + 1 <= limit, 'witness_bound')
+                      results.append(strict_json(line[len(prefix) + 1:].encode('utf8')))
+              return results
+          
+          
+          def held_witness(text):
+              witness = fixed_records(text, 'FIXTURE_HELD_CLIENT_CONTROL', 1024)
+              expected = {'schema': 'fixture-held-client-control/1', 'case': HELD_CASE,
+                          'rejectionIdentity': True, 'wrapperRestored': True,
+                          'heldPidContinuity': True, 'hiddenOriginProvisional': True,
+                          'cleanupComplete': True}
+              require(equal(witness, [expected]), 'held_client_witness')
+              rows = [row for row in fixed_records(text, 'FIXTURE_TARGET_DIAGNOSTIC', 1024)
+                      if row.get('scope') == 'held_client_control']
+              require(len(rows) == 1, 'held_client_target_population')
+              row = rows[0]
+              require(set(row) == {'schema', 'scope', 'vector', 'supplement'}
+                      and row['schema'] == 'fixture-target-diagnostic/2', 'held_target_shape')
+              vector = row['vector']
+              expected_vector = {'ordinal': 1, 'outcome': 'rows', 'oneRow': True,
+                                 'databaseMatches': True, 'runtimeRole': True,
+                                 'notElevated': True, 'noOtherSessions': False,
+                                 'oidString': True, 'loginString': True, 'databaseString': True,
+                                 'addressValid': True, 'portValid': True}
+              require(type(vector) is dict and set(vector) == set(expected_vector) | {'otherSessions'},
+                      'held_target_vector_shape')
+              require(equal({key: vector[key] for key in expected_vector}, expected_vector)
+                      and type(vector['otherSessions']) is int and vector['otherSessions'] >= 1,
+                      'held_target_assertions')
+              supplement = row['supplement']
+              require(supplement.get('status') == 'inconclusive'
+                      and supplement.get('reason') == 'unknown_type'
+                      and supplement.get('truncated') is False, 'held_target_supplement')
+              sample = supplement.get('sample')
+              require(type(sample) is list and 1 <= len(sample) <= 8, 'held_target_sample')
+              unknown = [item['pid'] for item in sample
+                         if type(item) is dict and set(item) == {'pid', 'category'}
+                         and item['category'] == 'unknown' and type(item['pid']) is int
+                         and item['pid'] > 0]
+              maintenance = [item for item in fixed_records(text, 'FIXTURE_TARGET_MAINTENANCE', 2048)
+                             if item.get('scope') == 'held_client_control']
+              require(len(maintenance) == 1, 'held_maintenance_population')
+              record = maintenance[0]
+              require(set(record) == {'schema', 'scope', 'ordinal', 'status', 'reason', 'cleanup', 'entries'}
+                      and record['schema'] == 'fixture-target-maintenance/1'
+                      and type(record['ordinal']) is int and record['ordinal'] == 1
+                      and record['status'] == 'observed' and record['reason'] == 'none'
+                      and record['cleanup'] == 'driver_handoff', 'held_maintenance_shape')
+              require(type(record['entries']) is list and 1 <= len(record['entries']) <= 8,
+                      'held_maintenance_entries')
+              held_pids = [pid for pid in unknown if
+                          {'pid': pid, 'category': 'client', 'binding': 'provisional',
+                           'reason': 'hidden_origin'} in record['entries']]
+              require(len(set(held_pids)) >= 1, 'held_pid_category_correspondence')
+              summary = [item for item in fixed_records(text, 'FIXTURE_TARGET_DIAGNOSTIC_SUMMARY', 1024)
+                         if item.get('scope') == 'held_client_control']
+              require(len(summary) == 1, 'held_summary_population')
+              require(equal(summary[0], {'schema': 'fixture-target-diagnostic-summary/2',
+                                        'scope': 'held_client_control', 'observed': 1, 'cap': 64,
+                                        'capReached': False, 'failureVectors': 1,
+                                        'observationFailed': False, 'inconclusive': True}),
+                      'held_summary')
+              return {'witness': expected, 'target': row, 'maintenance': record,
+                      'summary': summary[0], 'corroborated_pids': sorted(set(held_pids)),
+                      'raw_database_identifiers_reconstructed': False}
+          
+          
+          def stable_read(ci, path, limit=65536, private=False):
+              """Read either a private original or an honest legacy 0644 retention copy."""
+              require(path.lstat().st_mode & 0o022 == 0, 'evidence_write_permissions')
+              return ci.fixture_read(path, limit, private)
+          
+          
+          def load_ci():
+              require(Path.cwd() == Path('/tmp/e') and Path.cwd().resolve() == Path('/tmp/e'),
+                      'genuine_evaluation_checkout_required')
+              require(os.environ.get('DESK_CI_ROLE_TEMP') ==
+                      str(Path(os.environ['RUNNER_TEMP']) / 'evaluation'), 'evaluation_role_required')
+              spec = importlib.util.spec_from_file_location(
+                  'maintenance_native_ci', '/tmp/e/tools/ci-validation/ci.py')
+              module = importlib.util.module_from_spec(spec)
+              sys.modules[spec.name] = module
+              spec.loader.exec_module(module)
+              require(module.ROOT == Path('/tmp/e'), 'ci_module_root')
+              return module
+          
+          
+          def verify(ci):
+              require(os.environ.get('GITHUB_JOB') == 'verify-maintenance-fixture105', 'actual_job')
+              require(os.environ.get('GITHUB_EVENT_NAME') == 'pull_request', 'actual_pr_event')
+              require(os.environ.get('GITHUB_REPOSITORY') == 'mikeddamico/the-desk', 'repository')
+              require(os.environ.get('GITHUB_ACTIONS') == 'true'
+                      and os.environ.get('ImageOS') == 'ubuntu24'
+                      and os.environ.get('DESK_CI_PARTITION') == 'rest', 'hosted_rest')
+              for key in UPLOAD_OUTCOMES + ('FIXTURE046_CLEANUP_OUTCOME', 'NATIVE_OUTCOME'):
+                  require(os.environ.get(key) == 'success', 'platform_' + key)
+              owner = ci.installation_owner()
+              before = owner.outer(ci, 'EF')
+              require(equal(before, ci.check_partition_binding()), 'before_complete_binding')
+              identity, members = ci.proof_identity_now(True)
+              require(os.environ.get('GITHUB_REF') == 'refs/pull/%s/merge' % identity['pr_number'],
+                      'actual_pr_merge_ref')
+              require(os.environ.get('GITHUB_WORKFLOW_REF') ==
+                      'mikeddamico/the-desk/.github/workflows/ci.yml@' + os.environ['GITHUB_REF'],
+                      'actual_workflow_ref')
+              require(equal(ci.partition_identity(identity, members), before['identity']),
+                      'current_partition_identity')
+              require(len(members) == 520, 'source_population')
+              event = ci.load_event()
+              head_ref = event['pull_request']['head']['ref']
+              require(type(head_ref) is str and 0 < len(head_ref) <= 1024, 'pr_head_ref')
+              require(re.fullmatch(r'[0-9a-f]{40}', os.environ.get('GITHUB_WORKFLOW_SHA', '')),
+                      'workflow_commit_identity')
+              base = ci.ci_dir()
+              evidence = base / 'evidence'
+              native = evidence / 'fixture105-native'
+              retained = native / 'retained'
+              fixture = base / 'tmp' / ci.FIXTURE_NAME
+              controls = base / 'upload-controls'
+              full = base / 'upload-full'
+              secret = urlparse(os.environ['TEST_DATABASE_URL']).password or ''
+              custody = {}
+          
+              def raw(path, limit=65536, private=False):
+                  # Legacy collect files inherit 0644 while producer/native files are 0600.
+                  # Both require stable no-follow reads, current UID, one link and no write
+                  # permission for another user; requiring 0600 here would reject honest copies.
+                  return stable_read(ci, path, limit, private)
+          
+              def read(path, limit=65536):
+                  return strict_json(raw(path, limit))
+          
+              def pair(path, copy, limit=65536, redaction=False, whole_url=False, json_record=True):
+                  original = raw(path, limit)
+                  kept = raw(copy, limit)
+                  extra = (os.environ['TEST_DATABASE_URL'],) if whole_url else (secret,)
+                  require(kept == (ci.redact(original, extra) if redaction else original),
+                          'retention_custody_' + copy.name)
+                  require(raw(path, limit) == original, 'original_changed_' + path.name)
+                  custody[str(copy.relative_to(base))] = {'original': pin(original), 'retained': pin(kept)}
+                  return strict_json(original) if json_record else original
+          
+              require(not ci.controls_problems(controls), 'controls_validation')
+              # API is supplied by the permanent maintenance patch, not a second parser.
+              receipt_bytes = ci.read_db_probe(evidence / 'db-probe.json', before)
+              for bundle in (controls, full):
+                  ci.verify_db_probe_custody(evidence / 'db-probe.json', bundle / 'db-probe.json',
+                                             before, expected_bytes=receipt_bytes)
+              collection = read(full / 'final.json', ci.JSON_LIMIT * 4)
+              require(ci.collection_identity_ok(collection), 'full_collection_identity')
+              require(collection['scope'] == 'full'
+                      and equal(collection['verdicts'], {'prerequisite': True, 'focused': True, 'all': None})
+                      and collection['not_attempted'] == ['all']
+                      and collection['all_stages_ok'] is False
+                      and collection['evidence_status'] == 'partial/censored'
+                      and collection['collection_problems'] == {'missing': [], 'censored': [], 'errors': []}
+                      and equal(collection['execution'], before['execution']), 'intentional_full_absence')
+              for relative in ('all', 'verdict-all.json', 'stage-owner/all', 'stage-check/all',
+                               'bind-post-all.json', 'partition-proof.json'):
+                  require(not os.path.lexists(evidence / relative), 'unexpected_aggregate_' + relative)
+              for stage in ('prerequisite', 'focused'):
+                  require(ci.stage_verdict_ok(evidence / ('verdict-' + stage + '.json'), stage),
+                          'control_stage_' + stage)
+              semantic = pair(evidence / 'identity-witness/result.json',
+                              full / 'identity-witness/result.json', 262144, redaction=True, whole_url=True)
+              require(semantic.get('schema') == 'ci-semantic-identity-comparison/1'
+                      and semantic.get('all_six_equal') is True
+                      and equal(semantic['build'], semantic['evaluation']), 'semantic_identity')
+              require(equal(owner.identity_witness(read(evidence / 'identity-witness/stdout', 16384), 'evaluation'),
+                            semantic['evaluation']), 'semantic_live_witness')
+              invocation = pair(native / 'invocation.json', retained / 'invocation.json')
+              require(invocation['argv'] == ['/usr/bin/timeout', '--signal=TERM', '--kill-after=20s',
+                                           '1800s', '/usr/bin/python3', '-I', '-B',
+                                           'test/support/p33-parity-supervisor.py', 'guard', 'fixture105-native']
+                      and invocation['cwd'] == '/tmp/e'
+                      and invocation['profile'] == 'fixture105-native'
+                      and type(invocation['guard_invocations']) is int and invocation['guard_invocations'] == 1
+                      and invocation['native_case_timeout_ms'] is None
+                      and equal(invocation['identity'], before['identity']), 'native_invocation')
+              result = pair(native / 'result.json', retained / 'result.json')
+              for key in ('ok', 'direct_reaped', 'maintenance_ended', 'population_equal'):
+                  require(result.get(key) is True, 'native_' + key)
+              require(type(result['guard_exit']) is int and result['guard_exit'] == 0
+                      and result['guard_signal'] is None and result['primary'] is None
+                      and result['residual_group_members'] == [] and result['errors'] == [], 'native_settlement')
+              guard = pair(native / 'guard-result.json', retained / 'guard-result.json')
+              errors = []
+              ci.check_ledger(guard, 'native', errors, guard=True)
+              require(not errors, 'native_guard_ledger')
+              known_attempts = set()
+              for stage in ('prerequisite', 'focused'):
+                  verdict = read(evidence / ('verdict-' + stage + '.json'), ci.JSON_LIMIT * 4)
+                  known_attempts.add(verdict['facts']['attempt'])
+              runtime = ci.find_runtime_dir(base / 'tmp')
+              attempts = bounded_entries(runtime, 16)
+              actual_attempts = {name for name in attempts if re.fullmatch(r'attempt-[a-z0-9_]{8}', name)}
+              require(known_attempts <= actual_attempts and len(actual_attempts - known_attempts) == 1,
+                      'exactly_one_new_guard_attempt')
+              native_attempt = (actual_attempts - known_attempts).pop()
+              require(raw(runtime / native_attempt / 'guard-result.json') == raw(native / 'guard-result.json'),
+                      'original_guard_custody')
+              process = pair(native / 'process.json', retained / 'process.json')
+              require(set(process) == {'pid', 'pgid'} and type(process['pid']) is int
+                      and process['pid'] > 0 and process['pid'] == process['pgid'], 'native_process')
+              for name in os.listdir('/proc'):
+                  if not name.isdecimal():
+                      continue
+                  try:
+                      data = Path('/proc', name, 'stat').read_bytes()
+                  except (FileNotFoundError, ProcessLookupError):
+                      continue
+                  require(len(data) <= 4096, 'process_stat_bound')
+                  require(int(data[data.rfind(b')') + 2:].split()[2]) != process['pgid'],
+                          'native_residual_process_group')
+              population_before = pair(native / 'population-before.json', retained / 'population-before.json')
+              population_after = pair(native / 'population-after.json', retained / 'population-after.json')
+              require(equal(population_before, population_after)
+                      and set(population_before) == {'status', 'databases', 'roles', 'pid'}
+                      and population_before['status'] == 'observed'
+                      and type(population_before['pid']) is int and population_before['pid'] > 0,
+                      'independent_population_observations')
+              for key in ('databases', 'roles'):
+                  values = population_before[key]
+                  require(type(values) is list and len(values) <= 256
+                          and all(type(value) is str and value.startswith('fl_') for value in values)
+                          and values == sorted(set(values)), 'population_shape')
+              streams = {}
+              require(set(result['captured_streams']) == {'stdout', 'stderr'}
+                      and set(result['stream_bytes']) == {'stdout', 'stderr'}, 'capture_population')
+              for name in ('stdout', 'stderr'):
+                  data = raw(native / name, 8 * 1024 * 1024)
+                  capture = result['captured_streams'][name]
+                  require(equal(capture, dict(pin(data), complete=True))
+                          and type(result['stream_bytes'][name]) is int
+                          and result['stream_bytes'][name] == len(data), 'raw_capture_' + name)
+                  copy = raw(retained / name, 8 * 1024 * 1024)
+                  require(copy == ci.redact(data, (secret,)), 'redacted_capture_' + name)
+                  require(raw(native / name, 8 * 1024 * 1024) == data, 'raw_capture_changed')
+                  custody[str((retained / name).relative_to(base))] = {
+                      'original': pin(data), 'retained': pin(copy)}
+                  streams[name] = data.decode('utf8', errors='strict')
+              summary, problems = ci.parse_summary(streams['stdout'])
+              require(equal(summary, EXPECTED_SUMMARY) and problems == []
+                      and equal(ci.parse_file_lines(streams['stdout']), EXPECTED_FILES), 'native_complete_counts')
+              clean = ci.ANSI.sub('', streams['stdout'] + '\n' + streams['stderr'])
+              require(ci.FAILURE_LINE.search(clean) is None
+                      and not any(needle in clean for needle in ci.FATAL_TEXT), 'native_failure_output')
+              held = held_witness(streams['stderr'])
+              require(equal(held_witness(raw(retained / 'stderr', 8 * 1024 * 1024).decode('utf8')), held),
+                      'retained_held_witness')
+              source_before = pair(native / 'source-before.json', retained / 'source-before.json')
+              source_after = pair(native / 'source-after.json', retained / 'source-after.json')
+              binding, loader = ci.fixture_validate(base, ci.ROOT, True)
+              current_source = {'identity': before['identity'], 'binding': binding, 'loader': loader,
+                                'source_inventory_sha256': ci.fixture_hash(ci.fixture_bytes(ci.fixture_graph(ci.ROOT, 'source'))),
+                                'tools_inventory_sha256': ci.fixture_hash(ci.fixture_bytes(ci.fixture_graph(ci.ROOT / 'node_modules', 'tools')))}
+              require(set(source_before) == set(current_source) and equal(source_before, current_source),
+                      'source_before_current')
+              require(equal({key: source_after[key] for key in current_source}, current_source)
+                      and equal(source_after['summary'], EXPECTED_SUMMARY)
+                      and source_after['summary_errors'] == []
+                      and equal(source_after['file_results'], EXPECTED_FILES)
+                      and source_after['native_suite_complete'] is True, 'source_after_current')
+              journal = pair(evidence / 'fixture105-suite.json', retained / 'fixture105-suite.json',
+                             ci.SNAPSHOT_LIMIT, redaction=True)
+              ci.fixture_journal(fixture, journal)
+              # Validate both retained trees with the same full journal and retain every
+              # original/reference pair, including inventories, intentions and failure receipts.
+              compare_fixture(ci, fixture, retained / 'fixture105', pair, False)
+              compare_fixture(ci, fixture, full / 'fixture105', pair, True)
+              pair(evidence / 'fixture105-suite.json', full / 'fixture105/suite.json',
+                   ci.SNAPSHOT_LIMIT, redaction=True, whole_url=True)
+              ci.fixture_journal(retained / 'fixture105', strict_json(raw(retained / 'fixture105-suite.json', ci.SNAPSHOT_LIMIT)))
+              # Full collect uses legacy 0644 copies; fixture_journal's private reader is
+              # intentionally not patched. Its original validation plus exact authorized
+              # byte custody above proves the corresponding full-bundle content.
+              for bundle in (controls, full):
+                  verify_producer_inventory(ci, raw, read, fixture, bundle)
+              verify_retention_inventory(ci, raw, read, fixture, evidence, full)
+              verify_cleanup(ci, pair, read, evidence, full)
+              # Reviewed fixed native sources contain the real holder, original exception,
+              # descriptor restoration, durable-row/receipt checks and post-cleanup PID query.
+              for name, expected in SOURCE_PINS.items():
+                  require(digest(raw(ci.ROOT / name, 2 * 1024 * 1024, False)) == expected,
+                          'held_client_source_assertions_' + name)
+              after = owner.outer(ci, 'EF')
+              require(equal(after, ci.check_partition_binding()) and equal(before, after), 'after_complete_binding')
+              identity_after, members_after = ci.proof_identity_now(True)
+              require(equal(identity_after, identity) and equal(members_after, members)
+                      and equal(ci.load_event(), event), 'source_identity_drift')
+              for bundle in (controls, full):
+                  ci.verify_db_probe_custody(evidence / 'db-probe.json', bundle / 'db-probe.json',
+                                             after, expected_bytes=receipt_bytes)
+              return {'schema': 'ci-maintenance-native-diagnostic/1', 'diagnostic_only': True,
+                      'native_passed': True, 'native_tests': 34, 'full_acceptance': False,
+                      'identity': identity, 'binding': before, 'actual_job': os.environ['GITHUB_JOB'],
+                      'pr_head_ref': head_ref,
+                      'uploads': {name: os.environ[name] for name in UPLOAD_OUTCOMES},
+                      'held_client': held, 'source_assertion_sha256': SOURCE_PINS,
+                      'native_attempt': native_attempt, 'custody': custody,
+                      'collection_status': 'partial/censored', 'not_attempted': ['all'],
+                      'verdict_upload_requires_separate_gate': True}
+          
+          
+          def bounded_entries(path, cap):
+              result = []
+              with os.scandir(path) as iterator:
+                  for entry in iterator:
+                      require(len(result) < cap, 'directory_population_bound')
+                      result.append(entry.name)
+              return sorted(result)
+          
+          
+          def compare_fixture(ci, original, retained, pair, whole_url):
+              pair(original / 'ROOT.json', retained / 'ROOT.json', 262144,
+                   redaction=True, whole_url=whole_url)
+              require(set(bounded_entries(original / 'bindings', 32)) == set(ci.FIXTURE_BINDINGS)
+                      and set(bounded_entries(retained / 'bindings', 32)) == set(ci.FIXTURE_BINDINGS),
+                      'fixture_binding_population')
+              for name in ci.FIXTURE_BINDINGS:
+                  pair(original / 'bindings' / name, retained / 'bindings' / name,
+                       ci.SNAPSHOT_LIMIT if 'INVENTORY' in name else 262144,
+                       redaction=True, whole_url=whole_url)
+              for directory, cap in (('expectations', 384), ('receipts', 128)):
+                  entries = bounded_entries(original / directory, cap)
+                  require(entries == bounded_entries(retained / directory, cap), 'fixture_retained_population')
+                  for name in entries:
+                      if directory == 'expectations':
+                          require(re.fullmatch(r'[0-9a-f]{64}\.(intent|terminal|claims-failure)\.json', name),
+                                  'expectation_name')
+                          pair(original / directory / name, retained / directory / name, 16384,
+                               redaction=True, whole_url=whole_url)
+                      else:
+                          require(re.fullmatch(r'[0-9a-f]{64}', name), 'receipt_target')
+                          leaves = bounded_entries(original / directory / name, 2)
+                          require(leaves == bounded_entries(retained / directory / name, 2), 'receipt_leaf_population')
+                          for leaf in leaves:
+                              require(leaf in ('CONSTRUCTION.json', 'CLAIMS-FAILURE.json'), 'receipt_leaf')
+                              pair(original / directory / name / leaf, retained / directory / name / leaf,
+                                   16384 if leaf == 'CONSTRUCTION.json' else 262144,
+                                   redaction=True, whole_url=whole_url)
+          
+          
+          def verify_producer_inventory(ci, raw, read, fixture, bundle):
+              owner = ci.installation_owner()
+              expected = {}
+              for name in owner.BINDINGS:
+                  expected['metadata/' + name] = fixture / 'bindings' / name
+              for role in ('build', 'evaluation'):
+                  producer = owner.role_base(ci, role) / 'evidence/producer'
+                  for name in ('stdout', 'stderr', 'owner.json'):
+                      expected[role + '/install/' + name] = producer / 'install' / name
+              build = owner.role_base(ci, 'build') / 'evidence/producer'
+              for gate in owner.GATES:
+                  for name in ('stdout', 'stderr', 'result.json', 'owner.json'):
+                      expected['build/quality/' + gate + '/' + name] = build / 'quality' / gate / name
+              expected['build/quality/owner.json'] = build / 'quality/owner.json'
+              evaluation = owner.role_base(ci, 'evaluation') / 'evidence'
+              for name in ('stdout', 'stderr', 'copy-owner.json', 'owner.json'):
+                  expected['evaluation/transfer/' + name] = evaluation / 'producer/transfer' / name
+              for name in (owner.POLICY_PATH, owner.QUALITY_PATH):
+                  expected['policies/' + Path(name).name] = ci.ROOT / name
+              for name in ('partition-init.json', 'partition.json', 'fixture105-binding.json'):
+                  expected[name] = evaluation / name
+              manifest = read(bundle / 'producer/MANIFEST.json', 262144)
+              require(set(manifest) == {'schema', 'role', 'members', 'bytes'}
+                      and manifest['schema'] == 'ci-producer-bundle/1' and manifest['role'] == 'evaluation'
+                      and type(manifest['members']) is list
+                      and len(manifest['members']) == len(expected) <= 95, 'producer_manifest')
+              seen = set()
+              total = 0
+              for row in manifest['members']:
+                  require(type(row) is dict and set(row) == {'path', 'bytes', 'sha256'}
+                          and row['path'] in expected and row['path'] not in seen, 'producer_reference')
+                  name = row['path']
+                  seen.add(name)
+                  source = raw(expected[name], 8 * 1024 * 1024)
+                  copy = raw(bundle / 'producer' / name, 8 * 1024 * 1024)
+                  require(equal({'bytes': row['bytes'], 'sha256': row['sha256']}, pin(source))
+                          and copy == ci.redact(source, (os.environ['TEST_DATABASE_URL'],)),
+                          'producer_reference_custody')
+                  total += len(source)
+                  require(total <= 160 * 1024 * 1024, 'producer_bundle_bound')
+              require(seen == set(expected) and type(manifest['bytes']) is int
+                      and manifest['bytes'] == total, 'producer_bundle_population')
+          
+          
+          def verify_retention_inventory(ci, raw, read, fixture, evidence, full):
+              manifest = read(full / 'fixture105-retention.json', ci.SNAPSHOT_LIMIT)
+              require(raw(fixture / 'RETENTION.json', ci.SNAPSHOT_LIMIT) ==
+                      raw(full / 'fixture105-retention.json', ci.SNAPSHOT_LIMIT), 'terminal_retention_identity')
+              require(set(manifest) == {'schema', 'scope', 'files', 'total_bytes', 'problems'}
+                      and manifest['schema'] == 'fixture105-retention/1' and manifest['scope'] == 'full'
+                      and manifest['problems'] == {'missing': [], 'censored': [], 'errors': []}
+                      and type(manifest['files']) is list and len(manifest['files']) <= 1024,
+                      'retention_manifest_shape')
+              seen = set()
+              total = 0
+              for row in manifest['files']:
+                  require(type(row) is dict and set(row) == {'path', 'original', 'retained', 'redacted'},
+                          'retention_reference_shape')
+                  name = row['path']
+                  require(type(name) is str and name not in seen and not name.startswith('/')
+                          and '..' not in Path(name).parts, 'retention_reference_path')
+                  seen.add(name)
+                  if name == 'fixture105/suite.json':
+                      source = evidence / 'fixture105-suite.json'
+                  elif name == 'fixture105/runner-binding.json':
+                      source = evidence / 'fixture105-binding.json'
+                  elif name.startswith('fixture105/'):
+                      source = fixture / name.removeprefix('fixture105/')
+                  elif name.startswith('tooling-fixture105/'):
+                      suffix = name.removeprefix('tooling-fixture105/')
+                      if '/' in suffix:
+                          stage, leaf = suffix.split('/', 1)
+                          require(stage in ('prerequisite', 'focused'), 'retention_snapshot_stage')
+                          source = evidence / ('fixture105-cache-' + stage) / leaf
+                      else:
+                          require(re.fullmatch(r'(before|after)-(prerequisite|focused)\.json', suffix),
+                                  'retention_stage_record')
+                          source = evidence / ('fixture105-' + suffix)
+                  else:
+                      raise RuntimeError('retention_unknown_reference')
+                  original = raw(source, ci.SNAPSHOT_LIMIT)
+                  retained = raw(full / name, ci.SNAPSHOT_LIMIT)
+                  require(equal(row['original'], pin(original)) and equal(row['retained'], pin(retained))
+                          and row['redacted'] is (original != retained)
+                          and retained == ci.redact(original, (os.environ['TEST_DATABASE_URL'],)),
+                          'retention_inventory_custody')
+                  total += len(original)
+                  require(total <= 64 * 1024 * 1024, 'retention_total_bound')
+              require(type(manifest['total_bytes']) is int and manifest['total_bytes'] == total,
+                      'retention_total_identity')
+              required = {'fixture105/ROOT.json', 'fixture105/runner-binding.json', 'fixture105/suite.json'}
+              required.update('fixture105/bindings/' + name for name in ci.FIXTURE_BINDINGS)
+              require(required <= seen, 'retention_required_references')
+          
+          
+          def verify_cleanup(ci, pair, read, evidence, full):
+              registration = pair(evidence / 'fixture046-runtime.json', full / 'fixture046-runtime.json')
+              ci.fixture046_runtime_receipt(registration)
+              root = ci.FIXTURE046_RUNTIME
+              for name in ci.FIXTURE046_SUPPLY_FILES:
+                  pair(root / name, full / 'fixture046-runtime' / name, ci.JSON_LIMIT * 16,
+                       redaction=True, whole_url=True, json_record=name.endswith('.json'))
+              ownership = read(root / 'ownership.json')
+              cleanup = pair(root / 'cleanup.json', full / 'fixture046-runtime/cleanup.json')
+              require(ownership['schema'] == 'fixture046-supply-owner/1'
+                      and ownership['preparation'] == 'ready' and ownership['local'] is False
+                      and ownership['image_id'] == registration['image_id']
+                      and re.fullmatch(r'[0-9a-f]{32}', ownership['token'])
+                      and ownership['image_handle'] == 'desk-fixture046-runtime:owned-' + ownership['token']
+                      and ownership['image_reserved'] is True and ownership['client_uncertain'] is False
+                      and ownership['command_pending'] is False and ownership['uncertain_command'] is None
+                      and [row['name'] for row in ownership['containers']] == registration['containers']
+                      and all(row['removed'] is True for row in ownership['containers'])
+                      and ownership['image_removed'] is True and ownership['cleanup'] == 'complete',
+                      'fixture046_owned_cleanup')
+              require(cleanup['schema'] == 'fixture046-supply-cleanup/1'
+                      and cleanup['status'] == 'complete' and cleanup['preparation'] == 'ready'
+                      and cleanup['image_id'] == registration['image_id']
+                      and cleanup['image_removed'] is True and cleanup['client_uncertain'] is False,
+                      'fixture046_complete_cleanup')
+          
+          
+          SOURCE_PINS = {'test/integration/connected-fixture105.test.ts': 'd94a78b2340848d156cd4f634926e12378a8e868876b99c2a7ed649111f4577a', 'src/runtime/connected-fixture105.ts': '02f6b14225ca4b69c150fdce060a4b91cfc507cc4f69a38764a566e8bd31918d', 'test/support/command-postgres-hosted.ts': 'f091c648c397b667c9134ed6fa412726879440bf90046e507ee1a00ad2d5c623', 'test/support/p33-parity-supervisor.py': '3cbfef3cf48ebc4ac64d3a0938498be0ae5a89114790f7c833c176a02c2647cb', 'test/support/p33-parity-runner.ts': '44bb370ca659d5d585af88f51e3ec6678356572b723816498fc6c16165c49858'}
+          
+          
+          def main():
+              ci = load_ci()
+              failure = None
+              try:
+                  value = verify(ci)
+              except Exception as error:
+                  failure = error
+                  # A negative verdict never includes potentially secret-bearing exception text
+                  # or unadmitted source/producer objects. Its upload cannot turn it into a pass.
+                  value = {'schema': 'ci-maintenance-native-diagnostic/1',
+                           'diagnostic_only': True, 'native_passed': False,
+                           'full_acceptance': False, 'failure_type': type(error).__name__,
+                           'verdict_upload_requires_separate_gate': True}
+              data = (json.dumps(value, sort_keys=True, separators=(',', ':'), allow_nan=False) + '\n').encode()
+              require(len(data) <= 262144, 'verdict_bound')
+              ci.fixture_write_raw(ci.ci_dir() / 'evidence/maintenance-diagnostic-verdict.json', data, 262144)
+              output = os.open(os.environ['GITHUB_OUTPUT'], os.O_WRONLY | os.O_APPEND | os.O_NOFOLLOW)
+              try:
+                  import stat
+                  metadata = os.fstat(output)
+                  require(stat.S_ISREG(metadata.st_mode) and metadata.st_uid == os.getuid()
+                          and metadata.st_nlink == 1 and metadata.st_size <= 65536, 'output_file_shape')
+                  require(os.write(output, b'verdict_written=true\n') == 21, 'output_write')
+              finally:
+                  os.close(output)
+              print(json.dumps({'schema': value['schema'], 'diagnostic_only': True,
+                                'native_passed': value['native_passed'], 'full_acceptance': False}))
+              if failure is not None:
+                  raise RuntimeError('maintenance_native_verification_failed') from None
+          
+          
+          if __name__ == '__main__':
+              main()
+          PY
+      - name: Retain the separate diagnostic-only verdict
+        id: upload-maintenance-verdict
+        if: ${{ always() && steps.maintenance-verdict.outputs.verdict_written == 'true' }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        timeout-minutes: 2
+        with:
+          name: ci-maintenance-fixture105-verdict-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/evaluation/ci/evidence/maintenance-diagnostic-verdict.json
+          if-no-files-found: error
+          retention-days: 30
+      - name: Hold after diagnostic evidence without full acceptance
+        if: ${{ always() }}
+        timeout-minutes: 1
+        run: |
+          echo 'HOLD: diagnostic-only native fixture105 proof; full acceptance is false'
+          exit 78
+
   verify-writer:
+    needs: [verify-maintenance-fixture105]
     runs-on: ubuntu-24.04
     timeout-minutes: 190
     services:
@@ -282,11 +1179,13 @@ jobs:
           /usr/bin/python3 -I -B tools/ci-validation/ci.py final
 
   verify-rest:
+    needs: [verify-maintenance-fixture105]
     runs-on: ubuntu-24.04
     timeout-minutes: 190
     services:
       postgres:
         image: postgres:17
+        command: postgres -c autovacuum=off
         env:
           POSTGRES_USER: postgres
           POSTGRES_PASSWORD: postgres
@@ -644,6 +1543,7 @@ jobs:
           CONTAINER_OUTCOME: ${{ needs.container.result }}
 
   container:
+    needs: [verify-maintenance-fixture105]
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
