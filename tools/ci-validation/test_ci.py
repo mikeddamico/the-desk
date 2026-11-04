@@ -1552,7 +1552,7 @@ def _maintenance_workflow(test, text):
                       'sys.modules[spec.name] = module', "'full_acceptance': False"):
         test.assertIn(invariant, verdict)
     test.assertTrue(diagnostic.endswith("      - name: Hold after diagnostic evidence without full acceptance\n        if: ${{ always() }}\n        timeout-minutes: 1\n        run: |\n          echo 'HOLD: diagnostic-only native fixture105 proof; full acceptance is false'\n          exit 78\n"))
-    test.assertEqual(hashlib.sha256(diagnostic.encode()).hexdigest(), 'f5134ae8f5d86af704792e55c4652ccd4ff4f4d17d3f7f5a79d69837eab3b655')
+    test.assertEqual(hashlib.sha256(diagnostic.encode()).hexdigest(), '2cada30c5e85c853ee8a17778820d514894def9fa981f303cc27736c7a0a347a')
     projection = prefix + 'jobs:\n  verify-writer:\n' + normal_tail
     dependency = '    needs: [verify-maintenance-fixture105]\n'
     test.assertEqual(projection.count(dependency), 3)
@@ -1561,7 +1561,7 @@ def _maintenance_workflow(test, text):
         test.assertEqual(projection.count(opening), 1)
         projection = projection.replace(opening, '  ' + job + ':\n', 1)
     _restored_workflow(test, projection)
-    test.assertEqual(hashlib.sha256(text.encode()).hexdigest(), 'fce2d34d131128db12a7986f4e4dd4e6b6f1f9ab533d84a3817b62d23e729c37')
+    test.assertEqual(hashlib.sha256(text.encode()).hexdigest(), '9e98e8dd2ce04849056259c30809981d088d34c136e1f824d4e40b75b05e50eb')
     return projection
 
 # END TEMPORARY MAINTENANCE WORKFLOW VALIDATOR

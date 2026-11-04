@@ -50,7 +50,7 @@ jobs:
           import os
           import sys
           from pathlib import Path
-          
+
           if (os.environ.get('GITHUB_JOB') != 'verify-maintenance-fixture105'
                   or os.environ.get('GITHUB_EVENT_NAME') != 'pull_request'
                   or os.environ.get('GITHUB_REPOSITORY') != 'mikeddamico/the-desk'
@@ -220,7 +220,7 @@ jobs:
           import os
           import sys
           from pathlib import Path
-          
+
           if os.environ.get('GITHUB_JOB') != 'verify-maintenance-fixture105':
               raise RuntimeError('fixed diagnostic job required')
           if os.environ.get('GITHUB_EVENT_NAME') != 'pull_request':
@@ -318,7 +318,7 @@ jobs:
         run: |
           /usr/bin/python3 -I -B - <<'PY'
           """Temporary read-only native verifier; embed verbatim in the diagnostic workflow.
-          
+
           This file is an offline review artifact, never an additional tracked source file.
           It grants no stage, partition or full-suite acceptance and performs no DB work.
           """
@@ -331,8 +331,8 @@ jobs:
           import stat
           from pathlib import Path
           from urllib.parse import urlparse
-          
-          
+
+
           UPLOAD_OUTCOMES = (
               'BUILD_LAYOUT_UPLOAD_OUTCOME', 'EVAL_LAYOUT_UPLOAD_OUTCOME',
               'CONTROLS_UPLOAD_OUTCOME', 'NATIVE_UPLOAD_OUTCOME',
@@ -343,27 +343,27 @@ jobs:
           EXPECTED_SUMMARY = {'files': {'passed': 1, 'total': 1},
                               'tests': {'passed': 34, 'total': 34}}
           EXPECTED_FILES = {NATIVE_FILE: [{'tests': 34, 'failed': 0, 'skipped': 0, 'todo': 0}]}
-          
-          
+
+
           def require(condition, reason):
               if not condition:
                   raise RuntimeError(reason)
-          
-          
+
+
           def equal(left, right):
               # JSON equality must not treat True as integer 1.
               return json.dumps(left, sort_keys=True, allow_nan=False) == json.dumps(
                   right, sort_keys=True, allow_nan=False)
-          
-          
+
+
           def digest(data):
               return hashlib.sha256(data).hexdigest()
-          
-          
+
+
           def pin(data):
               return {'bytes': len(data), 'sha256': digest(data)}
-          
-          
+
+
           def strict_json(data):
               def object_pairs(pairs):
                   value = {}
@@ -371,15 +371,15 @@ jobs:
                       require(key not in value, 'duplicate_json_key')
                       value[key] = item
                   return value
-          
+
               def invalid_constant(value):
                   raise RuntimeError('nonfinite_json')
-          
+
               return json.loads(data.decode('utf8', errors='strict'),
                                 object_pairs_hook=object_pairs,
                                 parse_constant=invalid_constant)
-          
-          
+
+
           def fixed_records(text, prefix, limit):
               results = []
               for line in text.splitlines():
@@ -389,8 +389,8 @@ jobs:
                       require(len(line.encode('utf8')) + 1 <= limit, 'witness_bound')
                       results.append(strict_json(line[len(prefix) + 1:].encode('utf8')))
               return results
-          
-          
+
+
           def held_witness(text):
               witness = fixed_records(text, 'FIXTURE_HELD_CLIENT_CONTROL', 1024)
               expected = {'schema': 'fixture-held-client-control/1', 'case': HELD_CASE,
@@ -451,14 +451,14 @@ jobs:
               return {'witness': expected, 'target': row, 'maintenance': record,
                       'summary': summary[0], 'corroborated_pids': sorted(set(held_pids)),
                       'raw_database_identifiers_reconstructed': False}
-          
-          
+
+
           def stable_read(ci, path, limit=65536, private=False):
               """Read either a private original or an honest legacy 0644 retention copy."""
               require(path.lstat().st_mode & 0o022 == 0, 'evidence_write_permissions')
               return ci.fixture_read(path, limit, private)
-          
-          
+
+
           def load_ci():
               require(Path.cwd() == Path('/tmp/e') and Path.cwd().resolve() == Path('/tmp/e'),
                       'genuine_evaluation_checkout_required')
@@ -471,8 +471,8 @@ jobs:
               spec.loader.exec_module(module)
               require(module.ROOT == Path('/tmp/e'), 'ci_module_root')
               return module
-          
-          
+
+
           def verify(ci):
               require(os.environ.get('GITHUB_JOB') == 'verify-maintenance-fixture105', 'actual_job')
               require(os.environ.get('GITHUB_EVENT_NAME') == 'pull_request', 'actual_pr_event')
@@ -508,16 +508,16 @@ jobs:
               full = base / 'upload-full'
               secret = urlparse(os.environ['TEST_DATABASE_URL']).password or ''
               custody = {}
-          
+
               def raw(path, limit=65536, private=False):
                   # Legacy collect files inherit 0644 while producer/native files are 0600.
                   # Both require stable no-follow reads, current UID, one link and no write
                   # permission for another user; requiring 0600 here would reject honest copies.
                   return stable_read(ci, path, limit, private)
-          
+
               def read(path, limit=65536):
                   return strict_json(raw(path, limit))
-          
+
               def pair(path, copy, limit=65536, redaction=False, whole_url=False, json_record=True):
                   original = raw(path, limit)
                   kept = raw(copy, limit)
@@ -527,7 +527,7 @@ jobs:
                   require(raw(path, limit) == original, 'original_changed_' + path.name)
                   custody[str(copy.relative_to(base))] = {'original': pin(original), 'retained': pin(kept)}
                   return strict_json(original) if json_record else original
-          
+
               require(not ci.controls_problems(controls), 'controls_validation')
               # API is supplied by the permanent maintenance patch, not a second parser.
               receipt_bytes = ci.read_db_probe(evidence / 'db-probe.json', before)
@@ -688,8 +688,8 @@ jobs:
                       'native_attempt': native_attempt, 'custody': custody,
                       'collection_status': 'partial/censored', 'not_attempted': ['all'],
                       'verdict_upload_requires_separate_gate': True}
-          
-          
+
+
           def bounded_entries(path, cap):
               result = []
               with os.scandir(path) as iterator:
@@ -697,8 +697,8 @@ jobs:
                       require(len(result) < cap, 'directory_population_bound')
                       result.append(entry.name)
               return sorted(result)
-          
-          
+
+
           def compare_fixture(ci, original, retained, pair, whole_url):
               pair(original / 'ROOT.json', retained / 'ROOT.json', 262144,
                    redaction=True, whole_url=whole_url)
@@ -727,8 +727,8 @@ jobs:
                               pair(original / directory / name / leaf, retained / directory / name / leaf,
                                    16384 if leaf == 'CONSTRUCTION.json' else 262144,
                                    redaction=True, whole_url=whole_url)
-          
-          
+
+
           def verify_producer_inventory(ci, raw, read, fixture, bundle):
               owner = ci.installation_owner()
               expected = {}
@@ -771,8 +771,8 @@ jobs:
                   require(total <= 160 * 1024 * 1024, 'producer_bundle_bound')
               require(seen == set(expected) and type(manifest['bytes']) is int
                       and manifest['bytes'] == total, 'producer_bundle_population')
-          
-          
+
+
           def verify_retention_inventory(ci, raw, read, fixture, evidence, full):
               manifest = read(full / 'fixture105-retention.json', ci.SNAPSHOT_LIMIT)
               require(raw(fixture / 'RETENTION.json', ci.SNAPSHOT_LIMIT) ==
@@ -822,8 +822,8 @@ jobs:
               required = {'fixture105/ROOT.json', 'fixture105/runner-binding.json', 'fixture105/suite.json'}
               required.update('fixture105/bindings/' + name for name in ci.FIXTURE_BINDINGS)
               require(required <= seen, 'retention_required_references')
-          
-          
+
+
           def verify_cleanup(ci, pair, read, evidence, full):
               registration = pair(evidence / 'fixture046-runtime.json', full / 'fixture046-runtime.json')
               ci.fixture046_runtime_receipt(registration)
@@ -849,11 +849,11 @@ jobs:
                       and cleanup['image_id'] == registration['image_id']
                       and cleanup['image_removed'] is True and cleanup['client_uncertain'] is False,
                       'fixture046_complete_cleanup')
-          
-          
+
+
           SOURCE_PINS = {'test/integration/connected-fixture105.test.ts': 'd94a78b2340848d156cd4f634926e12378a8e868876b99c2a7ed649111f4577a', 'src/runtime/connected-fixture105.ts': '02f6b14225ca4b69c150fdce060a4b91cfc507cc4f69a38764a566e8bd31918d', 'test/support/command-postgres-hosted.ts': 'f091c648c397b667c9134ed6fa412726879440bf90046e507ee1a00ad2d5c623', 'test/support/p33-parity-supervisor.py': '3cbfef3cf48ebc4ac64d3a0938498be0ae5a89114790f7c833c176a02c2647cb', 'test/support/p33-parity-runner.ts': '44bb370ca659d5d585af88f51e3ec6678356572b723816498fc6c16165c49858'}
-          
-          
+
+
           def main():
               ci = load_ci()
               failure = None
@@ -883,8 +883,8 @@ jobs:
                                 'native_passed': value['native_passed'], 'full_acceptance': False}))
               if failure is not None:
                   raise RuntimeError('maintenance_native_verification_failed') from None
-          
-          
+
+
           if __name__ == '__main__':
               main()
           PY
