@@ -23,6 +23,7 @@ both audit and Gitleaks to have succeeded.
 """
 import ast
 import contextlib
+import functools
 import hashlib
 import io
 import json
@@ -63,6 +64,59 @@ PER_FILE.update(ci.FROZEN_RENDER046_COUNTS)
 PER_FILE.update(DURABLE_DIAGNOSTIC_COUNTS)
 
 
+@functools.lru_cache(maxsize=2)
+def _synthetic_db_binding(partition):
+    """Validated wire-shaped fixture, never an authenticated producer capability."""
+    identity = {'checkout': 'a' * 40, 'head': 'b' * 40, 'tree': 'c' * 40,
+                'repository': 'mikeddamico/the-desk', 'run_id': '123', 'run_attempt': '1',
+                'source_sha256': 'd' * 64}
+    policies = ci.installation_owner().policy(ci)
+    identity.update(profile_policy_sha256=policies[2], quality_policy_sha256=policies[3])
+    tracked = sorted([name for name in TRACKED if name != 'test/root00.test.ts'] + [ci.WRITER_TEST])
+    return {'schema': 'ci-partition/2', 'partition': partition, 'identity': identity,
+            'selection': ci.partition_files(tracked, partition), 'counts': list(ci.PARTITION_COUNTS[partition]),
+            'execution': installation_model.execution(ci, identity, partition)}
+
+
+def synthetic_db_binding(partition='rest'):
+    return json.loads(json.dumps(_synthetic_db_binding(partition)))
+
+
+def synthetic_db_row(partition='rest'):
+    return {'ok': True, 'v': 170004, 'd': 'the_desk_test', 'u': 'postgres',
+            'su': True, 'cdb': True, 'crole': True,
+            'autovacuum': [{'setting': 'off' if partition == 'rest' else 'on',
+                           'source': 'command line' if partition == 'rest' else 'default',
+                           'pending_restart': False, 'context': 'sighup'}]}
+
+
+def synthetic_db_receipt(binding=None):
+    binding = binding or synthetic_db_binding()
+    return {'schema': 'ci-db-probe/1', 'partition': binding['partition'],
+            'identity': binding['identity'], 'execution': binding['execution'],
+            'target': {'host': 'localhost', 'port': 5432, 'database': 'the_desk_test', 'user': 'postgres'},
+            'server': {'server_version_num': 170004, 'major': 17, 'database': 'the_desk_test',
+                       'role': 'postgres', 'superuser': True, 'createdb': True, 'createrole': True,
+                       'autovacuum': synthetic_db_row(binding['partition'])['autovacuum']},
+            'probe_exit': 0, 'errors': [], 'ok': True}
+
+
+@contextlib.contextmanager
+def db_context():
+    with mock.patch.object(ci, 'check_partition_binding', side_effect=synthetic_db_binding), \
+            mock.patch.dict(os.environ, {'TEST_DATABASE_URL': URL}):
+        yield
+
+
+@contextlib.contextmanager
+def credential_free_precheck_context():
+    env = dict(os.environ)
+    env.pop('TEST_DATABASE_URL', None)
+    env['DESK_CI_DB_TARGET'] = ci.fixture_bytes(synthetic_db_receipt()['target']).decode()
+    with mock.patch.dict(os.environ, env, clear=True):
+        yield
+
+
 def file_lines(counts=None, extra=''):
     counts = counts or PER_FILE
     return ''.join(' ✓ %s (%d tests) 12ms\n' % (n, c) for n, c in counts.items()) + extra
@@ -94,6 +148,8 @@ def case_result(nonce, mode, **over):
 
 def write(path, text):
     Path(path).write_text(text)
+    if Path(path).name == 'db-probe.json':
+        Path(path).chmod(0o600)
 
 
 def write_json(path, value):
@@ -166,7 +222,7 @@ def build_world(tmp):
     ev.mkdir(parents=True)
     runtime.mkdir(parents=True)
     for name in ('env.json', 'identity.json', 'db-probe.json', 'snapshot-pre.json', 'bind-pre.json', 'bind-build.json'):
-        write_json(ev / name, {'ok': True})
+        write_json(ev / name, synthetic_db_receipt() if name == 'db-probe.json' else {'ok': True})
     return ev, runtime
 
 
@@ -190,7 +246,7 @@ def build_full(tmp, stages=ci.STAGES):
 
 def collect(tmp, scope, env=None):
     # Historical retention controls isolate the new seam; Fixture105Tooling exercises it directly.
-    with mock.patch.object(ci, 'fixture_collect', return_value=None), mock.patch.object(ci, 'ci_dir', return_value=Path(tmp)/'ci'), mock.patch.dict(os.environ, {'RUNNER_TEMP': tmp, 'DESK_CI_ROLE_TEMP': str(Path(tmp)/'evaluation'), **(env or {})}), contextlib.redirect_stdout(io.StringIO()):
+    with db_context(), mock.patch.object(ci, 'fixture_collect', return_value=None), mock.patch.object(ci, 'ci_dir', return_value=Path(tmp)/'ci'), mock.patch.dict(os.environ, {'RUNNER_TEMP': tmp, 'DESK_CI_ROLE_TEMP': str(Path(tmp)/'evaluation'), **(env or {})}), contextlib.redirect_stdout(io.StringIO()):
         ci.cmd_collect(scope)
     return json.loads((Path(tmp) / 'ci' / ('upload-' + scope) / 'final.json').read_text())
 
@@ -201,7 +257,7 @@ OK_OUTCOMES = {'CONTROLS_UPLOAD_OUTCOME': 'success', 'UPLOAD_OUTCOME': 'success'
 
 def final_code(tmp, **outcomes):
     env = {'RUNNER_TEMP': tmp, 'DESK_CI_ROLE_TEMP': str(Path(tmp)/'evaluation'), **{**OK_OUTCOMES, **outcomes}}
-    with mock.patch.dict(os.environ, env), mock.patch.object(ci, 'ci_dir', return_value=Path(tmp)/'ci'), contextlib.redirect_stdout(io.StringIO()):
+    with db_context(), mock.patch.dict(os.environ, env), mock.patch.object(ci, 'ci_dir', return_value=Path(tmp)/'ci'), contextlib.redirect_stdout(io.StringIO()):
         return ci.cmd_final()
 
 
@@ -318,33 +374,128 @@ class DatabaseBinding(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     ci.validate_db_url(bad)
 
+        target = ci.validate_db_url(URL)
+        detached = ci.validate_db_target(target)
+        self.assertEqual(detached, target)
+        self.assertIsNot(detached, target)
+        mutations = [None, [], {}, {**target, 'extra': True}]
+        for field, values in {'host': ['remote.example', None, True],
+                              'port': [True, 5432.0, '5432', 5433],
+                              'database': ['postgres', None],
+                              'user': ['', None, True, 'a:b', 'a@b', 'a/b', 'a b', 'a\nb']}.items():
+            mutations.extend({**target, field: value} for value in values)
+        for field in target:
+            mutations.append({key: value for key, value in target.items() if key != field})
+        for value in mutations:
+            with self.subTest(target=value), self.assertRaises((RuntimeError, ValueError, TypeError)):
+                ci.validate_db_target(value)
+
     def test_missing_variable_is_a_recorded_failure_without_probing(self):
         with tempfile.TemporaryDirectory() as tmp:
             (Path(tmp) / 'ci' / 'evidence').mkdir(parents=True)
             env = {k: v for k, v in os.environ.items() if k != 'TEST_DATABASE_URL'}
+            env['DESK_CI_PARTITION'] = 'rest'
             env['RUNNER_TEMP'] = tmp
             env['DESK_CI_ROLE_TEMP'] = str(Path(tmp)/'evaluation')
-            with mock.patch.dict(os.environ, env, clear=True), mock.patch.object(ci, 'ci_dir', return_value=Path(tmp)/'ci'), contextlib.redirect_stdout(io.StringIO()):
+            with mock.patch.object(ci, 'check_partition_binding', side_effect=synthetic_db_binding), mock.patch.dict(os.environ, env, clear=True), mock.patch.object(ci, 'ci_dir', return_value=Path(tmp)/'ci'), contextlib.redirect_stdout(io.StringIO()):
                 with mock.patch.object(ci.subprocess, 'run', side_effect=AssertionError('no probe expected')):
                     code = ci.cmd_dbprobe()
             self.assertEqual(code, 1)
             record = json.loads((Path(tmp) / 'ci' / 'evidence' / 'db-probe.json').read_text())
             self.assertFalse(record['ok'])
             self.assertIn('TEST_DATABASE_URL', record['errors'][0])
+        for label in (None, '', 'all', 'unknown'):
+            with self.subTest(partition=label), tempfile.TemporaryDirectory() as tmp:
+                (Path(tmp) / 'ci/evidence').mkdir(parents=True)
+                env = {'TEST_DATABASE_URL': URL}
+                if label is not None:
+                    env['DESK_CI_PARTITION'] = label
+                with mock.patch.dict(os.environ, env, clear=True), \
+                        mock.patch.object(ci, 'ci_dir', return_value=Path(tmp) / 'ci'), \
+                        mock.patch.object(ci, 'check_partition_binding', side_effect=RuntimeError('invalid context')), \
+                        mock.patch.object(ci.subprocess, 'run') as run, contextlib.redirect_stdout(io.StringIO()):
+                    self.assertEqual(ci.cmd_dbprobe(), 1)
+                    run.assert_not_called()
+        for failure in ('missing binding', 'changed identity'):
+            with self.subTest(context=failure), tempfile.TemporaryDirectory() as tmp:
+                (Path(tmp) / 'ci/evidence').mkdir(parents=True)
+                values = [RuntimeError(failure)] if failure == 'missing binding' else [synthetic_db_binding(), RuntimeError(failure)]
+                with mock.patch.dict(os.environ, {'TEST_DATABASE_URL': URL, 'DESK_CI_PARTITION': 'rest'}), \
+                        mock.patch.object(ci, 'ci_dir', return_value=Path(tmp) / 'ci'), \
+                        mock.patch.object(ci, 'check_partition_binding', side_effect=values), \
+                        mock.patch.object(ci.shutil, 'which', return_value='/usr/bin/node'), \
+                        mock.patch.object(ci.subprocess, 'run', return_value=mock.Mock(returncode=0, stdout=self.GOOD_ROW)) as run, \
+                        contextlib.redirect_stdout(io.StringIO()):
+                    self.assertEqual(ci.cmd_dbprobe(), 1)
+                    self.assertEqual(run.call_count, 0 if failure == 'missing binding' else 1)
 
-    GOOD_ROW = json.dumps({'ok': True, 'v': 170004, 'd': 'the_desk_test', 'u': 'postgres', 'su': True,
-                           'cdb': True, 'crole': True}).encode() + b'\n'
+        identity_changes = {
+            'checkout': 'e' * 40, 'head': 'e' * 40, 'tree': 'e' * 40,
+            'repository': 'another/repository', 'run_id': '124', 'run_attempt': '2',
+            'source_sha256': 'e' * 64, 'profile_policy_sha256': 'e' * 64,
+            'quality_policy_sha256': 'e' * 64,
+        }
+        mutations = []
+        for field, value in identity_changes.items():
+            def change_identity(binding, field=field, value=value):
+                binding['identity'][field] = value
+                binding['execution']['summary']['identity'][field] = value
+            mutations.append(('identity ' + field, change_identity))
+        mutations.extend([
+            ('execution only', lambda b: b['execution']['summary']['transfer'].update(sha256='e' * 64)),
+            ('selection drift', lambda b: b['selection'].__setitem__(0, 'test/unit/changed.test.ts')),
+            ('execution Boolean', lambda b: b['execution']['summary']['quality_gates'][0].update(exit=False)),
+            ('count drift', lambda b: b['counts'].__setitem__(1, 4909)),
+            ('count Boolean one', lambda b: b['counts'].__setitem__(0, True)),
+            ('count Boolean zero', lambda b: b['counts'].__setitem__(2, False)),
+        ])
+        for label, change in mutations:
+            for aliased in (False, True):
+                with self.subTest(binding_change=label, aliased=aliased), tempfile.TemporaryDirectory() as tmp:
+                    evidence = Path(tmp) / 'ci/evidence'
+                    evidence.mkdir(parents=True)
+                    before = synthetic_db_binding('writer')
+                    after = before if aliased else json.loads(json.dumps(before))
+                    if not aliased:
+                        change(after)
+                    def child_result(*args, **kwargs):
+                        if aliased:
+                            change(after)
+                        return mock.Mock(returncode=0, stdout=json.dumps(synthetic_db_row('writer')).encode())
+                    with mock.patch.dict(os.environ, {'TEST_DATABASE_URL': URL, 'DESK_CI_PARTITION': 'writer'}), \
+                            mock.patch.object(ci, 'ci_dir', return_value=Path(tmp) / 'ci'), \
+                            mock.patch.object(ci, 'check_partition_binding', side_effect=[before, after]) as check, \
+                            mock.patch.object(ci.shutil, 'which', return_value='/usr/bin/node'), \
+                            mock.patch.object(ci.subprocess, 'run', side_effect=child_result) as run, \
+                            contextlib.redirect_stdout(io.StringIO()):
+                        self.assertEqual(ci.cmd_dbprobe(), 1)
+                    self.assertEqual(check.call_count, 2)
+                    run.assert_called_once()
+                    receipt = json.loads((evidence / 'db-probe.json').read_bytes())
+                    self.assertIs(receipt['ok'], False)
+                    self.assertTrue(receipt['errors'])
+
+    GOOD_ROW = json.dumps(synthetic_db_row()).encode() + b'\n'
 
     def run_probe(self, result=None, side_effect=None):
         """cmd_dbprobe with subprocess.run and shutil.which mocked: Node is never launched."""
         with tempfile.TemporaryDirectory() as tmp:
             (Path(tmp) / 'ci' / 'evidence').mkdir(parents=True)
-            env = {'RUNNER_TEMP': tmp, 'DESK_CI_ROLE_TEMP': str(Path(tmp)/'evaluation'), 'TEST_DATABASE_URL': URL, 'PATH': '/usr/bin:/bin'}
+            env = {'RUNNER_TEMP': tmp, 'DESK_CI_ROLE_TEMP': str(Path(tmp)/'evaluation'), 'TEST_DATABASE_URL': URL, 'PATH': '/usr/bin:/bin', 'DESK_CI_PARTITION': 'rest'}
             run = mock.Mock(return_value=result, side_effect=side_effect)
-            with mock.patch.dict(os.environ, env, clear=True), mock.patch.object(ci, 'ci_dir', return_value=Path(tmp)/'ci'), mock.patch.object(ci.shutil, 'which', return_value='/usr/bin/node'), \
+            with mock.patch.object(ci, 'check_partition_binding', side_effect=synthetic_db_binding), mock.patch.dict(os.environ, env, clear=True), mock.patch.object(ci, 'ci_dir', return_value=Path(tmp)/'ci'), mock.patch.object(ci.shutil, 'which', return_value='/usr/bin/node'), \
                     mock.patch.object(ci.subprocess, 'run', run), contextlib.redirect_stdout(io.StringIO()):
-                code = ci.cmd_dbprobe()
-            text = (Path(tmp) / 'ci' / 'evidence' / 'db-probe.json').read_text()
+                previous_umask = os.umask(0o022)
+                try:
+                    code = ci.cmd_dbprobe()
+                finally:
+                    os.umask(previous_umask)
+            receipt_path = Path(tmp) / 'ci/evidence/db-probe.json'
+            self.assertEqual(receipt_path.stat().st_mode & 0o777, 0o600)
+            text = receipt_path.read_text()
+            if code == 0:
+                with db_context():
+                    self.assertEqual(ci.read_db_probe(receipt_path, synthetic_db_binding()), text.encode())
         self.assertEqual(run.call_count, 1)
         self.assertNotIn('postgres:postgres', text)
         return code, json.loads(text), run
@@ -357,6 +508,61 @@ class DatabaseBinding(unittest.TestCase):
         self.assertEqual((kwargs['timeout'], kwargs['check'], kwargs['stdin'], kwargs['stderr']),
                          (30, False, ci.subprocess.DEVNULL, ci.subprocess.DEVNULL))
         self.assertEqual(sorted(kwargs['env']), ['HOME', 'PATH', 'TEST_DATABASE_URL'])
+        with tempfile.TemporaryDirectory() as tmp:
+            evidence = Path(tmp) / 'ci/evidence'
+            evidence.mkdir(parents=True)
+            with db_context(), mock.patch.dict(os.environ, {'DESK_CI_PARTITION': 'rest'}), \
+                    mock.patch.object(ci, 'ci_dir', return_value=Path(tmp) / 'ci'), \
+                    mock.patch.object(ci.shutil, 'which', return_value='/usr/bin/node'), \
+                    mock.patch.object(ci.subprocess, 'run', return_value=mock.Mock(returncode=0, stdout=self.GOOD_ROW)), \
+                    contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(ci.cmd_dbprobe(), 0)
+                original = (evidence / 'db-probe.json').read_bytes()
+                with self.assertRaises((RuntimeError, FileExistsError)):
+                    ci.cmd_dbprobe()
+                self.assertEqual((evidence / 'db-probe.json').read_bytes(), original)
+        binding = synthetic_db_binding()
+        self.assertEqual(ci.db_probe_problems(record, binding), [])
+        for partition in ('writer', 'rest'):
+            binding = synthetic_db_binding(partition)
+            self.assertEqual(ci.db_probe_problems(synthetic_db_receipt(binding), binding), [])
+        binding = synthetic_db_binding()
+        mutations = [
+            ('schema', lambda v: v.update(schema='ci-db-probe/0')),
+            ('extra', lambda v: v.update(extra=True)),
+            ('partition', lambda v: v.update(partition='writer')),
+            ('errors', lambda v: v.update(errors=['failure'])),
+            ('ok integer', lambda v: v.update(ok=1)),
+        ]
+        for status in (None, True, False, '0', 0.0, 1, -9):
+            mutations.append(('exit ' + repr(status), lambda v, status=status: v.update(probe_exit=status)))
+        for field in binding['identity']:
+            mutations.append(('identity ' + field, lambda v, field=field: v['identity'].update({field: 'changed'})))
+        for obj in ('target', 'server', 'identity', 'execution'):
+            mutations.append(('extra ' + obj, lambda v, obj=obj: v[obj].update(extra=True)))
+        for field, value in (('major', True), ('server_version_num', 170004.0), ('role', 'other'),
+                             ('database', 'postgres'), ('superuser', False)):
+            mutations.append(('server ' + field, lambda v, field=field, value=value: v['server'].update({field: value})))
+        mutations += [
+            ('execution Boolean integer', lambda v: v['execution']['summary']['quality_gates'][0].update(exit=False)),
+            ('execution partition', lambda v: v['execution']['summary'].update(partition='writer')),
+            ('target port Boolean', lambda v: v['target'].update(port=True)),
+            ('maintenance on', lambda v: v['server']['autovacuum'][0].update(setting='on')),
+            ('maintenance extra', lambda v: v['server']['autovacuum'][0].update(extra=True)),
+        ]
+        for label, change in mutations:
+            value = synthetic_db_receipt()
+            change(value)
+            with self.subTest(receipt=label):
+                self.assertTrue(ci.db_probe_problems(value, binding))
+        for field in synthetic_db_receipt():
+            value = synthetic_db_receipt()
+            del value[field]
+            with self.subTest(receipt_missing=field):
+                self.assertTrue(ci.db_probe_problems(value, binding))
+        for bad_binding in (None, {}, {**binding, 'partition': 'all'}, {**binding, 'schema': 'ci-partition/1'}):
+            with self.subTest(binding=bad_binding):
+                self.assertTrue(ci.db_probe_problems(synthetic_db_receipt(), bad_binding))
 
     def test_valid_row_with_nonzero_or_signal_exit_is_rejected(self):
         for status in (1, 2, 255, -9, -15, -11):
@@ -364,7 +570,7 @@ class DatabaseBinding(unittest.TestCase):
                 code, record, _ = self.run_probe(mock.Mock(returncode=status, stdout=self.GOOD_ROW))
                 self.assertEqual((code, record['ok'], record['probe_exit']), (1, False, status))
                 self.assertTrue(any('exit status' in e for e in record['errors']))
-                self.assertNotIn('server', record)
+                self.assertIsNone(record['server'])
 
     def test_non_integer_status_is_rejected(self):
         for status in (None, True, '0', 0.0):
@@ -379,25 +585,130 @@ class DatabaseBinding(unittest.TestCase):
                 self.assertEqual((code, record['ok'], record['probe_exit']), (1, False, None))
                 self.assertTrue(any(type(error).__name__ in e for e in record['errors']))
 
+        with tempfile.TemporaryDirectory() as tmp:
+            (Path(tmp) / 'ci/evidence').mkdir(parents=True)
+            with db_context(), mock.patch.dict(os.environ, {'DESK_CI_PARTITION': 'rest'}), \
+                    mock.patch.object(ci, 'ci_dir', return_value=Path(tmp) / 'ci'), \
+                    mock.patch.object(ci.shutil, 'which', return_value=None), \
+                    mock.patch.object(ci.subprocess, 'run') as run, contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(ci.cmd_dbprobe(), 1)
+                run.assert_not_called()
+
     def test_unreadable_output_is_rejected_even_with_exit_zero(self):
         for out in (b'not json\n', b'', b'\xff\xfe\n', b'[]\n', b'{"ok": false, "code": "28P01"}\n',
-                    self.GOOD_ROW.replace(b'170004', b'160004')):
+                    self.GOOD_ROW.replace(b'170004', b'160004'),
+                    self.GOOD_ROW.replace(b'\"v\": 170004', b'\"v\": 170004, \"v\": 170004'),
+                    self.GOOD_ROW.replace(b'170004', b'NaN')):
             with self.subTest(stdout=out):
                 code, record, _ = self.run_probe(mock.Mock(returncode=0, stdout=out))
                 self.assertEqual((code, record['ok'], record['probe_exit']), (1, False, 0))
 
+        binding = synthetic_db_binding()
+        raw = json.dumps(synthetic_db_receipt()).encode()
+        malformed = {
+            'truncated': raw[:-1], 'censored': raw[:20],
+            'duplicate': raw.replace(b'"ok": true', b'"ok": true, "ok": true'),
+            'nonfinite': raw.replace(b'170004', b'NaN'),
+            'extra': raw[:-1] + b', "extra": true}',
+        }
+        with tempfile.TemporaryDirectory() as tmp, db_context():
+            source, retained = Path(tmp) / 'source', Path(tmp) / 'retained'
+            source.write_bytes(raw)
+            retained.write_bytes(raw)
+            source.chmod(0o600)
+            retained.chmod(0o600)
+            self.assertEqual(ci.read_db_probe(source, binding), raw)
+            self.assertEqual(ci.verify_db_probe_custody(source, retained, binding, raw), raw)
+            target = synthetic_db_receipt()['target']
+            for url in (None, '', 'not-a-url', URL.replace('localhost', '127.0.0.1'),
+                        URL.replace('postgres:postgres@', 'different:postgres@')):
+                env = dict(os.environ)
+                env.pop('TEST_DATABASE_URL', None)
+                if url is not None:
+                    env['TEST_DATABASE_URL'] = url
+                with self.subTest(reader_url=url), mock.patch.dict(os.environ, env, clear=True):
+                    with self.assertRaises((RuntimeError, ValueError)):
+                        ci.read_db_probe(source, binding)
+                    with self.assertRaises((RuntimeError, ValueError)):
+                        ci.verify_db_probe_custody(source, retained, binding, raw)
+            with credential_free_precheck_context():
+                self.assertNotIn('TEST_DATABASE_URL', os.environ)
+                self.assertEqual(ci.read_db_probe(source, binding, expected_target=target), raw)
+                self.assertEqual(ci.verify_db_probe_custody(source, retained, binding, raw,
+                                                           expected_target=target), raw)
+                for expected in ({**target, 'host': '127.0.0.1'}, {**target, 'user': 'different'},
+                                 {**target, 'extra': True}, {}):
+                    with self.subTest(reader_target=expected):
+                        with self.assertRaises((RuntimeError, ValueError)):
+                            ci.read_db_probe(source, binding, expected_target=expected)
+                        with self.assertRaises((RuntimeError, ValueError)):
+                            ci.verify_db_probe_custody(source, retained, binding, raw,
+                                                      expected_target=expected)
+            for label, data in malformed.items():
+                with self.subTest(receipt_bytes=label):
+                    source.write_bytes(data)
+                    with self.assertRaises((RuntimeError, ValueError)):
+                        ci.read_db_probe(source, binding)
+            source.write_bytes(raw)
+            for label, data in {'different whitespace': raw + b'\n', 'changed source': raw.replace(b'170004', b'170005')}.items():
+                with self.subTest(custody=label):
+                    retained.write_bytes(data)
+                    with self.assertRaises(RuntimeError):
+                        ci.verify_db_probe_custody(source, retained, binding, raw)
+            retained.unlink()
+            retained.symlink_to(source)
+            with self.assertRaises((RuntimeError, OSError)):
+                ci.read_db_probe(retained, binding)
+            retained.unlink()
+            retained.write_bytes(raw)
+            retained.chmod(0o600)
+            with mock.patch.object(ci, 'fixture_read', side_effect=PermissionError('unreadable')):
+                with self.assertRaises(PermissionError):
+                    ci.read_db_probe(source, binding)
+            with mock.patch.object(ci, 'JSON_LIMIT', 10):
+                with self.assertRaises((RuntimeError, ValueError)):
+                    ci.read_db_probe(source, binding)
+            for sequence in ((raw, raw, raw + b'\n', raw), (raw, raw, raw, raw + b'\n')):
+                with self.subTest(read_race=sequence), mock.patch.object(ci, 'read_db_probe', side_effect=sequence):
+                    with self.assertRaises(RuntimeError):
+                        ci.verify_db_probe_custody(source, retained, binding, raw)
+
     def test_probe_interpretation(self):
-        good = {'ok': True, 'v': 170004, 'd': 'the_desk_test', 'u': 'postgres', 'su': True, 'cdb': True, 'crole': True}
-        self.assertEqual(ci.interpret_db_probe(good)[0], [])
-        for change, text in (({'v': 160009}, 'version'), ({'d': 'postgres'}, 'database'), ({'su': False}, 'superuser'),
-                             ({'su': None}, 'superuser')):
-            with self.subTest(change=change):
-                self.assertTrue(any(text in e for e in ci.interpret_db_probe({**good, **change})[0]))
-        errors, _ = ci.interpret_db_probe({'ok': False, 'code': '28P01'})
-        self.assertEqual(errors, ['database probe failed (error code 28P01)'])
-        errors, _ = ci.interpret_db_probe({'ok': False, 'code': 'x" ' + URL})
-        self.assertNotIn('postgres:postgres', errors[0])
-        self.assertTrue(ci.interpret_db_probe('garbage')[0])
+        target = ci.validate_db_url(URL)
+        good = synthetic_db_row()
+        self.assertEqual(ci.interpret_db_probe(good, 'rest', target)[0], [])
+        self.assertEqual(ci.interpret_db_probe(synthetic_db_row('writer'), 'writer', target)[0], [])
+        for field, values in {'v': [160009, True, 170004.0, '170004', None],
+                              'd': ['postgres', None], 'u': ['other', None],
+                              'su': [False, None, 1], 'ok': [1, False]}.items():
+            for value in values:
+                with self.subTest(field=field, value=value):
+                    self.assertTrue(ci.interpret_db_probe({**good, field: value}, 'rest', target)[0])
+        for field, values in {'setting': ['on', None, False],
+                              'source': ['configuration file', 'default', 'session', None],
+                              'context': ['postmaster', None, True],
+                              'pending_restart': [True, None, 'false', 0]}.items():
+            for value in values:
+                row = synthetic_db_row()
+                row['autovacuum'][0][field] = value
+                with self.subTest(setting=field, value=value):
+                    self.assertTrue(ci.interpret_db_probe(row, 'rest', target)[0])
+        for value in (None, [], [None], good['autovacuum'] * 2, {}, 'off'):
+            with self.subTest(rows=value):
+                self.assertTrue(ci.interpret_db_probe({**good, 'autovacuum': value}, 'rest', target)[0])
+        for field in good:
+            row = dict(good)
+            del row[field]
+            with self.subTest(missing=field):
+                self.assertTrue(ci.interpret_db_probe(row, 'rest', target)[0])
+        for row in ('garbage', {**good, 'extra': True}, {'ok': False, 'code': '28P01'},
+                    {'ok': False, 'code': 'x" ' + URL}):
+            errors, _ = ci.interpret_db_probe(row, 'rest', target)
+            self.assertTrue(errors)
+            self.assertNotIn('postgres:postgres', str(errors))
+        for partition in (None, '', 'all', 'REST', 'writer,rest'):
+            with self.subTest(partition=partition):
+                self.assertTrue(ci.interpret_db_probe(good, partition, target)[0])
 
     def test_run_stage_never_places_the_url_in_argv(self):
         text = (HERE / 'run-stage.sh').read_text()
@@ -784,14 +1095,15 @@ class StageGateCommands(unittest.TestCase):
         write(root / 'dist' / 'index.js', 'built')
         built = ci.take_snapshot(TRACKED, root=root, allow_dist=True)
         write_json(ev / 'bind-build.json', {'ok': True, 'dist': built['dist']})
-        write_json(ev / 'db-probe.json', {'ok': True})
+        write_json(ev / 'db-probe.json', synthetic_db_receipt())
         return root, runner, ev
 
     def run_cmd(self, root, runner, fn, *args):
         env = {'RUNNER_TEMP': str(runner), 'DESK_CI_ROLE_TEMP': str(runner/'evaluation')}
-        with mock.patch.dict(os.environ, env), mock.patch.object(ci, 'ci_dir', return_value=Path(runner)/'ci'), mock.patch.object(ci, 'ROOT', root), \
+        with db_context(), mock.patch.dict(os.environ, env), mock.patch.object(ci, 'ci_dir', return_value=Path(runner)/'ci'), mock.patch.object(ci, 'ROOT', root), \
                 mock.patch.object(ci, 'tracked_files', lambda: list(TRACKED)), mock.patch.object(ci, 'fixture_capture_stage', return_value={'complete': True}), contextlib.redirect_stdout(io.StringIO()):
-            return fn(*args)
+            with credential_free_precheck_context() if fn is ci.cmd_precheck else contextlib.nullcontext():
+                return fn(*args)
 
     def stage(self, ev, runner, stage, seen):
         runtime = runner / 'ci' / 'tmp' / 'p33-1000-abc'
@@ -808,6 +1120,67 @@ class StageGateCommands(unittest.TestCase):
             (ev / 'prerequisite').mkdir()
             self.assertEqual(self.run_cmd(root, runner, ci.cmd_precheck, 'prerequisite'), 1)
 
+        # Compose the real StageOwner PREP transform and launch validation with
+        # the real command. No prebuilt target context may hide the URL boundary.
+        import runpy
+        supervisor = runpy.run_path(str(ci.ROOT / 'test/support/p33-parity-supervisor.py'),
+                                    run_name='inert_prep_boundary')
+        for partition in ('writer', 'rest'):
+            for stage in ci.STAGES:
+                with self.subTest(credential_free_partition=partition, stage=stage), tempfile.TemporaryDirectory() as tmp:
+                    ev, _ = build_world(tmp)
+                    binding = synthetic_db_binding(partition)
+                    write_json(ev / 'db-probe.json', synthetic_db_receipt(binding))
+                    for previous in ci.STAGES[:ci.STAGES.index(stage)]:
+                        write_json(ev / ('verdict-' + previous + '.json'),
+                                   {'ok': True, 'partition': partition, 'stage': previous})
+                    controls = Path(tmp) / 'ci/upload-controls'
+                    controls.mkdir()
+                    write_json(controls / 'db-probe.json', synthetic_db_receipt(binding))
+                    write_json(controls / 'final.json', {
+                        'scope': 'controls', 'all_stages_ok': True, 'evidence_status': 'complete',
+                        'collection_problems': {'missing': [], 'censored': [], 'errors': []},
+                        'verdicts': {'prerequisite': True, 'focused': True}, 'not_attempted': [],
+                        'partition': partition, 'commit': binding['identity']['checkout'],
+                        'run_id': binding['identity']['run_id'], 'run_attempt': binding['identity']['run_attempt'],
+                        'execution': binding['execution'],
+                    })
+                    incoming = {'DESK_CI_PARTITION': partition,
+                                'TEST_DATABASE_URL': URL.replace(':postgres@', ':prep-canary-secret@'),
+                                'GITHUB_SHA': binding['identity']['checkout'],
+                                'GITHUB_RUN_ID': binding['identity']['run_id'],
+                                'GITHUB_RUN_ATTEMPT': binding['identity']['run_attempt']}
+                    original = dict(incoming)
+                    with mock.patch.object(ci, 'ci_dir', return_value=Path(tmp) / 'ci'), \
+                            mock.patch.object(ci, 'check_partition_binding', return_value=binding), \
+                            mock.patch.object(ci.subprocess, 'run', side_effect=AssertionError('no child permitted')) as run, \
+                            mock.patch.object(ci.subprocess, 'Popen', side_effect=AssertionError('no child permitted')) as popen:
+                        prepared = supervisor['stage_prep_env'](incoming)
+                        self.assertEqual(incoming, original)
+                        self.assertNotIn('TEST_DATABASE_URL', prepared)
+                        self.assertNotIn('prep-canary-secret', json.dumps(prepared))
+                        self.assertEqual(json.loads(prepared['DESK_CI_DB_TARGET']),
+                                         synthetic_db_receipt(binding)['target'])
+                        mismatched = supervisor['stage_prep_env'](dict(incoming,
+                            TEST_DATABASE_URL=incoming['TEST_DATABASE_URL'].replace('localhost', '127.0.0.1')))
+                        for label, child_env, expected in (('matching', prepared, 0),
+                                                           ('mismatched', mismatched, 1)):
+                            with self.subTest(owner_prep_target=label), \
+                                    mock.patch.dict(os.environ, child_env, clear=True), \
+                                    contextlib.redirect_stdout(io.StringIO()) as output:
+                                self.assertNotIn('TEST_DATABASE_URL', os.environ)
+                                self.assertIsNone(supervisor['stage_phase_env'](stage, 'PREP', partition, os.environ))
+                                self.assertEqual(ci.cmd_precheck(stage), expected)
+                                problems = json.loads(output.getvalue())['problems']
+                                self.assertEqual(problems, [] if expected == 0 else
+                                                 ['database probe precheck refused: RuntimeError'])
+                        for forged in (prepared['DESK_CI_DB_TARGET'], mismatched['DESK_CI_DB_TARGET']):
+                            with self.subTest(forged_owner_target=forged), \
+                                    self.assertRaisesRegex(RuntimeError, 'stage caller database target'):
+                                supervisor['stage_prep_env'](dict(incoming, DESK_CI_DB_TARGET=forged))
+                        run.assert_not_called()
+                        popen.assert_not_called()
+
     def test_precheck_requires_database_probe_and_build_binding(self):
         for name in ('db-probe.json', 'bind-build.json', 'bind-pre.json'):
             with self.subTest(missing=name), tempfile.TemporaryDirectory() as tmp:
@@ -818,6 +1191,43 @@ class StageGateCommands(unittest.TestCase):
             root, runner, ev = self.world(tmp)
             write_json(ev / 'db-probe.json', {'ok': False})
             self.assertEqual(self.run_cmd(root, runner, ci.cmd_precheck, 'prerequisite'), 1)
+
+        for change in (lambda v: v['identity'].update(run_id='999'),
+                       lambda v: v['server']['autovacuum'][0].update(setting='on'),
+                       lambda v: v.update(probe_exit=False),
+                       lambda v: v.update(schema='ci-db-probe/0')):
+            with self.subTest(receipt=change), tempfile.TemporaryDirectory() as tmp:
+                root, runner, ev = self.world(tmp)
+                edit_json(ev / 'db-probe.json', change)
+                self.assertEqual(self.run_cmd(root, runner, ci.cmd_precheck, 'prerequisite'), 1)
+
+        target = synthetic_db_receipt()['target']
+        target_json = json.dumps(target)
+        invalid_targets = [None, '', '{', 'null', '[]', '{}', target_json, ' ' * 1025,
+                           target_json[:-1] + ', "user": "postgres"}',
+                           target_json.replace('5432', 'NaN'),
+                           ci.fixture_bytes({**target, 'host': '127.0.0.1'}).decode(),
+                           ci.fixture_bytes({**target, 'user': 'different'}).decode(),
+                           ci.fixture_bytes({**target, 'extra': True}).decode()]
+        for value in invalid_targets:
+            with self.subTest(precheck_target=value), tempfile.TemporaryDirectory() as tmp:
+                build_world(tmp)
+                with db_context(), credential_free_precheck_context(), \
+                        mock.patch.object(ci, 'ci_dir', return_value=Path(tmp) / 'ci'), \
+                        contextlib.redirect_stdout(io.StringIO()):
+                    if value is None:
+                        os.environ.pop('DESK_CI_DB_TARGET', None)
+                    else:
+                        os.environ['DESK_CI_DB_TARGET'] = value
+                    self.assertEqual(ci.cmd_precheck('prerequisite'), 1)
+        for url in ('', URL, 'not-a-url'):
+            with self.subTest(precheck_url_injected=url), tempfile.TemporaryDirectory() as tmp:
+                build_world(tmp)
+                with db_context(), credential_free_precheck_context(), \
+                        mock.patch.dict(os.environ, {'TEST_DATABASE_URL': url}), \
+                        mock.patch.object(ci, 'ci_dir', return_value=Path(tmp) / 'ci'), \
+                        contextlib.redirect_stdout(io.StringIO()):
+                    self.assertEqual(ci.cmd_precheck('prerequisite'), 1)
 
     def test_check_accepts_matching_source_and_evidence(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -850,7 +1260,7 @@ class StageGateCommands(unittest.TestCase):
             root, runner, ev = self.world(tmp)
             self.stage(ev, runner, 'all', [])
             env = {'RUNNER_TEMP': str(runner), 'DESK_CI_ROLE_TEMP': str(runner/'evaluation')}
-            with mock.patch.dict(os.environ, env), mock.patch.object(ci, 'ci_dir', return_value=Path(runner)/'ci'), mock.patch.object(ci, 'ROOT', root), \
+            with db_context(), mock.patch.dict(os.environ, env), mock.patch.object(ci, 'ci_dir', return_value=Path(runner)/'ci'), mock.patch.object(ci, 'ROOT', root), \
                     mock.patch.object(ci, 'tracked_files', lambda: TRACKED[:-1]), contextlib.redirect_stdout(io.StringIO()):
                 self.assertEqual(ci.cmd_check('all'), 1)
 
@@ -874,6 +1284,26 @@ class RawRetention(unittest.TestCase):
             self.assertTrue((upload / 'attempt-3' / NONCES['all'][0] / 'completion.json').exists())
             self.assertTrue((upload / 'attempt-3' / NONCES['all'][0] / 'output.log').exists())
 
+        for location in ('evidence', 'upload-controls', 'upload-full'):
+            for fault in ('missing', 'whitespace', 'truncated', 'wrong run', 'symlink'):
+                with self.subTest(receipt_location=location, fault=fault), tempfile.TemporaryDirectory() as tmp:
+                    build_full(tmp)
+                    collect_both(tmp)
+                    path = Path(tmp) / 'ci' / location / 'db-probe.json'
+                    if fault == 'missing':
+                        path.unlink()
+                    elif fault == 'whitespace':
+                        path.write_bytes(path.read_bytes() + b'\n')
+                    elif fault == 'truncated':
+                        path.write_bytes(path.read_bytes()[:20])
+                    elif fault == 'wrong run':
+                        edit_json(path, lambda v: v['identity'].update(run_id='999'))
+                    else:
+                        other = path.with_name('receipt-backup.json')
+                        path.rename(other)
+                        path.symlink_to(other)
+                    self.assertEqual(final_code(tmp), 1)
+
     def test_late_controls_collection_salvages_an_existing_aggregate_attempt(self):
         # Supplemental salvage sweeps every existing attempt, so a tree that already holds the aggregate keeps it.
         with tempfile.TemporaryDirectory() as tmp:
@@ -889,7 +1319,7 @@ class RawRetention(unittest.TestCase):
                 for value in ('failure', 'skipped', 'cancelled', ''):
                     with self.subTest(name=name, value=value):
                         self.assertEqual(final_code(tmp, **{name: value}), 1)
-            with mock.patch.dict(os.environ, {'RUNNER_TEMP': tmp, 'DESK_CI_ROLE_TEMP': str(Path(tmp)/'evaluation')}), mock.patch.object(ci, 'ci_dir', return_value=Path(tmp)/'ci'), contextlib.redirect_stdout(io.StringIO()):
+            with db_context(), mock.patch.dict(os.environ, {'RUNNER_TEMP': tmp, 'DESK_CI_ROLE_TEMP': str(Path(tmp)/'evaluation')}), mock.patch.object(ci, 'ci_dir', return_value=Path(tmp)/'ci'), contextlib.redirect_stdout(io.StringIO()):
                 for name in ci.FINAL_OUTCOMES:
                     os.environ.pop(name, None)
                 self.assertEqual(ci.cmd_final(), 1)
@@ -974,6 +1404,20 @@ class RawRetention(unittest.TestCase):
                 final = collect(tmp, 'full')
             self.assertEqual(final['evidence_status'], 'partial/censored')
 
+        real_copy = ci.Retention.copy
+        for destination in (False, True):
+            with self.subTest(copy_destination=destination), tempfile.TemporaryDirectory() as tmp:
+                build_full(tmp)
+                def mutate_copy(collector, src, rel, *args, **kwargs):
+                    result = real_copy(collector, src, rel, *args, **kwargs)
+                    if str(rel) == 'db-probe.json':
+                        path = collector.upload / rel if destination else Path(src)
+                        path.write_bytes(path.read_bytes() + b'\n')
+                    return result
+                with mock.patch.object(ci.Retention, 'copy', mutate_copy):
+                    final = collect(tmp, 'full')
+                self.assertEqual(final['evidence_status'], 'partial/censored')
+
     def test_oversize_retained_file_is_censored(self):
         with tempfile.TemporaryDirectory() as tmp:
             build_full(tmp)
@@ -1049,8 +1493,9 @@ class ControlsGate(unittest.TestCase):
         return ev, runtime
 
     def precheck_all(self, tmp):
-        with mock.patch.dict(os.environ, {'RUNNER_TEMP': tmp, 'DESK_CI_ROLE_TEMP': str(Path(tmp)/'evaluation')}), mock.patch.object(ci, 'ci_dir', return_value=Path(tmp)/'ci'), contextlib.redirect_stdout(io.StringIO()):
-            return ci.cmd_precheck('all')
+        with db_context(), mock.patch.dict(os.environ, {'RUNNER_TEMP': tmp, 'DESK_CI_ROLE_TEMP': str(Path(tmp)/'evaluation')}), mock.patch.object(ci, 'ci_dir', return_value=Path(tmp)/'ci'), contextlib.redirect_stdout(io.StringIO()):
+            with credential_free_precheck_context():
+                return ci.cmd_precheck('all')
 
     def final_path(self, tmp):
         return Path(tmp) / 'ci' / 'upload-controls' / 'final.json'
@@ -1061,6 +1506,25 @@ class ControlsGate(unittest.TestCase):
             collect(tmp, 'controls')
             self.assertEqual(ci.controls_problems(Path(tmp) / 'ci' / 'upload-controls'), [])
             self.assertEqual(self.precheck_all(tmp), 0)
+
+        for fault in ('missing', 'whitespace', 'truncated', 'wrong run', 'symlink'):
+            with self.subTest(retained_probe=fault), tempfile.TemporaryDirectory() as tmp:
+                self.prepare(tmp)
+                collect(tmp, 'controls')
+                path = Path(tmp) / 'ci/upload-controls/db-probe.json'
+                if fault == 'missing':
+                    path.unlink()
+                elif fault == 'whitespace':
+                    path.write_bytes(path.read_bytes() + b'\n')
+                elif fault == 'truncated':
+                    path.write_bytes(path.read_bytes()[:20])
+                elif fault == 'wrong run':
+                    edit_json(path, lambda v: v['identity'].update(run_attempt='2'))
+                else:
+                    path.unlink()
+                    path.symlink_to(Path(tmp) / 'ci/evidence/db-probe.json')
+                self.assertEqual(self.precheck_all(tmp), 1)
+                self.assertFalse((Path(tmp) / 'ci/evidence/all').exists())
 
     def test_missing_record_blocks(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -1147,8 +1611,9 @@ class ControlsGate(unittest.TestCase):
             self.assertEqual(self.precheck_stage(tmp, 'focused'), 0)
 
     def precheck_stage(self, tmp, stage):
-        with mock.patch.dict(os.environ, {'RUNNER_TEMP': tmp, 'DESK_CI_ROLE_TEMP': str(Path(tmp)/'evaluation')}), mock.patch.object(ci, 'ci_dir', return_value=Path(tmp)/'ci'), contextlib.redirect_stdout(io.StringIO()):
-            return ci.cmd_precheck(stage)
+        with db_context(), mock.patch.dict(os.environ, {'RUNNER_TEMP': tmp, 'DESK_CI_ROLE_TEMP': str(Path(tmp)/'evaluation')}), mock.patch.object(ci, 'ci_dir', return_value=Path(tmp)/'ci'), contextlib.redirect_stdout(io.StringIO()):
+            with credential_free_precheck_context():
+                return ci.cmd_precheck(stage)
 
 
 def _restored_workflow(test, text):
@@ -1158,6 +1623,15 @@ def _restored_workflow(test, text):
     test.assertNotRegex(text,r'(?m)^\s+RUNNER_TEMP:')
     writer=text.split('  verify-writer:\n',1)[1].split('\n  verify-rest:',1)[0]
     rest=text.split('  verify-rest:\n',1)[1].split('\n  verify:',1)[0]
+    service = ('    services:\n      postgres:\n        image: postgres:17\n{command}'
+               '        env:\n          POSTGRES_USER: postgres\n          POSTGRES_PASSWORD: postgres\n'
+               '          POSTGRES_DB: the_desk_test\n        ports: ["5432:5432"]\n'
+               '        options: >-\n          --health-cmd "pg_isready -U postgres -d the_desk_test"\n'
+               '          --health-interval 5s --health-timeout 5s --health-retries 10\n')
+    for label, job in (('writer', writer), ('rest', rest)):
+        actual = '    services:\n' + job.split('    services:\n', 1)[1].split('    outputs:', 1)[0]
+        command = '        command: postgres -c autovacuum=off\n' if label == 'rest' else ''
+        test.assertEqual(actual, service.format(command=command))
     for identifier in ('fixture046-runtime','fixture046-cleanup'):
         test.assertNotIn(identifier,writer)
     for profile in ('fixture105-unknown', 'fixture105-isolation', 'fixture105-native', 'provider-timeout'):
@@ -1223,7 +1697,7 @@ def _restored_workflow(test, text):
             test.assertIn('1200s',steps['command-postgres'])
             test.assertIn('ci-command-postgres-rest-',steps['upload-command-postgres'])
             for name in ('traversal-proof','upload-traversal'):test.assertIn('if: ${{ false }}',steps[name])
-    test.assertEqual(hashlib.sha256(text.encode()).hexdigest(),'48e018806108f57b5deaf23e81d55e96fcabf62465ea7e066f064db979d64651')
+    test.assertEqual(hashlib.sha256(text.encode()).hexdigest(),'ac3f6c8873c0caf9be26a57bd43ca282dd7738262dc975f8d83359c6a051dbe7')
 
 
 def _provider_timeout_workflow(test, text):
@@ -2191,6 +2665,24 @@ class WorkflowShape(unittest.TestCase):
             return
         if '# FULL RESTORATION:' in raw:
             _restored_workflow(self,raw)
+            command = '        command: postgres -c autovacuum=off\n'
+            mutations = {
+                'missing command': raw.replace(command, ''),
+                'on': raw.replace(command, command.replace('off', 'on')),
+                'both partitions': raw.replace('        image: postgres:17\n', '        image: postgres:17\n' + command, 1),
+                'writer only': raw.replace(command, '').replace('        image: postgres:17\n', '        image: postgres:17\n' + command, 1),
+                'docker options': raw.replace(command, '').replace('        options: >-', '        options: >-\n          -c autovacuum=off'),
+            }
+            for before, after in (('image: postgres:17', 'image: postgres:latest'),
+                                  ('        env:', '        entrypoint: postgres\n        env:'),
+                                  ('POSTGRES_DB: the_desk_test', 'POSTGRES_DB: postgres'),
+                                  ('ports: ["5432:5432"]', 'ports: ["5433:5432"]'),
+                                  ('--health-retries 10', '--health-retries 1'),
+                                  ('DESK_CI_PARTITION: rest', 'DESK_CI_PARTITION: all')):
+                mutations[before] = raw.replace(before, after)
+            for label, value in mutations.items():
+                with self.subTest(maintenance_workflow=label), self.assertRaises(AssertionError):
+                    _restored_workflow(self, value)
             for before,after in (
                 ('run-stage.sh all','run-stage.sh focused'),('stage-check all','ci.py check all'),
                 ('timeout-minutes: 122','timeout-minutes: 123'),('timeout-minutes: 190','timeout-minutes: 191'),
@@ -2947,14 +3439,14 @@ class Fixture105Tooling(unittest.TestCase):
             runtime = base / 'tmp/p33-1000-abc'
             runtime.mkdir(mode=0o700)
             for name in ('env.json', 'identity.json', 'db-probe.json', 'snapshot-pre.json', 'bind-pre.json', 'bind-build.json'):
-                write_json(ev / name, {'ok': True})
+                write_json(ev / name, synthetic_db_receipt() if name == 'db-probe.json' else {'ok': True})
             suite = self.journal(root)
             (ev / 'fixture105-suite.json').write_bytes(ci.fixture_bytes(suite))
             cache = self.cache(root)
             cache.write_bytes(ci.fixture_bytes({'version': '4.1.12', 'results': [[':test/unit/unit00.test.ts', {'duration': 1, 'failed': False}]]}))
             previous = os.umask(0o022)
             try:
-                with mock.patch.object(ci, 'ROOT', checkout), mock.patch.object(ci, 'tracked_files', return_value=TRACKED), mock.patch.dict(os.environ, {'RUNNER_TEMP': str(base.parent.parent), 'DESK_CI_ROLE_TEMP': str(base.parent), **OK_OUTCOMES}), contextlib.redirect_stdout(io.StringIO()):
+                with db_context(), mock.patch.object(ci, 'ROOT', checkout), mock.patch.object(ci, 'tracked_files', return_value=TRACKED), mock.patch.dict(os.environ, {'RUNNER_TEMP': str(base.parent.parent), 'DESK_CI_ROLE_TEMP': str(base.parent), **OK_OUTCOMES}), contextlib.redirect_stdout(io.StringIO()):
                     for stage in ci.STAGES:
                         add_stage(ev, runtime, stage)
                         verdict_path = ev / ('verdict-' + stage + '.json')
@@ -3414,9 +3906,10 @@ class Partition155Tests(unittest.TestCase):
             output = base / 'github-output'
             env = {'DESK_CI_PARTITION': label, 'GITHUB_SHA': 'a' * 40, 'GITHUB_RUN_ID': '123',
                    'GITHUB_RUN_ATTEMPT': '1', 'GITHUB_REPOSITORY': 'mikeddamico/the-desk',
-                   'GITHUB_OUTPUT': str(output), 'FIXTURE046_CLEANUP_OUTCOME': 'success', **OK_OUTCOMES}
+                   'GITHUB_OUTPUT': str(output), 'FIXTURE046_CLEANUP_OUTCOME': 'success', 'TEST_DATABASE_URL': URL, **OK_OUTCOMES}
             write_json(ev / 'identity.json', identity); write_json(ev / 'snapshot-pre.json', {'members': members})
             write_json(ev / 'bind-pre.json', {'ok': True}); write_json(ev / 'partition.json', binding)
+            write_json(ev / 'db-probe.json', synthetic_db_receipt(binding))
             security = base / 'security-report'; security.mkdir(mode=0o700)
             security_bytes = ci.fixture_bytes({'version': '2.1.0', 'runs': [{'tool': {'driver': {'name': 'gitleaks'}}, 'results': []}]})
             (security / 'results.sarif').write_bytes(security_bytes)
@@ -3427,6 +3920,7 @@ class Partition155Tests(unittest.TestCase):
                 'selected_files': selected, 'file_results': {p: [{'tests': self.counts[p], 'failed': 0, 'skipped': 0, 'todo': 0}] for p in selected}}})
             for scope in ci.SCOPES:
                 (base / ('upload-' + scope)).mkdir(mode=0o700)
+                write_json(base / ('upload-' + scope) / 'db-probe.json', synthetic_db_receipt(binding))
                 write_json(base / ('upload-' + scope) / 'final.json', {'scope': scope, 'all_stages_ok': True,
                     'evidence_status': 'complete', 'partition': label, 'commit': 'a' * 40, 'run_id': '123', 'run_attempt': '1',
                     'execution': self.copy(binding['execution'])})
